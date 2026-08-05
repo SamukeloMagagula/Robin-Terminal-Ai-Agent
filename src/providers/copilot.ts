@@ -111,7 +111,7 @@ export class CopilotProvider implements Provider {
       },
       body: JSON.stringify({
         model,
-        messages,
+        messages: messages.map(toWireMessage),
         stream: true,
         ...(tools && tools.length > 0
           ? {
@@ -172,6 +172,30 @@ export class CopilotProvider implements Provider {
     this.copilotToken = undefined;
     this.copilotTokenExpiresAt = 0;
   }
+}
+
+interface WireMessage {
+  role: Message['role'];
+  content: string;
+  tool_calls?: { id: string; type: 'function'; function: { name: string; arguments: string } }[];
+  tool_call_id?: string;
+}
+
+/**
+ * Translate an internal camelCase `Message` into the OpenAI-compatible wire shape
+ * the Copilot chat/completions endpoint expects.
+ */
+function toWireMessage(message: Message): WireMessage {
+  const wire: WireMessage = { role: message.role, content: message.content };
+  if (message.toolCalls && message.toolCalls.length > 0) {
+    wire.tool_calls = message.toolCalls.map((tc) => ({
+      id: tc.id,
+      type: 'function' as const,
+      function: { name: tc.name, arguments: tc.arguments },
+    }));
+  }
+  if (message.toolCallId) wire.tool_call_id = message.toolCallId;
+  return wire;
 }
 
 function* emitToolCalls(toolCallsByIndex: Map<number, ToolCall>): Generator<ChatEvent> {

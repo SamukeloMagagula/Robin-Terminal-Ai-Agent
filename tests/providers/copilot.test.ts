@@ -152,6 +152,63 @@ describe('CopilotProvider', () => {
     ]);
   });
 
+  it('serializes toolCalls/toolCallId history into OpenAI wire format', async () => {
+    await authStore.set('copilot', { githubToken: 'gh-token' });
+    const encoder = new TextEncoder();
+    const sseLines = [`data: ${JSON.stringify({ choices: [{ delta: { content: 'ok' } }] })}\n\n`, `data: [DONE]\n\n`];
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('copilot_internal')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ token: 'copilot-token', expires_at: Math.floor(Date.now() / 1000) + 1800 }),
+        });
+      }
+      let i = 0;
+      return Promise.resolve({
+        ok: true,
+        body: {
+          getReader: () => ({
+            read: async () => {
+              if (i < sseLines.length) return { done: false, value: encoder.encode(sseLines[i++]) };
+              return { done: true, value: undefined };
+            },
+          }),
+        },
+      });
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const history = [
+      { role: 'user' as const, content: 'read a.txt' },
+      {
+        role: 'assistant' as const,
+        content: '',
+        toolCalls: [{ id: 'call-1', name: 'read_file', arguments: '{"path":"a.txt"}' }],
+      },
+      { role: 'tool' as const, content: 'hello world', toolCallId: 'call-1' },
+    ];
+    for await (const _event of provider.chat('gpt-4o', history)) {
+      // drain
+    }
+
+    const chatCall = fetchMock.mock.calls.find(([url]) => String(url).includes('chat/completions'));
+    expect(chatCall).toBeDefined();
+    const body = JSON.parse(chatCall![1].body as string) as { messages: Record<string, unknown>[] };
+    expect(body.messages).toEqual([
+      { role: 'user', content: 'read a.txt' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          { id: 'call-1', type: 'function', function: { name: 'read_file', arguments: '{"path":"a.txt"}' } },
+        ],
+      },
+      { role: 'tool', content: 'hello world', tool_call_id: 'call-1' },
+    ]);
+    // The internal camelCase shape must not leak onto the wire.
+    expect(JSON.stringify(body.messages)).not.toContain('toolCall');
+  });
+
   it('logout clears the stored token', async () => {
     await authStore.set('copilot', { githubToken: 'gh-token' });
     await provider.logout();
