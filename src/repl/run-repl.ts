@@ -53,6 +53,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
 
     if (!cmd.arg) continue;
 
+    const historyLengthBeforeTurn = history.length;
     history.push({ role: 'user', content: cmd.arg });
     process.stdout.write(chalk.magenta('assistant> '));
     try {
@@ -67,6 +68,9 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       history.push(...newMessages);
       process.stdout.write('\n');
     } catch (err) {
+      // Drop the user message so a failed turn doesn't leave two consecutive
+      // user messages in the history sent to the API next time.
+      history.length = historyLengthBeforeTurn;
       console.log(chalk.red(`\nError: ${(err as Error).message}`));
     }
   }

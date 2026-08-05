@@ -52,7 +52,7 @@ export async function runAgentTurn(
 
   const limitMessage: Message = {
     role: 'assistant',
-    content: 'Stopped after reaching the maximum number of tool-call rounds (10).',
+    content: `Stopped after reaching the maximum number of tool-call rounds (${MAX_ROUNDS}).`,
   };
   newMessages.push(limitMessage);
   return newMessages;
