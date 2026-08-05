@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ToolCall } from '../providers/types.js';
+import { defaultAuthPath } from '../auth-store.js';
 
 const execAsync = promisify(exec);
 const MAX_OUTPUT_LENGTH = 4000;
@@ -30,7 +31,22 @@ export async function executeTool(toolCall: ToolCall, confirm: ConfirmFn): Promi
   }
 }
 
-async function readFileTool(filePath: string): Promise<string> {
+/**
+ * True when `filePath` resolves to something inside `directory` (or is the directory itself).
+ * Exported for testing so the guard can be exercised without touching the real ~/.ai-term-chat.
+ */
+export function isInsideDirectory(filePath: string, directory: string): boolean {
+  const resolvedDir = path.resolve(directory);
+  const resolvedFile = path.resolve(filePath);
+  if (resolvedFile === resolvedDir) return true;
+  const relative = path.relative(resolvedDir, resolvedFile);
+  return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
+async function readFileTool(filePath: string, authDir = path.dirname(defaultAuthPath())): Promise<string> {
+  if (isInsideDirectory(filePath, authDir)) {
+    return 'Error: refused to read credential file';
+  }
   try {
     return await fs.readFile(filePath, 'utf-8');
   } catch (err) {

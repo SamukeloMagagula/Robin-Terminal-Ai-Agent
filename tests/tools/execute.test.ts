@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { executeTool } from '../../src/tools/execute';
+import { executeTool, isInsideDirectory } from '../../src/tools/execute';
+import { defaultAuthPath } from '../../src/auth-store';
 import type { ToolCall } from '../../src/providers/types';
 
 function call(name: string, args: Record<string, unknown>): ToolCall {
@@ -75,6 +76,26 @@ describe('executeTool', () => {
     const toolCall = { id: 'call-1', name: 'read_file', arguments: '{not valid json' };
     const result = await executeTool(toolCall, async () => true);
     expect(result).toMatch(/^Error: invalid tool arguments/);
+  });
+
+  it('read_file refuses to read the credential file', async () => {
+    const result = await executeTool(call('read_file', { path: defaultAuthPath() }), async () => true);
+    expect(result).toBe('Error: refused to read credential file');
+  });
+
+  it('read_file refuses any path inside the auth directory, including via traversal', async () => {
+    const authDir = path.dirname(defaultAuthPath());
+    const sneaky = path.join(authDir, 'sub', '..', 'auth.json');
+    const result = await executeTool(call('read_file', { path: sneaky }), async () => true);
+    expect(result).toBe('Error: refused to read credential file');
+  });
+
+  it('isInsideDirectory guards a directory without touching the real auth path', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'auth-guard-'));
+    expect(isInsideDirectory(path.join(dir, 'auth.json'), dir)).toBe(true);
+    expect(isInsideDirectory(dir, dir)).toBe(true);
+    expect(isInsideDirectory(path.join(dir, '..', 'elsewhere.txt'), dir)).toBe(false);
+    expect(isInsideDirectory(path.join(os.tmpdir(), 'other.txt'), dir)).toBe(false);
   });
 
   it('write_file returns an error message when write fails', async () => {
