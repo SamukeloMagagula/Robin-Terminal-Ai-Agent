@@ -63,24 +63,102 @@ describe('OllamaProvider', () => {
     ]);
   });
 
-  it('chat with tools uses a non-streaming request and yields tool_call events', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
+  it('chat with tools still streams, yielding text then tool_call events', async () => {
+    const lines = [
+      JSON.stringify({ message: { content: 'Let me look. ' } }) + '\n',
+      JSON.stringify({
         message: {
           content: '',
           tool_calls: [{ function: { name: 'read_file', arguments: { path: 'a.txt' } } }],
         },
-      }),
-    }) as unknown as typeof fetch;
+      }) + '\n',
+      JSON.stringify({ done: true }) + '\n',
+    ];
+    const fetchMock = streamingFetchMock(lines);
+    global.fetch = fetchMock as unknown as typeof fetch;
 
     const tools = [{ name: 'read_file', description: 'Read a file.', parameters: { type: 'object', properties: {} } }];
     const events = [];
     for await (const event of provider.chat('llama3.1', [{ role: 'user', content: 'read a.txt' }], tools)) {
       events.push(event);
     }
-    expect(events).toEqual([
-      { type: 'tool_call', toolCall: { id: 'ollama-call-0', name: 'read_file', arguments: '{"path":"a.txt"}' } },
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string) as { stream: boolean; tools: unknown[] };
+    expect(body.stream).toBe(true);
+    expect(body.tools).toHaveLength(1);
+
+    expect(events).toHaveLength(2);
+    expect(events[0]).toEqual({ type: 'text', text: 'Let me look. ' });
+    expect(events[1]).toMatchObject({
+      type: 'tool_call',
+      toolCall: { name: 'read_file', arguments: '{"path":"a.txt"}' },
+    });
+  });
+
+  it('generates a unique tool-call id for every call across rounds', async () => {
+    const ids: string[] = [];
+    const chunk =
+      JSON.stringify({
+        message: { content: '', tool_calls: [{ function: { name: 'read_file', arguments: { path: 'a.txt' } } }] },
+      }) + '\n';
+
+    for (let round = 0; round < 2; round++) {
+      global.fetch = streamingFetchMock([chunk]) as unknown as typeof fetch;
+      for await (const event of provider.chat('llama3.1', [{ role: 'user', content: 'go' }])) {
+        if (event.type === 'tool_call') ids.push(event.toolCall.id);
+      }
+    }
+
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it('serializes toolCalls/toolCallId history into Ollama wire format', async () => {
+    const fetchMock = streamingFetchMock([JSON.stringify({ message: { content: 'ok' } }) + '\n']);
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const history = [
+      { role: 'user' as const, content: 'read a.txt' },
+      {
+        role: 'assistant' as const,
+        content: '',
+        toolCalls: [{ id: 'call-1', name: 'read_file', arguments: '{"path":"a.txt"}' }],
+      },
+      { role: 'tool' as const, content: 'hello world', toolCallId: 'call-1' },
+    ];
+    for await (const _event of provider.chat('llama3.1', history)) {
+      // drain
+    }
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string) as { messages: Record<string, unknown>[] };
+    expect(body.messages).toEqual([
+      { role: 'user', content: 'read a.txt' },
+      {
+        role: 'assistant',
+        content: '',
+        // Ollama wants arguments as an object, not a JSON string.
+        tool_calls: [{ function: { name: 'read_file', arguments: { path: 'a.txt' } } }],
+      },
+      { role: 'tool', content: 'hello world', tool_call_id: 'call-1' },
     ]);
+    expect(JSON.stringify(body.messages)).not.toContain('toolCall');
   });
 });
+
+function streamingFetchMock(lines: string[]) {
+  const encoder = new TextEncoder();
+  return vi.fn().mockImplementation(() => {
+    let i = 0;
+    return Promise.resolve({
+      ok: true,
+      body: {
+        getReader: () => ({
+          read: async () => {
+            if (i < lines.length) return { done: false, value: encoder.encode(lines[i++]) };
+            return { done: true, value: undefined };
+          },
+        }),
+      },
+    });
+  });
+}

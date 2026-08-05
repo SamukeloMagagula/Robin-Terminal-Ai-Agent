@@ -1,9 +1,42 @@
+import { randomUUID } from 'node:crypto';
 import type { Provider, Message, ChatEvent, ToolDefinition } from './types.js';
 
 const BASE_URL = 'http://localhost:11434';
 
 interface TagsResponse {
   models: { name: string }[];
+}
+
+interface WireMessage {
+  role: Message['role'];
+  content: string;
+  tool_calls?: { function: { name: string; arguments: Record<string, unknown> } }[];
+  tool_call_id?: string;
+}
+
+/**
+ * Translate an internal camelCase `Message` into the shape Ollama's /api/chat expects.
+ * Note Ollama wants tool-call `arguments` as an object, not the JSON string we carry
+ * internally, so we parse it back here (the inverse of what `chat` does on receive).
+ */
+function toWireMessage(message: Message): WireMessage {
+  const wire: WireMessage = { role: message.role, content: message.content };
+  if (message.toolCalls && message.toolCalls.length > 0) {
+    wire.tool_calls = message.toolCalls.map((tc) => ({
+      function: { name: tc.name, arguments: parseArguments(tc.arguments) },
+    }));
+  }
+  if (message.toolCallId) wire.tool_call_id = message.toolCallId;
+  return wire;
+}
+
+function parseArguments(raw: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
 }
 
 export class OllamaProvider implements Provider {
@@ -37,14 +70,22 @@ export class OllamaProvider implements Provider {
   }
 
   async *chat(model: string, messages: Message[], tools?: ToolDefinition[]): AsyncIterable<ChatEvent> {
-    if (tools && tools.length > 0) {
-      yield* this.chatWithTools(model, messages, tools);
-      return;
-    }
     const res = await fetch(`${BASE_URL}/api/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model, messages, stream: true }),
+      body: JSON.stringify({
+        model,
+        messages: messages.map(toWireMessage),
+        stream: true,
+        ...(tools && tools.length > 0
+          ? {
+              tools: tools.map((t) => ({
+                type: 'function',
+                function: { name: t.name, description: t.description, parameters: t.parameters },
+              })),
+            }
+          : {}),
+      }),
     });
     if (!res.ok || !res.body) {
       throw new Error(`Ollama chat request failed: ${res.status}`);
@@ -60,49 +101,27 @@ export class OllamaProvider implements Provider {
       buffer = lines.pop() ?? '';
       for (const line of lines) {
         if (!line.trim()) continue;
-        const parsed = JSON.parse(line) as { message?: { content?: string }; done?: boolean };
+        const parsed = JSON.parse(line) as {
+          message?: {
+            content?: string;
+            tool_calls?: { function: { name: string; arguments: Record<string, unknown> } }[];
+          };
+          done?: boolean;
+        };
         if (parsed.message?.content) yield { type: 'text', text: parsed.message.content };
+        // Ollama emits each tool call complete within a single streamed chunk,
+        // so there is nothing to accumulate across fragments.
+        for (const call of parsed.message?.tool_calls ?? []) {
+          yield {
+            type: 'tool_call',
+            toolCall: {
+              id: randomUUID(),
+              name: call.function.name,
+              arguments: JSON.stringify(call.function.arguments),
+            },
+          };
+        }
       }
-    }
-  }
-
-  private async *chatWithTools(
-    model: string,
-    messages: Message[],
-    tools: ToolDefinition[]
-  ): AsyncIterable<ChatEvent> {
-    const res = await fetch(`${BASE_URL}/api/chat`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages,
-        stream: false,
-        tools: tools.map((t) => ({
-          type: 'function',
-          function: { name: t.name, description: t.description, parameters: t.parameters },
-        })),
-      }),
-    });
-    if (!res.ok) throw new Error(`Ollama chat request failed: ${res.status}`);
-    const data = (await res.json()) as {
-      message?: {
-        content?: string;
-        tool_calls?: { function: { name: string; arguments: Record<string, unknown> } }[];
-      };
-    };
-    if (data.message?.content) yield { type: 'text', text: data.message.content };
-    const toolCalls = data.message?.tool_calls ?? [];
-    for (let i = 0; i < toolCalls.length; i++) {
-      const call = toolCalls[i];
-      yield {
-        type: 'tool_call',
-        toolCall: {
-          id: `ollama-call-${i}`,
-          name: call.function.name,
-          arguments: JSON.stringify(call.function.arguments),
-        },
-      };
     }
   }
 
