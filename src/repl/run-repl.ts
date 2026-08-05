@@ -2,6 +2,9 @@ import * as readline from 'node:readline/promises';
 import chalk from 'chalk';
 import type { Provider, Message } from '../providers/types.js';
 import { parseCommand } from './parse-command.js';
+import { runAgentTurn } from '../agent-loop.js';
+import { executeTool } from '../tools/execute.js';
+import { TOOL_DEFINITIONS } from '../tools/definitions.js';
 
 export interface ReplDeps {
   provider: Provider;
@@ -52,16 +55,17 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
 
     history.push({ role: 'user', content: cmd.arg });
     process.stdout.write(chalk.magenta('assistant> '));
-    let reply = '';
     try {
-      for await (const event of provider.chat(model, history)) {
-        if (event.type === 'text') {
-          process.stdout.write(event.text);
-          reply += event.text;
-        }
-      }
+      const newMessages = await runAgentTurn(provider, model, history, TOOL_DEFINITIONS, {
+        onText: (text) => process.stdout.write(text),
+        executeTool,
+        confirm: async (message) => {
+          const answer = await rl.question(chalk.yellow(`\n${message} (y/n) `));
+          return /^y(es)?$/i.test(answer.trim());
+        },
+      });
+      history.push(...newMessages);
       process.stdout.write('\n');
-      history.push({ role: 'assistant', content: reply });
     } catch (err) {
       console.log(chalk.red(`\nError: ${(err as Error).message}`));
     }

@@ -62,4 +62,25 @@ describe('OllamaProvider', () => {
       { type: 'text', text: 'lo' },
     ]);
   });
+
+  it('chat with tools uses a non-streaming request and yields tool_call events', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        message: {
+          content: '',
+          tool_calls: [{ function: { name: 'read_file', arguments: { path: 'a.txt' } } }],
+        },
+      }),
+    }) as unknown as typeof fetch;
+
+    const tools = [{ name: 'read_file', description: 'Read a file.', parameters: { type: 'object', properties: {} } }];
+    const events = [];
+    for await (const event of provider.chat('llama3.1', [{ role: 'user', content: 'read a.txt' }], tools)) {
+      events.push(event);
+    }
+    expect(events).toEqual([
+      { type: 'tool_call', toolCall: { id: 'ollama-call-0', name: 'read_file', arguments: '{"path":"a.txt"}' } },
+    ]);
+  });
 });

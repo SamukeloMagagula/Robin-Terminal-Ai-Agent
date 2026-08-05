@@ -36,7 +36,11 @@ export class OllamaProvider implements Provider {
     return data.models.map((m) => m.name);
   }
 
-  async *chat(model: string, messages: Message[], _tools?: ToolDefinition[]): AsyncIterable<ChatEvent> {
+  async *chat(model: string, messages: Message[], tools?: ToolDefinition[]): AsyncIterable<ChatEvent> {
+    if (tools && tools.length > 0) {
+      yield* this.chatWithTools(model, messages, tools);
+      return;
+    }
     const res = await fetch(`${BASE_URL}/api/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -59,6 +63,46 @@ export class OllamaProvider implements Provider {
         const parsed = JSON.parse(line) as { message?: { content?: string }; done?: boolean };
         if (parsed.message?.content) yield { type: 'text', text: parsed.message.content };
       }
+    }
+  }
+
+  private async *chatWithTools(
+    model: string,
+    messages: Message[],
+    tools: ToolDefinition[]
+  ): AsyncIterable<ChatEvent> {
+    const res = await fetch(`${BASE_URL}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages,
+        stream: false,
+        tools: tools.map((t) => ({
+          type: 'function',
+          function: { name: t.name, description: t.description, parameters: t.parameters },
+        })),
+      }),
+    });
+    if (!res.ok) throw new Error(`Ollama chat request failed: ${res.status}`);
+    const data = (await res.json()) as {
+      message?: {
+        content?: string;
+        tool_calls?: { function: { name: string; arguments: Record<string, unknown> } }[];
+      };
+    };
+    if (data.message?.content) yield { type: 'text', text: data.message.content };
+    const toolCalls = data.message?.tool_calls ?? [];
+    for (let i = 0; i < toolCalls.length; i++) {
+      const call = toolCalls[i];
+      yield {
+        type: 'tool_call',
+        toolCall: {
+          id: `ollama-call-${i}`,
+          name: call.function.name,
+          arguments: JSON.stringify(call.function.arguments),
+        },
+      };
     }
   }
 
