@@ -1,4 +1,4 @@
-import type { Provider, Message } from './types.js';
+import type { Provider, Message, ChatEvent, ToolDefinition } from './types.js';
 import { AuthStore } from '../auth-store.js';
 
 const CLIENT_ID = '01ab8ac9400c4e429b23';
@@ -101,7 +101,7 @@ export class CopilotProvider implements Provider {
     return ['gpt-4o', 'gpt-4o-mini'];
   }
 
-  async *chat(model: string, messages: Message[]): AsyncIterable<string> {
+  async *chat(model: string, messages: Message[], _tools?: ToolDefinition[]): AsyncIterable<ChatEvent> {
     const token = await this.getCopilotToken();
     const res = await fetch('https://api.githubcopilot.com/chat/completions', {
       method: 'POST',
@@ -132,7 +132,7 @@ export class CopilotProvider implements Provider {
           choices?: { delta?: { content?: string } }[];
         };
         const content = parsed.choices?.[0]?.delta?.content;
-        if (content) yield content;
+        if (content) yield { type: 'text', text: content };
       }
     }
   }

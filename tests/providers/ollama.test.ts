@@ -31,7 +31,7 @@ describe('OllamaProvider', () => {
     expect(await provider.listModels()).toEqual(['llama3', 'phi3']);
   });
 
-  it('chat yields streamed content chunks', async () => {
+  it('chat yields streamed text events', async () => {
     const lines = [
       JSON.stringify({ message: { content: 'Hel' } }) + '\n',
       JSON.stringify({ message: { content: 'lo' } }) + '\n',
@@ -53,10 +53,13 @@ describe('OllamaProvider', () => {
       },
     }) as unknown as typeof fetch;
 
-    const chunks: string[] = [];
-    for await (const chunk of provider.chat('llama3', [{ role: 'user', content: 'hi' }])) {
-      chunks.push(chunk);
+    const events: { type: string; text?: string }[] = [];
+    for await (const event of provider.chat('llama3', [{ role: 'user', content: 'hi' }])) {
+      events.push(event);
     }
-    expect(chunks.join('')).toBe('Hello');
+    expect(events).toEqual([
+      { type: 'text', text: 'Hel' },
+      { type: 'text', text: 'lo' },
+    ]);
   });
 });

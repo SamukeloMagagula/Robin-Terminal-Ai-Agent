@@ -54,9 +54,11 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     process.stdout.write(chalk.magenta('assistant> '));
     let reply = '';
     try {
-      for await (const chunk of provider.chat(model, history)) {
-        process.stdout.write(chunk);
-        reply += chunk;
+      for await (const event of provider.chat(model, history)) {
+        if (event.type === 'text') {
+          process.stdout.write(event.text);
+          reply += event.text;
+        }
       }
       process.stdout.write('\n');
       history.push({ role: 'assistant', content: reply });

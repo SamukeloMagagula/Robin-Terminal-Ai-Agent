@@ -1,4 +1,4 @@
-import type { Provider, Message } from './types.js';
+import type { Provider, Message, ChatEvent, ToolDefinition } from './types.js';
 
 const BASE_URL = 'http://localhost:11434';
 
@@ -36,7 +36,7 @@ export class OllamaProvider implements Provider {
     return data.models.map((m) => m.name);
   }
 
-  async *chat(model: string, messages: Message[]): AsyncIterable<string> {
+  async *chat(model: string, messages: Message[], _tools?: ToolDefinition[]): AsyncIterable<ChatEvent> {
     const res = await fetch(`${BASE_URL}/api/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -57,7 +57,7 @@ export class OllamaProvider implements Provider {
       for (const line of lines) {
         if (!line.trim()) continue;
         const parsed = JSON.parse(line) as { message?: { content?: string }; done?: boolean };
-        if (parsed.message?.content) yield parsed.message.content;
+        if (parsed.message?.content) yield { type: 'text', text: parsed.message.content };
       }
     }
   }

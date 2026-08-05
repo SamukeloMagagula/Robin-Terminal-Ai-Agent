@@ -93,11 +93,14 @@ describe('CopilotProvider', () => {
       });
     }) as unknown as typeof fetch;
 
-    const chunks: string[] = [];
-    for await (const chunk of provider.chat('gpt-4o', [{ role: 'user', content: 'hi' }])) {
-      chunks.push(chunk);
+    const events: { type: string; text?: string }[] = [];
+    for await (const event of provider.chat('gpt-4o', [{ role: 'user', content: 'hi' }])) {
+      events.push(event);
     }
-    expect(chunks.join('')).toBe('Hi there');
+    expect(events).toEqual([
+      { type: 'text', text: 'Hi' },
+      { type: 'text', text: ' there' },
+    ]);
   });
 
   it('logout clears the stored token', async () => {
