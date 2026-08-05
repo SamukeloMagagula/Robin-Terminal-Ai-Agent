@@ -103,6 +103,55 @@ describe('CopilotProvider', () => {
     ]);
   });
 
+  it('chat with tools accumulates streamed tool_call fragments into one event', async () => {
+    await authStore.set('copilot', { githubToken: 'gh-token' });
+    const encoder = new TextEncoder();
+    const sseLines = [
+      `data: ${JSON.stringify({
+        choices: [{ delta: { tool_calls: [{ index: 0, id: 'call-1', function: { name: 'read_file', arguments: '' } }] } }],
+      })}\n\n`,
+      `data: ${JSON.stringify({
+        choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"path":' } }] } }],
+      })}\n\n`,
+      `data: ${JSON.stringify({
+        choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '"a.txt"}' } }] } }],
+      })}\n\n`,
+      `data: [DONE]\n\n`,
+    ];
+    global.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('copilot_internal')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            token: 'copilot-token',
+            expires_at: Math.floor(Date.now() / 1000) + 1800,
+          }),
+        });
+      }
+      let i = 0;
+      return Promise.resolve({
+        ok: true,
+        body: {
+          getReader: () => ({
+            read: async () => {
+              if (i < sseLines.length) return { done: false, value: encoder.encode(sseLines[i++]) };
+              return { done: true, value: undefined };
+            },
+          }),
+        },
+      });
+    }) as unknown as typeof fetch;
+
+    const tools = [{ name: 'read_file', description: 'Read a file.', parameters: { type: 'object', properties: {} } }];
+    const events = [];
+    for await (const event of provider.chat('gpt-4o', [{ role: 'user', content: 'read a.txt' }], tools)) {
+      events.push(event);
+    }
+    expect(events).toEqual([
+      { type: 'tool_call', toolCall: { id: 'call-1', name: 'read_file', arguments: '{"path":"a.txt"}' } },
+    ]);
+  });
+
   it('logout clears the stored token', async () => {
     await authStore.set('copilot', { githubToken: 'gh-token' });
     await provider.logout();

@@ -28,6 +28,26 @@ In a chat session:
 - `/clear` — reset the conversation
 - `/exit` — quit
 
+## Tool-Calling
+
+Every chat session gives the model access to three tools:
+
+- `read_file` — reads a file's contents (no confirmation needed)
+- `write_file` — writes/overwrites a file (asks for y/n confirmation first)
+- `run_command` — runs a shell command (asks for y/n confirmation first)
+
+When the model wants to write a file or run a command, you'll see a prompt like:
+
+```
+Write to hello.txt?
+---
+hi from the agent
+---
+ (y/n)
+```
+
+Answer `y`/`yes` to proceed or anything else to decline. Declined actions are reported back to the model so it can adjust its next step instead of silently failing.
+
 ## Requirements
 
 - Node.js >= 18

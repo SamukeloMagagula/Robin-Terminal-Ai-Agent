@@ -1,4 +1,4 @@
-import type { Provider, Message, ChatEvent, ToolDefinition } from './types.js';
+import type { Provider, Message, ChatEvent, ToolCall, ToolDefinition } from './types.js';
 import { AuthStore } from '../auth-store.js';
 
 const CLIENT_ID = '01ab8ac9400c4e429b23';
@@ -101,7 +101,7 @@ export class CopilotProvider implements Provider {
     return ['gpt-4o', 'gpt-4o-mini'];
   }
 
-  async *chat(model: string, messages: Message[], _tools?: ToolDefinition[]): AsyncIterable<ChatEvent> {
+  async *chat(model: string, messages: Message[], tools?: ToolDefinition[]): AsyncIterable<ChatEvent> {
     const token = await this.getCopilotToken();
     const res = await fetch('https://api.githubcopilot.com/chat/completions', {
       method: 'POST',
@@ -109,7 +109,19 @@ export class CopilotProvider implements Provider {
         authorization: `Bearer ${token}`,
         'content-type': 'application/json',
       },
-      body: JSON.stringify({ model, messages, stream: true }),
+      body: JSON.stringify({
+        model,
+        messages,
+        stream: true,
+        ...(tools && tools.length > 0
+          ? {
+              tools: tools.map((t) => ({
+                type: 'function',
+                function: { name: t.name, description: t.description, parameters: t.parameters },
+              })),
+            }
+          : {}),
+      }),
     });
     if (!res.ok || !res.body) {
       throw new Error(`Copilot chat request failed: ${res.status}`);
@@ -117,6 +129,8 @@ export class CopilotProvider implements Provider {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    const toolCallsByIndex = new Map<number, ToolCall>();
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -127,19 +141,42 @@ export class CopilotProvider implements Provider {
         const trimmed = line.trim();
         if (!trimmed.startsWith('data:')) continue;
         const payload = trimmed.slice('data:'.length).trim();
-        if (payload === '[DONE]') return;
+        if (payload === '[DONE]') {
+          yield* emitToolCalls(toolCallsByIndex);
+          return;
+        }
         const parsed = JSON.parse(payload) as {
-          choices?: { delta?: { content?: string } }[];
+          choices?: {
+            delta?: {
+              content?: string;
+              tool_calls?: { index: number; id?: string; function?: { name?: string; arguments?: string } }[];
+            };
+          }[];
         };
-        const content = parsed.choices?.[0]?.delta?.content;
-        if (content) yield { type: 'text', text: content };
+        const delta = parsed.choices?.[0]?.delta;
+        if (delta?.content) yield { type: 'text', text: delta.content };
+        for (const tc of delta?.tool_calls ?? []) {
+          const existing = toolCallsByIndex.get(tc.index) ?? { id: '', name: '', arguments: '' };
+          if (tc.id) existing.id = tc.id;
+          if (tc.function?.name) existing.name = tc.function.name;
+          if (tc.function?.arguments) existing.arguments += tc.function.arguments;
+          toolCallsByIndex.set(tc.index, existing);
+        }
       }
     }
+    yield* emitToolCalls(toolCallsByIndex);
   }
 
   async logout(): Promise<void> {
     await this.authStore.delete(this.id);
     this.copilotToken = undefined;
     this.copilotTokenExpiresAt = 0;
+  }
+}
+
+function* emitToolCalls(toolCallsByIndex: Map<number, ToolCall>): Generator<ChatEvent> {
+  const indices = [...toolCallsByIndex.keys()].sort((a, b) => a - b);
+  for (const index of indices) {
+    yield { type: 'tool_call', toolCall: toolCallsByIndex.get(index)! };
   }
 }
