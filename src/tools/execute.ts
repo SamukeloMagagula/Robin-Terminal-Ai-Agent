@@ -11,7 +11,12 @@ const MAX_PREVIEW_LENGTH = 500;
 export type ConfirmFn = (message: string) => Promise<boolean>;
 
 export async function executeTool(toolCall: ToolCall, confirm: ConfirmFn): Promise<string> {
-  const args = JSON.parse(toolCall.arguments) as Record<string, unknown>;
+  let args: Record<string, unknown>;
+  try {
+    args = JSON.parse(toolCall.arguments) as Record<string, unknown>;
+  } catch (err) {
+    return `Error: invalid tool arguments — ${(err as Error).message}`;
+  }
 
   switch (toolCall.name) {
     case 'read_file':
@@ -39,9 +44,13 @@ async function writeFileTool(filePath: string, content: string, confirm: Confirm
   if (!approved) {
     return `Write to ${filePath} was declined by the user.`;
   }
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, content, 'utf-8');
-  return `Wrote ${Buffer.byteLength(content, 'utf-8')} bytes to ${filePath}.`;
+  try {
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, content, 'utf-8');
+    return `Wrote ${Buffer.byteLength(content, 'utf-8')} bytes to ${filePath}.`;
+  } catch (err) {
+    return `Error: ${(err as Error).message}`;
+  }
 }
 
 async function runCommandTool(command: string, confirm: ConfirmFn): Promise<string> {

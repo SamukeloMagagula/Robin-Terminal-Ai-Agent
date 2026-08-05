@@ -70,4 +70,24 @@ describe('executeTool', () => {
     const result = await executeTool(call('bogus_tool', {}), async () => true);
     expect(result).toMatch(/unknown tool/);
   });
+
+  it('returns an error message for malformed JSON arguments', async () => {
+    const toolCall = { id: 'call-1', name: 'read_file', arguments: '{not valid json' };
+    const result = await executeTool(toolCall, async () => true);
+    expect(result).toMatch(/^Error: invalid tool arguments/);
+  });
+
+  it('write_file returns an error message when write fails', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'tool-test-'));
+    // Create a file at a path
+    const filePath = path.join(dir, 'existing-file.txt');
+    await fs.writeFile(filePath, 'content');
+    // Try to write to a path where a parent directory is actually a file
+    const invalidPath = path.join(filePath, 'subdir', 'file.txt');
+    const result = await executeTool(
+      call('write_file', { path: invalidPath, content: 'data' }),
+      async () => true
+    );
+    expect(result).toMatch(/^Error:/);
+  });
 });
