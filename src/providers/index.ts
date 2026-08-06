@@ -1,8 +1,15 @@
 import type { Provider } from './types.js';
 import { CopilotProvider } from './copilot.js';
 import { OllamaProvider } from './ollama.js';
+import { GeminiProvider } from './gemini.js';
+import { OpenRouterProvider } from './openrouter.js';
 
-const providers: Provider[] = [new CopilotProvider(), new OllamaProvider()];
+const providers: Provider[] = [
+  new CopilotProvider(),
+  new OllamaProvider(),
+  new GeminiProvider(),
+  new OpenRouterProvider(),
+];
 
 export function listProviders(): Provider[] {
   return providers;

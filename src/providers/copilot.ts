@@ -1,6 +1,7 @@
-import { spawn } from 'node:child_process';
-import type { Provider, Message, ChatEvent, ToolCall, ToolDefinition } from './types.js';
+import type { Provider, Message, ChatEvent, ToolDefinition } from './types.js';
 import { AuthStore } from '../auth-store.js';
+import { openBrowser } from '../browser.js';
+import { toOpenAiWireMessage, toOpenAiToolsPayload, streamOpenAiCompatibleChat } from './openai-compatible.js';
 
 const CLIENT_ID = '01ab8ac9400c4e429b23';
 
@@ -11,20 +12,6 @@ interface DeviceCodeResponse {
   verification_uri_complete?: string;
   interval: number;
   expires_in: number;
-}
-
-function openBrowser(url: string): void {
-  try {
-    if (process.platform === 'win32') {
-      spawn('cmd', ['/c', 'start', '""', url], { stdio: 'ignore', detached: true }).unref();
-    } else if (process.platform === 'darwin') {
-      spawn('open', [url], { stdio: 'ignore', detached: true }).unref();
-    } else {
-      spawn('xdg-open', [url], { stdio: 'ignore', detached: true }).unref();
-    }
-  } catch {
-    // Best-effort: the printed URL/code is still there for the user to open manually.
-  }
 }
 
 interface AccessTokenResponse {
@@ -65,8 +52,11 @@ export class CopilotProvider implements Provider {
     const data = (await res.json()) as DeviceCodeResponse;
 
     console.log(`Go to ${data.verification_uri} and enter code: ${data.user_code}`);
-    console.log('Opening your browser to authorize...');
-    openBrowser(data.verification_uri_complete ?? data.verification_uri);
+    if (openBrowser(data.verification_uri_complete ?? data.verification_uri)) {
+      console.log('Opening Chrome to authorize...');
+    } else {
+      console.log('No graphical browser detected here (e.g. an SSH/PuTTY session) — open the link above on a device with a browser.');
+    }
 
     const githubToken = await this.pollForToken(data.device_code, data.interval);
     await this.authStore.set(this.id, { githubToken });
@@ -132,96 +122,17 @@ export class CopilotProvider implements Provider {
       },
       body: JSON.stringify({
         model,
-        messages: messages.map(toWireMessage),
+        messages: messages.map(toOpenAiWireMessage),
         stream: true,
-        ...(tools && tools.length > 0
-          ? {
-              tools: tools.map((t) => ({
-                type: 'function',
-                function: { name: t.name, description: t.description, parameters: t.parameters },
-              })),
-            }
-          : {}),
+        ...toOpenAiToolsPayload(tools),
       }),
     });
-    if (!res.ok || !res.body) {
-      throw new Error(`Copilot chat request failed: ${res.status}`);
-    }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    const toolCallsByIndex = new Map<number, ToolCall>();
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) continue;
-        const payload = trimmed.slice('data:'.length).trim();
-        if (payload === '[DONE]') {
-          yield* emitToolCalls(toolCallsByIndex);
-          return;
-        }
-        const parsed = JSON.parse(payload) as {
-          choices?: {
-            delta?: {
-              content?: string;
-              tool_calls?: { index: number; id?: string; function?: { name?: string; arguments?: string } }[];
-            };
-          }[];
-        };
-        const delta = parsed.choices?.[0]?.delta;
-        if (delta?.content) yield { type: 'text', text: delta.content };
-        for (const tc of delta?.tool_calls ?? []) {
-          const existing = toolCallsByIndex.get(tc.index) ?? { id: '', name: '', arguments: '' };
-          if (tc.id) existing.id = tc.id;
-          if (tc.function?.name) existing.name = tc.function.name;
-          if (tc.function?.arguments) existing.arguments += tc.function.arguments;
-          toolCallsByIndex.set(tc.index, existing);
-        }
-      }
-    }
-    yield* emitToolCalls(toolCallsByIndex);
+    yield* streamOpenAiCompatibleChat(res, 'Copilot');
   }
 
   async logout(): Promise<void> {
     await this.authStore.delete(this.id);
     this.copilotToken = undefined;
     this.copilotTokenExpiresAt = 0;
-  }
-}
-
-interface WireMessage {
-  role: Message['role'];
-  content: string;
-  tool_calls?: { id: string; type: 'function'; function: { name: string; arguments: string } }[];
-  tool_call_id?: string;
-}
-
-/**
- * Translate an internal camelCase `Message` into the OpenAI-compatible wire shape
- * the Copilot chat/completions endpoint expects.
- */
-function toWireMessage(message: Message): WireMessage {
-  const wire: WireMessage = { role: message.role, content: message.content };
-  if (message.toolCalls && message.toolCalls.length > 0) {
-    wire.tool_calls = message.toolCalls.map((tc) => ({
-      id: tc.id,
-      type: 'function' as const,
-      function: { name: tc.name, arguments: tc.arguments },
-    }));
-  }
-  if (message.toolCallId) wire.tool_call_id = message.toolCallId;
-  return wire;
-}
-
-function* emitToolCalls(toolCallsByIndex: Map<number, ToolCall>): Generator<ChatEvent> {
-  const indices = [...toolCallsByIndex.keys()].sort((a, b) => a - b);
-  for (const index of indices) {
-    yield { type: 'tool_call', toolCall: toolCallsByIndex.get(index)! };
   }
 }

@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { listProviders, getProvider } from '../../src/providers/index';
 
 describe('provider registry', () => {
-  it('lists copilot and ollama', () => {
+  it('lists copilot, ollama, gemini, and openrouter', () => {
     const ids = listProviders().map((p) => p.id);
-    expect(ids).toEqual(['copilot', 'ollama']);
+    expect(ids).toEqual(['copilot', 'ollama', 'gemini', 'openrouter']);
   });
 
   it('getProvider returns the matching provider', () => {

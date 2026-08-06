@@ -5,7 +5,7 @@ import * as os from 'node:os';
 export type AuthData = Record<string, Record<string, unknown>>;
 
 export function defaultAuthPath(): string {
-  return path.join(os.homedir(), '.ai-term-chat', 'auth.json');
+  return path.join(os.homedir(), '.robin', 'auth.json');
 }
 
 export class AuthStore {

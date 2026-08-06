@@ -1,10 +1,11 @@
 {
-  "name": "ai-term-chat",
+  "name": "robin",
   "version": "0.1.0",
   "description": "Terminal chat client for AI models (GitHub Copilot, Ollama)",
+  "author": "Samukelo \"Batman\" Magagula",
   "type": "module",
   "bin": {
-    "ai-term-chat": "dist/cli.js"
+    "robin": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

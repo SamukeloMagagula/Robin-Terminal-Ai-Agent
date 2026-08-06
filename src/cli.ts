@@ -4,6 +4,7 @@ import { select } from '@inquirer/prompts';
 import type { Provider } from './providers/types.js';
 import { listProviders, getProvider } from './providers/index.js';
 import { runLogin, runLogout } from './commands/auth-commands.js';
+import { runStatus } from './commands/status-command.js';
 import { runRepl } from './repl/run-repl.js';
 import { printBanner } from './ui/banner.js';
 
@@ -23,6 +24,17 @@ async function pickModel(provider: Provider): Promise<string> {
   });
 }
 
+const BACK = '__back__';
+
+/** Same as pickModel, but with a "← Back" choice for returning to provider selection. */
+async function pickModelWithBack(provider: Provider): Promise<string> {
+  const models = await provider.listModels();
+  return select({
+    message: 'Select a model:',
+    choices: [{ name: '← Back to provider list', value: BACK }, ...models.map((m) => ({ name: m, value: m }))],
+  });
+}
+
 async function ensureAuthenticated(provider: Provider): Promise<void> {
   if (!(await provider.isAuthenticated())) {
     console.log(`Not logged in to ${provider.name} yet.`);
@@ -30,16 +42,35 @@ async function ensureAuthenticated(provider: Provider): Promise<void> {
   }
 }
 
+/** Picks a provider, then a model — looping back to provider selection if the model picker's "Back" choice is taken. */
+async function pickProviderAndModel(): Promise<{ provider: Provider; model: string }> {
+  let provider = await pickProvider();
+  while (true) {
+    await ensureAuthenticated(provider);
+    const modelChoice = await pickModelWithBack(provider);
+    if (modelChoice === BACK) {
+      provider = await pickProvider();
+      continue;
+    }
+    return { provider, model: modelChoice };
+  }
+}
+
 async function startChat(providerId?: string): Promise<void> {
   printBanner();
-  const provider = providerId ? getProvider(providerId) : await pickProvider();
-  await ensureAuthenticated(provider);
-  const model = await pickModel(provider);
-  await runRepl({ provider, model, pickModel, pickProvider });
+  if (providerId) {
+    const provider = getProvider(providerId);
+    await ensureAuthenticated(provider);
+    const model = await pickModel(provider);
+    await runRepl({ provider, model, pickModel, pickProvider, pickProviderAndModel });
+    return;
+  }
+  const { provider, model } = await pickProviderAndModel();
+  await runRepl({ provider, model, pickModel, pickProvider, pickProviderAndModel });
 }
 
 const program = new Command();
-program.name('ai-term-chat').description('Chat with AI models from your terminal');
+program.name('robin').description('Chat with AI models from your terminal');
 
 program
   .command('login <provider>')
@@ -53,6 +84,13 @@ program
   .description('Log out of a provider')
   .action(async (providerId: string) => {
     await runLogout(getProvider(providerId));
+  });
+
+program
+  .command('status')
+  .description('Show login/reachability status for every provider')
+  .action(async () => {
+    await runStatus(listProviders());
   });
 
 program

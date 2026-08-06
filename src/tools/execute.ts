@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
+import * as os from 'node:os';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ToolCall } from '../providers/types.js';
@@ -8,6 +9,36 @@ import { defaultAuthPath } from '../auth-store.js';
 const execAsync = promisify(exec);
 const MAX_OUTPUT_LENGTH = 4000;
 const MAX_PREVIEW_LENGTH = 500;
+
+/** Directories read_file/write_file refuse to touch: robin's own credentials and the user's SSH keys. */
+export function defaultSensitiveDirs(): string[] {
+  return [path.dirname(defaultAuthPath()), path.join(os.homedir(), '.ssh')];
+}
+
+function isInsideAnyDirectory(filePath: string, directories: string[]): boolean {
+  return directories.some((dir) => isInsideDirectory(filePath, dir));
+}
+
+// Coarse heuristics for commands worth a louder warning before approval —
+// not a sandbox or a blocklist, just extra friction against rubber-stamping
+// destructive one-liners the model suggests.
+const DANGEROUS_COMMAND_PATTERNS: RegExp[] = [
+  /\brm\s+(-\w*\s+)*-\w*[rR]\w*[fF]\w*\b/, // rm -rf and variants
+  /\brm\s+(-\w*\s+)*-\w*[fF]\w*[rR]\w*\b/,
+  /\bsudo\b/,
+  /\bmkfs\b/,
+  /\bdd\s+if=/,
+  /:\(\)\s*\{.*\};\s*:/, // classic shell fork bomb
+  /\bformat\b/i,
+  /\bdel\s+\/f\s+\/s\s+\/q\b/i,
+  /(curl|wget)\b[^|]*\|\s*(sh|bash|zsh)\b/,
+  /\bshutdown\b/,
+  /\breboot\b/,
+];
+
+export function isDangerousCommand(command: string): boolean {
+  return DANGEROUS_COMMAND_PATTERNS.some((pattern) => pattern.test(command));
+}
 
 export type ConfirmFn = (message: string) => Promise<boolean>;
 
@@ -33,7 +64,7 @@ export async function executeTool(toolCall: ToolCall, confirm: ConfirmFn): Promi
 
 /**
  * True when `filePath` resolves to something inside `directory` (or is the directory itself).
- * Exported for testing so the guard can be exercised without touching the real ~/.ai-term-chat.
+ * Exported for testing so the guard can be exercised without touching the real ~/.robin.
  */
 export function isInsideDirectory(filePath: string, directory: string): boolean {
   const resolvedDir = path.resolve(directory);
@@ -43,9 +74,9 @@ export function isInsideDirectory(filePath: string, directory: string): boolean 
   return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
-async function readFileTool(filePath: string, authDir = path.dirname(defaultAuthPath())): Promise<string> {
-  if (isInsideDirectory(filePath, authDir)) {
-    return 'Error: refused to read credential file';
+async function readFileTool(filePath: string, sensitiveDirs = defaultSensitiveDirs()): Promise<string> {
+  if (isInsideAnyDirectory(filePath, sensitiveDirs)) {
+    return 'Error: refused to read from a protected credential directory';
   }
   try {
     return await fs.readFile(filePath, 'utf-8');
@@ -54,7 +85,15 @@ async function readFileTool(filePath: string, authDir = path.dirname(defaultAuth
   }
 }
 
-async function writeFileTool(filePath: string, content: string, confirm: ConfirmFn): Promise<string> {
+async function writeFileTool(
+  filePath: string,
+  content: string,
+  confirm: ConfirmFn,
+  sensitiveDirs = defaultSensitiveDirs()
+): Promise<string> {
+  if (isInsideAnyDirectory(filePath, sensitiveDirs)) {
+    return 'Error: refused to write inside a protected credential directory';
+  }
   const preview = content.length > MAX_PREVIEW_LENGTH ? `${content.slice(0, MAX_PREVIEW_LENGTH)}...` : content;
   const approved = await confirm(`Write to ${filePath}?\n---\n${preview}\n---`);
   if (!approved) {
@@ -70,7 +109,10 @@ async function writeFileTool(filePath: string, content: string, confirm: Confirm
 }
 
 async function runCommandTool(command: string, confirm: ConfirmFn): Promise<string> {
-  const approved = await confirm(`Run "${command}"?`);
+  const warning = isDangerousCommand(command)
+    ? '⚠ This command looks potentially destructive — review it carefully.\n'
+    : '';
+  const approved = await confirm(`${warning}Run "${command}"?`);
   if (!approved) {
     return `Command "${command}" was declined by the user.`;
   }
