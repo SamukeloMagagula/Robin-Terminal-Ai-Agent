@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import type { Provider, Message, ChatEvent, ToolCall, ToolDefinition } from './types.js';
 import { AuthStore } from '../auth-store.js';
 
@@ -7,8 +8,23 @@ interface DeviceCodeResponse {
   device_code: string;
   user_code: string;
   verification_uri: string;
+  verification_uri_complete?: string;
   interval: number;
   expires_in: number;
+}
+
+function openBrowser(url: string): void {
+  try {
+    if (process.platform === 'win32') {
+      spawn('cmd', ['/c', 'start', '""', url], { stdio: 'ignore', detached: true }).unref();
+    } else if (process.platform === 'darwin') {
+      spawn('open', [url], { stdio: 'ignore', detached: true }).unref();
+    } else {
+      spawn('xdg-open', [url], { stdio: 'ignore', detached: true }).unref();
+    }
+  } catch {
+    // Best-effort: the printed URL/code is still there for the user to open manually.
+  }
 }
 
 interface AccessTokenResponse {
@@ -49,6 +65,8 @@ export class CopilotProvider implements Provider {
     const data = (await res.json()) as DeviceCodeResponse;
 
     console.log(`Go to ${data.verification_uri} and enter code: ${data.user_code}`);
+    console.log('Opening your browser to authorize...');
+    openBrowser(data.verification_uri_complete ?? data.verification_uri);
 
     const githubToken = await this.pollForToken(data.device_code, data.interval);
     await this.authStore.set(this.id, { githubToken });
@@ -108,6 +126,9 @@ export class CopilotProvider implements Provider {
       headers: {
         authorization: `Bearer ${token}`,
         'content-type': 'application/json',
+        'Editor-Version': 'vscode/1.85.1',
+        'Editor-Plugin-Version': 'copilot-chat/0.12.0',
+        'Copilot-Integration-Id': 'vscode-chat',
       },
       body: JSON.stringify({
         model,
