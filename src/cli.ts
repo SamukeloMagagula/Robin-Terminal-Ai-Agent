@@ -5,6 +5,7 @@ import type { Provider } from './providers/types.js';
 import { listProviders, getProvider } from './providers/index.js';
 import { runLogin, runLogout } from './commands/auth-commands.js';
 import { runRepl } from './repl/run-repl.js';
+import { printBanner } from './ui/banner.js';
 
 async function pickProvider(): Promise<Provider> {
   const id = await select({
@@ -30,6 +31,7 @@ async function ensureAuthenticated(provider: Provider): Promise<void> {
 }
 
 async function startChat(providerId?: string): Promise<void> {
+  printBanner();
   const provider = providerId ? getProvider(providerId) : await pickProvider();
   await ensureAuthenticated(provider);
   const model = await pickModel(provider);
