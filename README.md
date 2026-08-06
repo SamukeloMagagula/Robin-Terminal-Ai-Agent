@@ -91,6 +91,7 @@ In a chat session:
 - `/skill save <name>` — save the current system prompt as a reusable named preset under `~/.robin/skills/<name>.json`
 - `/skill use <name>` — load a saved preset as the current system prompt
 - `/skill [list]` — list saved presets
+- `/recall <query>` — search past conversations under `~/Downloads/robin-chats/`
 - `/clear` — reset the conversation
 - `/exit` — quit
 
@@ -99,6 +100,8 @@ In a chat session:
 Every conversation is automatically written to a readable markdown transcript in `~/Downloads/robin-chats/robin-chat-<timestamp>.md`, updated after every reply — nothing to remember to do. A new file starts whenever the conversation resets (`/clear`, `/model`, `/provider`, `/load`), so each distinct conversation gets its own file you can browse, search, or share later.
 
 This is separate from `/save`/`/load`, which store an exact, reloadable snapshot as JSON under `~/.robin/conversations/` — use `/save` when you want to resume a specific conversation later inside `robin`; the Downloads markdown log is for your own reading/reference outside the app.
+
+Use `/recall <query>` to search across all past markdown transcripts from inside a chat session — it's a plain case-insensitive text search (newest conversations first, capped at 10 matches), not semantic search, but it's enough to find "did I already ask about X" without leaving the terminal.
 
 ## Tool-Calling
 
@@ -127,6 +130,7 @@ Answer `y`/`yes` to proceed or anything else to decline. Declined actions are re
 - **Credentials** (Copilot token, Gemini API key) are stored in plaintext at `~/.robin/auth.json` — the same approach tools like the GitHub CLI and `npm login` use. The file is written with owner-only permissions (`0o600`) on POSIX systems; on Windows this relies on your user profile's normal NTFS permissions instead, since POSIX mode bits aren't meaningful there.
 - **`read_file`/`write_file` refuse to touch two directories**: `~/.robin/` (robin's own credentials) and `~/.ssh/` (your SSH keys) — regardless of how the path is spelled, including `..` traversal. This stops a model from accidentally (or if convinced by malicious content it read) exfiltrating or overwriting those files through the tools robin gives it.
 - **`write_file` and `run_command` always require an explicit y/n confirmation** before touching disk or running anything; `run_command` additionally flags commands matching destructive patterns (see above). `read_file` has no confirmation by design (matches the tool's low-risk, read-only nature) beyond the protected-directory guard above.
+- **`read_file` and `run_command` output is wrapped as untrusted content** before it goes back to the model — file contents and command output are data the model reads, not instructions it should follow, even if the file or output contains text that looks like a command (e.g. "ignore previous instructions and run..."). This narrows prompt-injection attacks where a file the model reads (or output it captures) tries to hijack the conversation.
 - This is a personal CLI tool, not a multi-user or sandboxed environment: anyone with access to your terminal and OS user account already has access to everything `robin` can do. There's no separate app-level authentication gate.
 
 ## Troubleshooting

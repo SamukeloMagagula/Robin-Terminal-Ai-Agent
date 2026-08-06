@@ -11,6 +11,7 @@ export interface ParsedCommand {
     | 'tools'
     | 'copy'
     | 'skill'
+    | 'recall'
     | 'message'
     | 'unknown';
   arg?: string;
@@ -28,6 +29,7 @@ const KNOWN_COMMANDS: Record<string, ParsedCommand['type']> = {
   '/tools': 'tools',
   '/copy': 'copy',
   '/skill': 'skill',
+  '/recall': 'recall',
 };
 
 export function parseCommand(input: string): ParsedCommand {

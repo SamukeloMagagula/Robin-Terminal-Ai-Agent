@@ -85,4 +85,12 @@ describe('parseCommand', () => {
   it('parses /skill list', () => {
     expect(parseCommand('/skill list')).toEqual({ type: 'skill', arg: 'list' });
   });
+
+  it('parses /recall with a query', () => {
+    expect(parseCommand('/recall capital of France')).toEqual({ type: 'recall', arg: 'capital of France' });
+  });
+
+  it('parses /recall with no argument', () => {
+    expect(parseCommand('/recall')).toEqual({ type: 'recall' });
+  });
 });

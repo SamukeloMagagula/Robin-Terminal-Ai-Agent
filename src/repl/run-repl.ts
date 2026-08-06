@@ -11,6 +11,7 @@ import { ConversationStore } from '../conversation-store.js';
 import { SkillStore } from '../skill-store.js';
 import { copyToClipboard } from '../clipboard.js';
 import { ChatLog } from '../chat-log.js';
+import { searchChatLogs } from '../recall.js';
 import { buildFallbackCandidates, type FallbackCandidate } from './fallback.js';
 import {
   assistantColor,
@@ -42,6 +43,7 @@ const HELP_ENTRIES: [string, string][] = [
   ['/skill save <name>', 'save the current system prompt as a reusable named preset'],
   ['/skill use <name>', 'load a saved preset as the system prompt'],
   ['/skill [list]', 'list saved presets'],
+  ['/recall <query>', 'search past conversations under ~/Downloads/robin-chats/'],
   ['/clear', 'reset the conversation'],
   ['/exit', 'quit'],
 ];
@@ -207,6 +209,26 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
         }
       } else {
         console.log(errorColor(`✖ Unknown /skill subcommand "${sub}". Usage: /skill save|use|list [name]`));
+      }
+      continue;
+    }
+
+    if (cmd.type === 'recall') {
+      if (!cmd.arg) {
+        console.log(errorColor('✖ Usage: /recall <query>'));
+        continue;
+      }
+      const matches = await searchChatLogs(cmd.arg);
+      if (matches.length === 0) {
+        console.log(mutedColor(`No matches for "${cmd.arg}" in ~/Downloads/robin-chats/.`));
+      } else {
+        for (const match of matches) {
+          console.log(`  ${assistantColor(match.file)}${mutedColor(`:${match.lineNumber}`)}`);
+          for (const line of match.context) {
+            console.log(`    ${mutedColor(line)}`);
+          }
+          console.log();
+        }
       }
       continue;
     }
