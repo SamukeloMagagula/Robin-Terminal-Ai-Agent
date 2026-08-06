@@ -6,6 +6,10 @@ describe('parseCommand', () => {
     expect(parseCommand('/help')).toEqual({ type: 'help' });
   });
 
+  it('parses a bare "/" as help, same as /help', () => {
+    expect(parseCommand('/')).toEqual({ type: 'help' });
+  });
+
   it('parses /exit', () => {
     expect(parseCommand('/exit')).toEqual({ type: 'exit' });
   });

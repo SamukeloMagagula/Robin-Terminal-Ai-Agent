@@ -18,6 +18,7 @@ export interface ParsedCommand {
 }
 
 const KNOWN_COMMANDS: Record<string, ParsedCommand['type']> = {
+  '/': 'help',
   '/help': 'help',
   '/exit': 'exit',
   '/clear': 'clear',

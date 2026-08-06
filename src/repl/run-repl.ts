@@ -66,8 +66,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
   printConnectionLine(provider.name, model);
-  console.log(chalk.gray('Commands:'));
-  printHelp();
+  console.log(chalk.gray('Type your message, or / for commands.'));
 
   let isFirstTurn = true;
 
@@ -229,6 +228,14 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
           }
           console.log();
         }
+        // Add to the conversation (not just the terminal) so a follow-up like
+        // "yep that one" has something for the model to actually refer to.
+        const recalled = matches.map((m) => `[${m.file}:${m.lineNumber}]\n${m.context.join('\n')}`).join('\n\n');
+        history.push({
+          role: 'user',
+          content: `(Recalled from a past conversation, matching "${cmd.arg}":)\n\n${recalled}`,
+        });
+        console.log(mutedColor('(Added to the conversation — you can refer to it in your next message.)'));
       }
       continue;
     }

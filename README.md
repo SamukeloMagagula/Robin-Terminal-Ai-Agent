@@ -80,7 +80,7 @@ robin status              # show login/reachability status for every provider
 
 In a chat session:
 
-- `/help` — list commands
+- `/help` (or just `/`) — list commands
 - `/model` — pick a different model from the ones available on the current provider
 - `/provider` — switch provider (e.g. Copilot ↔ Gemini ↔ OpenRouter ↔ Ollama)
 - `/system [text]` — view the current system prompt, set one (`/system be terse`), or clear it (`/system clear`)
