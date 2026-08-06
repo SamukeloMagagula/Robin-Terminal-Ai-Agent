@@ -78,7 +78,7 @@ robin logout copilot     # clear stored Copilot credentials
 robin status              # show login/reachability status for every provider
 ```
 
-In a chat session:
+In a chat session, typing `/` shows a live-filtered popup of matching commands as you keep typing — arrow keys to move the highlight, **Tab** to fill in the highlighted command without submitting (so you can still type an argument), **Enter** to submit the highlighted command (or your typed line, if the popup isn't open), **Esc** to dismiss the popup and keep typing free text.
 
 - `/help` (or just `/`) — list commands
 - `/model` — pick a different model from the ones available on the current provider

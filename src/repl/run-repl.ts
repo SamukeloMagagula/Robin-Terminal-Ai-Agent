@@ -13,15 +13,8 @@ import { copyToClipboard } from '../clipboard.js';
 import { ChatLog } from '../chat-log.js';
 import { searchChatLogs } from '../recall.js';
 import { buildFallbackCandidates, type FallbackCandidate } from './fallback.js';
-import {
-  assistantColor,
-  errorColor,
-  mutedColor,
-  divider,
-  box,
-  USER_INPUT_COLOR,
-  RESET_COLOR,
-} from '../ui/theme.js';
+import { readSlashAwareLine } from './slash-prompt.js';
+import { assistantColor, errorColor, mutedColor, divider, box } from '../ui/theme.js';
 
 export interface ReplDeps {
   provider: Provider;
@@ -76,8 +69,11 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     }
     isFirstTurn = false;
 
-    const line = await rl.question(`${USER_INPUT_COLOR}> `);
-    process.stdout.write(RESET_COLOR);
+    const line = await readSlashAwareLine();
+    // Same reasoning as the process.stdin.resume() calls below: this prompt
+    // closes its own internal readline.Interface on the shared stdin when it
+    // resolves, which pauses the stream — resume it before the next read.
+    process.stdin.resume();
     const cmd = parseCommand(line);
 
     if (cmd.type === 'exit') break;
