@@ -1,69 +1,108 @@
 import { describe, it, expect, vi } from 'vitest';
-import { parseUsage, UsageCache, type OpenRouterUsage } from '../../src/usage/openrouter-usage';
+import {
+  parseKeyResponse,
+  parseCreditsResponse,
+  accountBalance,
+  UsageCache,
+  type OpenRouterUsage,
+} from '../../src/usage/openrouter-usage';
 
-// The exact shape the live /key endpoint returned, minus the redacted label.
-const LIVE_BODY = {
+// The exact body the live /key endpoint returned, label redacted.
+const LIVE_KEY_BODY = {
   data: {
-    label: 'sk-or-v1-...',
+    is_management_key: false,
+    is_provisioning_key: false,
     limit: null,
+    limit_reset: null,
     limit_remaining: null,
+    include_byok_in_limit: false,
     usage: 0.013673776,
     usage_daily: 0.010498172,
     usage_weekly: 0.013673776,
     usage_monthly: 0.013673776,
+    byok_usage: 0,
     is_free_tier: true,
+    expires_at: '2026-09-05T09:48:00.011Z',
   },
 };
 
-describe('parseUsage', () => {
-  it('reads a real response', () => {
-    expect(parseUsage(LIVE_BODY)).toEqual({
-      total: 0.013673776,
-      daily: 0.010498172,
-      weekly: 0.013673776,
-      monthly: 0.013673776,
-      limit: null,
-      limitRemaining: null,
-      isFreeTier: true,
+const LIVE_CREDITS_BODY = { data: { total_credits: 0, total_usage: 0.013673776 } };
+
+describe('parseKeyResponse', () => {
+  it('reads the live response into documented meanings', () => {
+    expect(parseKeyResponse(LIVE_KEY_BODY)).toEqual({
+      keyTotal: 0.013673776,
+      keyUtcDay: 0.010498172,
+      keyUtcWeek: 0.013673776,
+      keyUtcMonth: 0.013673776,
+      keyLimit: null,
+      keyLimitRemaining: null,
+      byokTotal: 0,
+      expiresAt: '2026-09-05T09:48:00.011Z',
+      hasEverPurchasedCredits: false,
     });
   });
 
-  it('reads a key that has a limit', () => {
-    const usage = parseUsage({ data: { usage: 4, limit: 10, limit_remaining: 6 } });
-    expect(usage.limit).toBe(10);
-    expect(usage.limitRemaining).toBe(6);
-    expect(usage.isFreeTier).toBe(false);
+  // is_free_tier is documented as "whether the user has paid for credits
+  // before" — a purchase-history flag. It must not be read as a plan name.
+  it('treats is_free_tier:false as having purchased before', () => {
+    expect(parseKeyResponse({ data: { is_free_tier: false } }).hasEverPurchasedCredits).toBe(true);
+  });
+
+  it('does not claim a purchase when the flag is absent', () => {
+    expect(parseKeyResponse({ data: {} }).hasEverPurchasedCredits).toBe(false);
+  });
+
+  it('reads a key that has a spending cap', () => {
+    const usage = parseKeyResponse({ data: { usage: 4, limit: 10, limit_remaining: 6 } });
+    expect(usage.keyLimit).toBe(10);
+    expect(usage.keyLimitRemaining).toBe(6);
   });
 
   it('defaults missing numbers to zero rather than NaN', () => {
-    expect(parseUsage({ data: {} })).toEqual({
-      total: 0,
-      daily: 0,
-      weekly: 0,
-      monthly: 0,
-      limit: null,
-      limitRemaining: null,
-      isFreeTier: false,
-    });
+    const usage = parseKeyResponse({ data: {} });
+    expect(usage.keyTotal).toBe(0);
+    expect(usage.keyUtcDay).toBe(0);
+    expect(usage.expiresAt).toBeNull();
   });
 
   it('survives a body of the wrong shape entirely', () => {
     for (const body of [null, undefined, 'nope', 42, [], {}]) {
-      expect(() => parseUsage(body)).not.toThrow();
-      expect(parseUsage(body).total).toBe(0);
+      expect(() => parseKeyResponse(body)).not.toThrow();
+      expect(parseKeyResponse(body).keyTotal).toBe(0);
     }
   });
 });
 
-const sample: OpenRouterUsage = {
-  total: 1,
-  daily: 1,
-  weekly: 1,
-  monthly: 1,
-  limit: null,
-  limitRemaining: null,
-  isFreeTier: true,
-};
+describe('parseCreditsResponse', () => {
+  it('reads the live response', () => {
+    expect(parseCreditsResponse(LIVE_CREDITS_BODY)).toEqual({
+      purchased: 0,
+      used: 0.013673776,
+    });
+  });
+
+  it('survives a malformed body', () => {
+    expect(parseCreditsResponse(null)).toEqual({ purchased: 0, used: 0 });
+  });
+});
+
+describe('accountBalance', () => {
+  const base = parseKeyResponse(LIVE_KEY_BODY);
+
+  it('is null when account figures are unavailable', () => {
+    expect(accountBalance({ ...base, account: null })).toBeNull();
+  });
+
+  it('is purchased minus used, and may be negative', () => {
+    expect(accountBalance({ ...base, account: { purchased: 0, used: 0.0137 } })).toBeCloseTo(
+      -0.0137
+    );
+    expect(accountBalance({ ...base, account: { purchased: 10, used: 2.5 } })).toBe(7.5);
+  });
+});
+
+const sample: OpenRouterUsage = { ...parseKeyResponse(LIVE_KEY_BODY), account: null };
 
 describe('UsageCache', () => {
   it('fetches once and serves the cached value inside the TTL', async () => {

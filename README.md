@@ -76,10 +76,19 @@ Two limits keep this from turning into a long wait. Models that can't answer a t
 If you're logged into OpenRouter, `robin` shows what you've spent — on the startup banner, on the divider between turns, and in full via `/usage`:
 
 ```
-💳 $0.0105 today  ·  $0.0137 total  ·  free tier
+💳 $0.0105 UTC day  ·  $0.0137 this key  ·  -$0.0137 account balance
 ```
 
-The figure is cached for 60 seconds and refreshed in the background after each reply, so the prompt never waits on the network. If a limit is set on your key you get a coloured bar and percentage instead of the free-tier badge — green, amber past half, red past 80%. No OpenRouter key, or the request fails? The line is simply omitted.
+Every label is the figure OpenRouter actually reports, not a friendlier paraphrase:
+
+- **UTC day / UTC week / UTC month** — the windows are UTC-based, and the week starts Monday. They are not your local day, so they aren't labelled "today".
+- **this key** — all-time spend for the API key you're using, not the account. An account with several keys will show a smaller number here than its account total.
+- **account balance** — credits purchased minus credits used, across every key, from `/credits`. It goes negative once free usage exceeds anything purchased.
+- **key cap** — a spending limit set on the individual key, shown with a bar only when one exists. Separate from account balance; either can stop a request.
+
+`/usage` adds the key's expiry date and BYOK spend when it's non-zero, and states OpenRouter's `is_free_tier` flag as what it is — a record of whether credits have ever been purchased, not a plan name.
+
+The figure is cached for 60 seconds and refreshed in the background after each reply, so the prompt never waits on the network. No OpenRouter key, or the request fails? The line is simply omitted. If the account call alone fails, the per-key figures still show and the balance segment disappears.
 
 ## Usage
 
@@ -111,7 +120,7 @@ In a chat session, typing `/` shows a live-filtered popup of matching commands a
 - `/skill use <name>` — load a saved preset as the current system prompt
 - `/skill [list]` — list saved presets
 - `/random` — re-roll onto a randomly chosen provider and model
-- `/usage` — show OpenRouter spend for today, this week, this month and all time
+- `/usage` — OpenRouter spend for this key (UTC day/week/month, all time) and the account balance
 - `/recall <query>` — search past conversations under `~/.robin/chats/`
 - `/clear` — reset the conversation
 - `/exit` — quit

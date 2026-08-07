@@ -43,7 +43,7 @@ const HELP_ENTRIES: [string, string][] = [
   ['/skill use <name>', 'load a saved preset as the system prompt'],
   ['/skill [list]', 'list saved presets'],
   ['/random', 'switch to a randomly chosen provider and model'],
-  ['/usage', 'show OpenRouter spend for today, this week, this month and all time'],
+  ['/usage', 'OpenRouter spend for this key, and the account balance'],
   ['/recall <query>', 'search past conversations under ~/.robin/chats/'],
   ['/clear', 'reset the conversation'],
   ['/exit', 'quit'],

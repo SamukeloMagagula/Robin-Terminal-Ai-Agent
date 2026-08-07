@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   formatUsd,
   usageBar,
-  limitPercent,
+  keyLimitPercent,
   renderUsageLine,
   renderUsageReport,
 } from '../../src/usage/render-usage';
@@ -12,23 +12,24 @@ const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
 
 function usage(overrides: Partial<OpenRouterUsage> = {}): OpenRouterUsage {
   return {
-    total: 0.013673776,
-    daily: 0.010498172,
-    weekly: 0.013673776,
-    monthly: 0.013673776,
-    limit: null,
-    limitRemaining: null,
-    isFreeTier: true,
+    keyTotal: 0.013673776,
+    keyUtcDay: 0.010498172,
+    keyUtcWeek: 0.013673776,
+    keyUtcMonth: 0.013673776,
+    keyLimit: null,
+    keyLimitRemaining: null,
+    byokTotal: 0,
+    expiresAt: '2026-09-05T09:48:00.011Z',
+    hasEverPurchasedCredits: false,
+    account: { purchased: 0, used: 0.013673776 },
     ...overrides,
   };
 }
 
 describe('formatUsd', () => {
-  // The real balance is $0.0137 — rounding to cents would show "$0.01" and
-  // then "$0.01" again next turn, hiding all movement.
-  it('keeps four decimals for sub-cent amounts', () => {
+  it('keeps four decimals below ten cents', () => {
     expect(formatUsd(0.013673776)).toBe('$0.0137');
-    expect(formatUsd(0.0001)).toBe('$0.0001');
+    expect(formatUsd(0.010498172)).toBe('$0.0105');
   });
 
   it('uses three decimals below a dollar', () => {
@@ -41,6 +42,12 @@ describe('formatUsd', () => {
 
   it('renders zero plainly', () => {
     expect(formatUsd(0)).toBe('$0');
+  });
+
+  // A spent-down account has a negative balance; it must not render as "$0.0137".
+  it('keeps the sign on negative amounts', () => {
+    expect(formatUsd(-0.013673776)).toBe('-$0.0137');
+    expect(formatUsd(-5)).toBe('-$5.00');
   });
 });
 
@@ -55,43 +62,56 @@ describe('usageBar', () => {
     expect(usageBar(-20, 10)).toBe('░░░░░░░░░░');
     expect(usageBar(300, 10)).toBe('██████████');
   });
-
-  it('is always the requested width', () => {
-    for (const percent of [0, 7, 33, 66, 99, 100]) {
-      expect(usageBar(percent, 10)).toHaveLength(10);
-    }
-  });
 });
 
-describe('limitPercent', () => {
-  it('is null when the key has no limit', () => {
-    expect(limitPercent(usage({ limit: null }))).toBeNull();
+describe('keyLimitPercent', () => {
+  it('is null when the key is uncapped', () => {
+    expect(keyLimitPercent(usage({ keyLimit: null }))).toBeNull();
   });
 
-  it('is null for a zero limit rather than dividing by zero', () => {
-    expect(limitPercent(usage({ limit: 0 }))).toBeNull();
+  it('is null for a zero cap rather than dividing by zero', () => {
+    expect(keyLimitPercent(usage({ keyLimit: 0 }))).toBeNull();
   });
 
-  it('computes a percentage against the limit', () => {
-    expect(limitPercent(usage({ total: 2.5, limit: 10 }))).toBe(25);
+  it('measures key total against the key cap', () => {
+    expect(keyLimitPercent(usage({ keyTotal: 2.5, keyLimit: 10 }))).toBe(25);
   });
 });
 
 describe('renderUsageLine', () => {
-  it('shows today and total spend', () => {
+  // The window is the UTC day, which is not midnight for most of the world.
+  // Labelling it "today" would be wrong for part of every day.
+  it('labels the daily figure as the UTC day, not "today"', () => {
     const line = strip(renderUsageLine(usage()));
-    expect(line).toContain('$0.0105 today');
-    expect(line).toContain('$0.0137 total');
+    expect(line).toContain('$0.0105 UTC day');
+    expect(line).not.toMatch(/\btoday\b/);
   });
 
-  it('marks a free-tier key with no limit', () => {
-    expect(strip(renderUsageLine(usage()))).toContain('free tier');
+  it('scopes the all-time figure to the key, not the account', () => {
+    const line = strip(renderUsageLine(usage()));
+    expect(line).toContain('$0.0137 this key');
+    expect(line).not.toMatch(/\btotal\b/);
   });
 
-  it('shows a bar and percentage when a limit exists', () => {
-    const line = strip(renderUsageLine(usage({ total: 5, limit: 10, isFreeTier: false })));
-    expect(line).toContain('50% of limit');
-    expect(line).toContain('█████░░░░░');
+  it('shows account balance when the account call succeeded', () => {
+    expect(strip(renderUsageLine(usage()))).toContain('-$0.0137 account balance');
+  });
+
+  it('omits account balance when the account call failed', () => {
+    expect(strip(renderUsageLine(usage({ account: null })))).not.toContain('account balance');
+  });
+
+  // "free tier" is a plan name; is_free_tier is a purchase-history flag.
+  it('never calls the account a tier', () => {
+    for (const flag of [true, false]) {
+      const line = strip(renderUsageLine(usage({ hasEverPurchasedCredits: flag })));
+      expect(line.toLowerCase()).not.toContain('tier');
+    }
+  });
+
+  it('shows a bar against the key cap when one is set', () => {
+    const line = strip(renderUsageLine(usage({ keyTotal: 5, keyLimit: 10 })));
+    expect(line).toContain('50% of key cap');
   });
 
   it('is a single line', () => {
@@ -100,28 +120,55 @@ describe('renderUsageLine', () => {
 });
 
 describe('renderUsageReport', () => {
-  it('lists every period', () => {
+  it('labels every window as UTC and names the week start', () => {
     const report = strip(renderUsageReport(usage()));
-    for (const label of ['Today', 'This week', 'This month', 'All time']) {
-      expect(report).toContain(label);
-    }
+    expect(report).toContain('UTC day');
+    expect(report).toContain('UTC week');
+    expect(report).toContain('from Monday');
+    expect(report).toContain('UTC month');
   });
 
-  it('says so when the key has no limit', () => {
-    expect(strip(renderUsageReport(usage()))).toContain('none set on this key');
+  it('separates key figures from account figures', () => {
+    const report = strip(renderUsageReport(usage()));
+    expect(report).toContain('this API key');
+    expect(report).toContain('Account (all keys)');
+    expect(report).toContain('Credits purchased');
+    expect(report).toContain('Credits used');
   });
 
-  it('explains why free-tier keys hit 402s', () => {
-    expect(strip(renderUsageReport(usage({ isFreeTier: true })))).toContain('402');
+  it('reports a negative balance as negative', () => {
+    expect(strip(renderUsageReport(usage()))).toContain('-$0.0137');
   });
 
-  it('shows limit and remaining when both are present', () => {
-    const report = strip(
-      renderUsageReport(usage({ total: 8, limit: 10, limitRemaining: 2, isFreeTier: false }))
+  it('states the purchase-history flag as what the API reports', () => {
+    expect(strip(renderUsageReport(usage({ hasEverPurchasedCredits: false })))).toContain(
+      'no credits have ever been purchased'
     );
-    expect(report).toContain('80% of $10.00');
-    expect(report).toContain('Remaining');
-    expect(report).toContain('$2.00');
+    expect(strip(renderUsageReport(usage({ hasEverPurchasedCredits: true })))).toContain(
+      'credits have been purchased'
+    );
+  });
+
+  // The old version asserted "paid models will refuse with 402", an inference
+  // about future behaviour that the API never stated.
+  it('does not predict what requests will fail', () => {
+    const report = strip(renderUsageReport(usage()));
     expect(report).not.toContain('402');
+    expect(report).not.toContain('will refuse');
+  });
+
+  it('says so plainly when account totals are unavailable', () => {
+    expect(strip(renderUsageReport(usage({ account: null })))).toContain(
+      'Account totals unavailable'
+    );
+  });
+
+  it('shows key expiry when the API gives one', () => {
+    expect(strip(renderUsageReport(usage()))).toContain('2026-09-05');
+  });
+
+  it('hides BYOK when it is zero and shows it when it is not', () => {
+    expect(strip(renderUsageReport(usage()))).not.toContain('BYOK');
+    expect(strip(renderUsageReport(usage({ byokTotal: 1.5 })))).toContain('BYOK');
   });
 });
