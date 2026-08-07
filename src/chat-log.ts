@@ -3,8 +3,13 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import type { Message } from './providers/types.js';
 
+/**
+ * Transcripts contain everything discussed plus the contents of any file the
+ * model read, so they live in the private ~/.robin tree rather than in
+ * ~/Downloads, which is world-readable, backed up and scanned by other tools.
+ */
 export function defaultChatLogDir(): string {
-  return path.join(os.homedir(), 'Downloads', 'robin-chats');
+  return path.join(os.homedir(), '.robin', 'chats');
 }
 
 function timestampForFilename(date: Date): string {
@@ -45,7 +50,7 @@ function renderMarkdown(providerName: string, model: string, startedAt: Date, me
   return lines.join('\n');
 }
 
-/** Writes a human-readable markdown transcript of the current conversation to ~/Downloads/robin-chats/. */
+/** Writes a human-readable markdown transcript of the current conversation to ~/.robin/chats/. */
 export class ChatLog {
   private filePath: string | undefined;
   private startedAt: Date | undefined;
@@ -60,7 +65,7 @@ export class ChatLog {
   async write(providerName: string, model: string, messages: Message[]): Promise<void> {
     if (!this.filePath || !this.startedAt) this.startNewSession();
     const content = renderMarkdown(providerName, model, this.startedAt!, messages);
-    await fs.mkdir(this.dir, { recursive: true });
-    await fs.writeFile(this.filePath!, content, 'utf-8');
+    await fs.mkdir(this.dir, { recursive: true, mode: 0o700 });
+    await fs.writeFile(this.filePath!, content, { encoding: 'utf-8', mode: 0o600 });
   }
 }

@@ -91,15 +91,15 @@ In a chat session, typing `/` shows a live-filtered popup of matching commands a
 - `/skill save <name>` — save the current system prompt as a reusable named preset under `~/.robin/skills/<name>.json`
 - `/skill use <name>` — load a saved preset as the current system prompt
 - `/skill [list]` — list saved presets
-- `/recall <query>` — search past conversations under `~/Downloads/robin-chats/`
+- `/recall <query>` — search past conversations under `~/.robin/chats/`
 - `/clear` — reset the conversation
 - `/exit` — quit
 
 ## Chat History
 
-Every conversation is automatically written to a readable markdown transcript in `~/Downloads/robin-chats/robin-chat-<timestamp>.md`, updated after every reply — nothing to remember to do. A new file starts whenever the conversation resets (`/clear`, `/model`, `/provider`, `/load`), so each distinct conversation gets its own file you can browse, search, or share later.
+Every conversation is automatically written to a readable markdown transcript in `~/.robin/chats/robin-chat-<timestamp>.md`, updated after every reply — nothing to remember to do. A new file starts whenever the conversation resets (`/clear`, `/model`, `/provider`, `/load`), so each distinct conversation gets its own file you can browse, search, or share later.
 
-This is separate from `/save`/`/load`, which store an exact, reloadable snapshot as JSON under `~/.robin/conversations/` — use `/save` when you want to resume a specific conversation later inside `robin`; the Downloads markdown log is for your own reading/reference outside the app.
+This is separate from `/save`/`/load`, which store an exact, reloadable snapshot as JSON under `~/.robin/conversations/` — use `/save` when you want to resume a specific conversation later inside `robin`; the markdown transcript is for your own reading/reference outside the app.
 
 Use `/recall <query>` to search across all past markdown transcripts from inside a chat session — it's a plain case-insensitive text search (newest conversations first, capped at 10 matches), not semantic search, but it's enough to find "did I already ask about X" without leaving the terminal.
 

@@ -30,7 +30,7 @@ export function filterSlashCommands(buffer: string, commands: SlashCommandEntry[
 
 const NAME_WIDTH = 12;
 
-const promptWithSlashMenu = createPrompt<string, Record<string, never>>((_config, done) => {
+export const promptWithSlashMenu = createPrompt<string, Record<string, never>>((_config, done) => {
   const [value, setValue] = useState('');
   const [matches, setMatches] = useState<SlashCommandEntry[]>([]);
   const [selected, setSelected] = useState(0);
@@ -67,7 +67,11 @@ const promptWithSlashMenu = createPrompt<string, Record<string, never>>((_config
       // special-case "select without submitting" (that fights readline's
       // own built-in handling and produces a garbled second render). If a
       // popup is open, submit the highlighted command directly.
-      done(matches.length > 0 ? matches[selected].name : rl.line);
+      //
+      // Submit `value`, NOT rl.line: readline's own Enter handling runs before
+      // this listener and has already cleared its buffer, so rl.line is always
+      // "" here. `value` is the buffer we mirrored on every other keypress.
+      done(matches.length > 0 ? matches[selected].name : value);
       return;
     }
     setValue(rl.line);

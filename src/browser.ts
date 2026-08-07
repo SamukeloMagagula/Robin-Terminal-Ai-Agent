@@ -11,15 +11,40 @@ export function canOpenGraphicalBrowser(platform: NodeJS.Platform, env: NodeJS.P
   return Boolean(env.DISPLAY || env.WAYLAND_DISPLAY);
 }
 
-/** Best-effort: opens `url` in Chrome. Returns false (without throwing) if no graphical browser is available. */
+/**
+ * Only http(s) URLs are ever handed to a shell. The URLs here come from
+ * provider responses (OAuth verification URIs), so they are not under our
+ * control, and cmd.exe re-parses its arguments — an embedded `&` or `|` in a
+ * hostile URL would otherwise run as a separate command.
+ */
+export function isSafeBrowserUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+  return !/[&|^<>"'`\r\n\s]/.test(url);
+}
+
+/**
+ * Best-effort: opens `url` in a browser. Returns false (without throwing) when
+ * the URL is unsafe or no graphical browser is available.
+ */
 export function openBrowser(url: string): boolean {
+  if (!isSafeBrowserUrl(url)) return false;
   if (!canOpenGraphicalBrowser(process.platform, process.env)) return false;
   try {
     if (process.platform === 'win32') {
-      // "start chrome <url>" resolves via the Windows "App Paths" registry
-      // entry Chrome's installer registers, so it works even when chrome.exe
-      // isn't on PATH. Empty "" is the window-title arg start expects.
-      spawn('cmd', ['/c', 'start', '""', 'chrome', url], { stdio: 'ignore', detached: true }).unref();
+      // Hands the URL to the default browser without a shell. The previous
+      // "cmd /c start ... chrome" spawned cmd.exe, which re-parses its own
+      // command line, so any shell metacharacter in the URL would have run as
+      // a separate command.
+      spawn('rundll32', ['url.dll,FileProtocolHandler', url], {
+        stdio: 'ignore',
+        detached: true,
+      }).unref();
     } else if (process.platform === 'darwin') {
       spawn('open', ['-a', 'Google Chrome', url], { stdio: 'ignore', detached: true }).unref();
     } else {
@@ -31,11 +56,11 @@ export function openBrowser(url: string): boolean {
   }
 }
 
-/** Prints `url` and either opens Chrome or explains why it can't, so the message always makes sense. */
+/** Prints `url` and either opens a browser or explains why it can't, so the message always makes sense. */
 export function announceAndOpen(url: string): void {
   console.log(`Go to ${url}`);
   if (openBrowser(url)) {
-    console.log('Opening Chrome...');
+    console.log('Opening your browser...');
   } else {
     console.log('No graphical browser detected here (e.g. an SSH/PuTTY session) — open the link above on a device with a browser.');
   }

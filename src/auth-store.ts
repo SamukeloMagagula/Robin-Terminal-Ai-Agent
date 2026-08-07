@@ -39,7 +39,13 @@ export class AuthStore {
   }
 
   private async write(data: AuthData): Promise<void> {
-    await fs.mkdir(path.dirname(this.filePath), { recursive: true });
+    await fs.mkdir(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
     await fs.writeFile(this.filePath, JSON.stringify(data, null, 2), { mode: 0o600 });
+    // writeFile's `mode` only applies when it creates the file. An auth.json
+    // that already exists with looser permissions would silently keep them,
+    // so tighten it explicitly on every write.
+    if (process.platform !== 'win32') {
+      await fs.chmod(this.filePath, 0o600);
+    }
   }
 }

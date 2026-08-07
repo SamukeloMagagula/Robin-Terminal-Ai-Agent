@@ -53,18 +53,25 @@ export class CopilotProvider implements Provider {
 
     console.log(`Go to ${data.verification_uri} and enter code: ${data.user_code}`);
     if (openBrowser(data.verification_uri_complete ?? data.verification_uri)) {
-      console.log('Opening Chrome to authorize...');
+      console.log('Opening your browser to authorize...');
     } else {
       console.log('No graphical browser detected here (e.g. an SSH/PuTTY session) — open the link above on a device with a browser.');
     }
 
-    const githubToken = await this.pollForToken(data.device_code, data.interval);
+    const githubToken = await this.pollForToken(data.device_code, data.interval, data.expires_in);
     await this.authStore.set(this.id, { githubToken });
   }
 
-  private async pollForToken(deviceCode: string, intervalSeconds: number): Promise<string> {
+  private async pollForToken(
+    deviceCode: string,
+    intervalSeconds: number,
+    expiresInSeconds = 900
+  ): Promise<string> {
     let interval = intervalSeconds;
-    while (true) {
+    // GitHub expires the device code; without this the loop would poll forever
+    // on a permanent `authorization_pending` and never hand control back.
+    const deadline = Date.now() + expiresInSeconds * 1000;
+    while (Date.now() < deadline) {
       await sleep(interval * 1000);
       const res = await fetch('https://github.com/login/oauth/access_token', {
         method: 'POST',
@@ -84,6 +91,7 @@ export class CopilotProvider implements Provider {
       }
       throw new Error(`GitHub device login failed: ${data.error ?? 'unknown error'}`);
     }
+    throw new Error('GitHub device login timed out — the code expired. Run `login copilot` again.');
   }
 
   private async getCopilotToken(): Promise<string> {

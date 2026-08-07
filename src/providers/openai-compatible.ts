@@ -57,7 +57,9 @@ export async function* streamOpenAiCompatibleChat(response: Response, errorLabel
         return;
       }
       if (!payload) continue;
-      const parsed = JSON.parse(payload) as {
+      // A single malformed SSE frame must not abort the whole turn and throw
+      // away the text already streamed — skip it and keep reading.
+      let parsed: {
         choices?: {
           delta?: {
             content?: string;
@@ -65,6 +67,11 @@ export async function* streamOpenAiCompatibleChat(response: Response, errorLabel
           };
         }[];
       };
+      try {
+        parsed = JSON.parse(payload);
+      } catch {
+        continue;
+      }
       const delta = parsed.choices?.[0]?.delta;
       if (delta?.content) yield { type: 'text', text: delta.content };
       for (const tc of delta?.tool_calls ?? []) {

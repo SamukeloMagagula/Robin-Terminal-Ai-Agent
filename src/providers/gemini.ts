@@ -19,6 +19,15 @@ interface GeminiContent {
   parts: GeminiPart[];
 }
 
+/**
+ * Gemini accepts the key either as a `?key=` query parameter or as this
+ * header. Query strings get written to proxy logs, server access logs and
+ * shell history in a way headers do not, so the header is the only form used.
+ */
+function apiKeyHeader(apiKey: string): Record<string, string> {
+  return { 'x-goog-api-key': apiKey };
+}
+
 function parseArguments(raw: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -101,7 +110,7 @@ export class GeminiProvider implements Provider {
 
   async listModels(): Promise<string[]> {
     const apiKey = await this.getApiKey();
-    const res = await fetch(`${BASE_URL}/models?key=${apiKey}`);
+    const res = await fetch(`${BASE_URL}/models`, { headers: apiKeyHeader(apiKey) });
     if (!res.ok) throw new Error(`Failed to list Gemini models: ${res.status}`);
     const data = (await res.json()) as {
       models: { name: string; supportedGenerationMethods?: string[] }[];
@@ -128,9 +137,10 @@ export class GeminiProvider implements Provider {
       ];
     }
 
-    const res = await fetch(`${BASE_URL}/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`, {
+    const url = `${BASE_URL}/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`;
+    const res = await fetch(url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...apiKeyHeader(apiKey) },
       body: JSON.stringify(body),
     });
     if (!res.ok || !res.body) {

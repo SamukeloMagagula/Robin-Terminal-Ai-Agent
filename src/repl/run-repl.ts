@@ -4,7 +4,7 @@ import type { Provider, Message } from '../providers/types.js';
 import { listProviders } from '../providers/index.js';
 import { parseCommand } from './parse-command.js';
 import { runAgentTurn } from '../agent-loop.js';
-import { executeTool } from '../tools/execute.js';
+import { executeTool, wrapUntrusted } from '../tools/execute.js';
 import { TOOL_DEFINITIONS } from '../tools/definitions.js';
 import { printBanner, printConnectionLine } from '../ui/banner.js';
 import { newSessionId } from '../session-id.js';
@@ -38,7 +38,7 @@ const HELP_ENTRIES: [string, string][] = [
   ['/skill save <name>', 'save the current system prompt as a reusable named preset'],
   ['/skill use <name>', 'load a saved preset as the system prompt'],
   ['/skill [list]', 'list saved presets'],
-  ['/recall <query>', 'search past conversations under ~/Downloads/robin-chats/'],
+  ['/recall <query>', 'search past conversations under ~/.robin/chats/'],
   ['/clear', 'reset the conversation'],
   ['/exit', 'quit'],
 ];
@@ -210,7 +210,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       }
       const matches = await searchChatLogs(cmd.arg);
       if (matches.length === 0) {
-        console.log(mutedColor(`No matches for "${cmd.arg}" in ~/Downloads/robin-chats/.`));
+        console.log(mutedColor(`No matches for "${cmd.arg}" in ~/.robin/chats/.`));
       } else {
         for (const match of matches) {
           console.log(`  ${assistantColor(match.file)}${mutedColor(`:${match.lineNumber}`)}`);
@@ -222,9 +222,16 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
         // Add to the conversation (not just the terminal) so a follow-up like
         // "yep that one" has something for the model to actually refer to.
         const recalled = matches.map((m) => `[${m.file}:${m.lineNumber}]\n${m.context.join('\n')}`).join('\n\n');
+        // Transcripts contain past tool output — file contents and command
+        // output that were wrapped as untrusted the first time round. Replaying
+        // them as a plain user message would launder that text back into the
+        // context as if the user had typed it, so re-wrap it.
         history.push({
           role: 'user',
-          content: `(Recalled from a past conversation, matching "${cmd.arg}":)\n\n${recalled}`,
+          content: wrapUntrusted(
+            `recalled excerpts from past conversations matching "${cmd.arg}"`,
+            recalled
+          ),
         });
         console.log(mutedColor('(Added to the conversation — you can refer to it in your next message.)'));
       }

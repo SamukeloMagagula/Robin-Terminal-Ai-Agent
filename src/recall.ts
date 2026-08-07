@@ -10,7 +10,7 @@ export interface RecallMatch {
 
 const MAX_MATCHES = 10;
 
-/** Searches saved chat-log markdown files (~/Downloads/robin-chats/) for lines containing `query`, newest files first. */
+/** Searches saved chat-log markdown files (~/.robin/chats/) for lines containing `query`, newest files first. */
 export async function searchChatLogs(query: string, dir: string = defaultChatLogDir()): Promise<RecallMatch[]> {
   const trimmedQuery = query.trim();
   if (!trimmedQuery) return [];

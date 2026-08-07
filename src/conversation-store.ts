@@ -20,6 +20,26 @@ export function isValidConversationName(name: string): boolean {
   return /^[a-zA-Z0-9._-]+$/.test(name);
 }
 
+const VALID_ROLES = new Set(['system', 'user', 'assistant', 'tool']);
+
+function isMessage(value: unknown): value is Message {
+  if (!value || typeof value !== 'object') return false;
+  const m = value as Record<string, unknown>;
+  return VALID_ROLES.has(m.role as string) && typeof m.content === 'string';
+}
+
+/**
+ * Save files are plain JSON on disk and can be hand-edited or corrupted. An
+ * unchecked load put arbitrary objects straight into the live history, where a
+ * missing `content` string later crashed rendering, /copy and the chat log.
+ */
+export function isSavedConversation(value: unknown): value is SavedConversation {
+  if (!value || typeof value !== 'object') return false;
+  const c = value as Record<string, unknown>;
+  if (typeof c.model !== 'string' || typeof c.providerName !== 'string') return false;
+  return Array.isArray(c.messages) && c.messages.every(isMessage);
+}
+
 export class ConversationStore {
   constructor(private readonly dir: string = defaultConversationsDir()) {}
 
@@ -40,7 +60,11 @@ export class ConversationStore {
       throw new Error(`Invalid conversation name "${name}" — use letters, numbers, dots, dashes, underscores only.`);
     }
     const raw = await fs.readFile(this.pathFor(name), 'utf-8');
-    return JSON.parse(raw) as SavedConversation;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isSavedConversation(parsed)) {
+      throw new Error('the file is not a valid saved conversation');
+    }
+    return parsed;
   }
 
   async list(): Promise<string[]> {

@@ -1,23 +1,21 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ToolCall } from '../providers/types.js';
-import { defaultAuthPath } from '../auth-store.js';
+import { checkPath, defaultSensitiveDirs } from './sensitive-paths.js';
+
+export {
+  defaultSensitiveDirs,
+  isInsideDirectory,
+  isInsideAnyDirectory,
+  isSensitiveBasename,
+} from './sensitive-paths.js';
 
 const execAsync = promisify(exec);
 const MAX_OUTPUT_LENGTH = 4000;
 const MAX_PREVIEW_LENGTH = 500;
-
-/** Directories read_file/write_file refuse to touch: robin's own credentials and the user's SSH keys. */
-export function defaultSensitiveDirs(): string[] {
-  return [path.dirname(defaultAuthPath()), path.join(os.homedir(), '.ssh')];
-}
-
-function isInsideAnyDirectory(filePath: string, directories: string[]): boolean {
-  return directories.some((dir) => isInsideDirectory(filePath, dir));
-}
+const COMMAND_TIMEOUT_MS = 120_000;
 
 // Coarse heuristics for commands worth a louder warning before approval —
 // not a sandbox or a blocklist, just extra friction against rubber-stamping
@@ -37,7 +35,7 @@ const DANGEROUS_COMMAND_PATTERNS: RegExp[] = [
 ];
 
 export function isDangerousCommand(command: string): boolean {
-  return DANGEROUS_COMMAND_PATTERNS.some((pattern) => pattern.test(command));
+  return DANGEROUS_COMMAND_PATTERNS.some((pattern) => pattern.test(String(command)));
 }
 
 const UNTRUSTED_NOTICE =
@@ -55,48 +53,95 @@ export function wrapUntrusted(source: string, content: string): string {
 
 export type ConfirmFn = (message: string) => Promise<boolean>;
 
-export async function executeTool(toolCall: ToolCall, confirm: ConfirmFn): Promise<string> {
+/** Tool arguments arrive as model-generated JSON, so nothing about their shape is guaranteed. */
+function requireString(value: unknown, field: string): string {
+  if (typeof value !== 'string') {
+    throw new Error(`missing or non-string "${field}" argument`);
+  }
+  return value;
+}
+
+export interface ExecuteOptions {
+  /** Overridable so tests can assert the timeout path without waiting it out. */
+  commandTimeoutMs?: number;
+}
+
+export async function executeTool(
+  toolCall: ToolCall,
+  confirm: ConfirmFn,
+  options: ExecuteOptions = {}
+): Promise<string> {
   let args: Record<string, unknown>;
   try {
-    args = JSON.parse(toolCall.arguments) as Record<string, unknown>;
+    const parsed = JSON.parse(toolCall.arguments) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return 'Error: tool arguments must be a JSON object.';
+    }
+    args = parsed as Record<string, unknown>;
   } catch (err) {
     return `Error: invalid tool arguments — ${(err as Error).message}`;
   }
 
-  switch (toolCall.name) {
-    case 'read_file':
-      return readFileTool(args.path as string);
-    case 'write_file':
-      return writeFileTool(args.path as string, args.content as string, confirm);
-    case 'run_command':
-      return runCommandTool(args.command as string, confirm);
-    default:
-      return `Error: unknown tool "${toolCall.name}".`;
-  }
-}
-
-/**
- * True when `filePath` resolves to something inside `directory` (or is the directory itself).
- * Exported for testing so the guard can be exercised without touching the real ~/.robin.
- */
-export function isInsideDirectory(filePath: string, directory: string): boolean {
-  const resolvedDir = path.resolve(directory);
-  const resolvedFile = path.resolve(filePath);
-  if (resolvedFile === resolvedDir) return true;
-  const relative = path.relative(resolvedDir, resolvedFile);
-  return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
-}
-
-async function readFileTool(filePath: string, sensitiveDirs = defaultSensitiveDirs()): Promise<string> {
-  if (isInsideAnyDirectory(filePath, sensitiveDirs)) {
-    return 'Error: refused to read from a protected credential directory';
-  }
   try {
-    const content = await fs.readFile(filePath, 'utf-8');
-    return wrapUntrusted(`contents of ${filePath}`, content);
+    switch (toolCall.name) {
+      case 'read_file':
+        return await readFileTool(requireString(args.path, 'path'), confirm);
+      case 'write_file':
+        return await writeFileTool(
+          requireString(args.path, 'path'),
+          requireString(args.content, 'content'),
+          confirm
+        );
+      case 'run_command':
+        return await runCommandTool(
+          requireString(args.command, 'command'),
+          confirm,
+          options.commandTimeoutMs ?? COMMAND_TIMEOUT_MS
+        );
+      default:
+        return `Error: unknown tool "${toolCall.name}".`;
+    }
   } catch (err) {
     return `Error: ${(err as Error).message}`;
   }
+}
+
+async function readFileTool(
+  filePath: string,
+  confirm: ConfirmFn,
+  sensitiveDirs = defaultSensitiveDirs()
+): Promise<string> {
+  const verdict = await checkPath(filePath, 'read', sensitiveDirs);
+  if (verdict.blocked) {
+    return `Error: ${verdict.refusal}`;
+  }
+
+  // Reads inside the directory Robin was launched from are the normal case and
+  // stay friction-free. Anything outside it is a potential exfiltration of
+  // unrelated files into the model's context, so the user gets a say.
+  if (!isInsideCwd(verdict.realPath)) {
+    const approved = await confirm(`Read ${verdict.realPath}?\n(outside the current working directory)`);
+    if (!approved) {
+      return `Reading ${filePath} was declined by the user.`;
+    }
+  }
+
+  try {
+    const content = await fs.readFile(verdict.realPath, 'utf-8');
+    const truncated =
+      content.length > MAX_OUTPUT_LENGTH
+        ? `${content.slice(0, MAX_OUTPUT_LENGTH)}\n...[truncated ${content.length - MAX_OUTPUT_LENGTH} characters]`
+        : content;
+    return wrapUntrusted(`contents of ${filePath}`, truncated);
+  } catch (err) {
+    return `Error: ${(err as Error).message}`;
+  }
+}
+
+function isInsideCwd(realPath: string): boolean {
+  const cwd = path.resolve(process.cwd());
+  const relative = path.relative(cwd, realPath);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 async function writeFileTool(
@@ -105,24 +150,30 @@ async function writeFileTool(
   confirm: ConfirmFn,
   sensitiveDirs = defaultSensitiveDirs()
 ): Promise<string> {
-  if (isInsideAnyDirectory(filePath, sensitiveDirs)) {
-    return 'Error: refused to write inside a protected credential directory';
+  const verdict = await checkPath(filePath, 'write', sensitiveDirs);
+  if (verdict.blocked) {
+    return `Error: ${verdict.refusal}`;
   }
-  const preview = content.length > MAX_PREVIEW_LENGTH ? `${content.slice(0, MAX_PREVIEW_LENGTH)}...` : content;
-  const approved = await confirm(`Write to ${filePath}?\n---\n${preview}\n---`);
+  const preview =
+    content.length > MAX_PREVIEW_LENGTH ? `${content.slice(0, MAX_PREVIEW_LENGTH)}...` : content;
+  const approved = await confirm(`Write to ${verdict.realPath}?\n---\n${preview}\n---`);
   if (!approved) {
     return `Write to ${filePath} was declined by the user.`;
   }
   try {
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, content, 'utf-8');
-    return `Wrote ${Buffer.byteLength(content, 'utf-8')} bytes to ${filePath}.`;
+    await fs.mkdir(path.dirname(verdict.realPath), { recursive: true });
+    await fs.writeFile(verdict.realPath, content, 'utf-8');
+    return `Wrote ${Buffer.byteLength(content, 'utf-8')} bytes to ${verdict.realPath}.`;
   } catch (err) {
     return `Error: ${(err as Error).message}`;
   }
 }
 
-async function runCommandTool(command: string, confirm: ConfirmFn): Promise<string> {
+async function runCommandTool(
+  command: string,
+  confirm: ConfirmFn,
+  timeoutMs: number
+): Promise<string> {
   const warning = isDangerousCommand(command)
     ? '⚠ This command looks potentially destructive — review it carefully.\n'
     : '';
@@ -131,12 +182,28 @@ async function runCommandTool(command: string, confirm: ConfirmFn): Promise<stri
     return `Command "${command}" was declined by the user.`;
   }
   try {
-    const { stdout, stderr } = await execAsync(command, { maxBuffer: 1024 * 1024 });
+    // Without a timeout a command that waits on stdin (which it never gets —
+    // the REPL owns it) hangs the whole session with no way back to the prompt.
+    const { stdout, stderr } = await execAsync(command, {
+      maxBuffer: 1024 * 1024,
+      timeout: timeoutMs,
+    });
     const output = `${stdout}${stderr}`.slice(0, MAX_OUTPUT_LENGTH);
     return `Exit code: 0\n${wrapUntrusted(`output of "${command}"`, output)}`;
   } catch (err) {
-    const execErr = err as { code?: number; stdout?: string; stderr?: string; message: string };
-    const output = (`${execErr.stdout ?? ''}${execErr.stderr ?? ''}`.slice(0, MAX_OUTPUT_LENGTH)) || execErr.message;
+    const execErr = err as {
+      code?: number;
+      killed?: boolean;
+      signal?: string;
+      stdout?: string;
+      stderr?: string;
+      message: string;
+    };
+    if (execErr.killed) {
+      return `Error: command timed out after ${timeoutMs / 1000}s and was terminated.`;
+    }
+    const output =
+      `${execErr.stdout ?? ''}${execErr.stderr ?? ''}`.slice(0, MAX_OUTPUT_LENGTH) || execErr.message;
     return `Exit code: ${execErr.code ?? 1}\n${wrapUntrusted(`output of "${command}"`, output)}`;
   }
 }

@@ -17,7 +17,10 @@ export interface ParsedCommand {
   arg?: string;
 }
 
-const KNOWN_COMMANDS: Record<string, ParsedCommand['type']> = {
+// Null-prototype: a plain object literal would make "/toString", "/constructor"
+// and "/__proto__" resolve to inherited Object members and read as known
+// commands, so they were silently swallowed instead of reported as unknown.
+const KNOWN_COMMANDS: Record<string, ParsedCommand['type']> = Object.assign(Object.create(null), {
   '/': 'help',
   '/help': 'help',
   '/exit': 'exit',
@@ -31,7 +34,7 @@ const KNOWN_COMMANDS: Record<string, ParsedCommand['type']> = {
   '/copy': 'copy',
   '/skill': 'skill',
   '/recall': 'recall',
-};
+});
 
 export function parseCommand(input: string): ParsedCommand {
   const trimmed = input.trim();
