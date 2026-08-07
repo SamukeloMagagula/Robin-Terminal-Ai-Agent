@@ -69,6 +69,18 @@ Anywhere `robin` needs you to visit a page (Copilot/Gemini/OpenRouter login), it
 
 If a request to the current model fails (rate-limited, unreachable, etc.), `robin` automatically retries the message on the next model — first other models on the same provider, then models on any other provider you're logged into. Once a fallback succeeds, the session sticks with it (same as switching with `/model`/`/provider` yourself) rather than retrying the original model every turn.
 
+Two limits keep this from turning into a long wait. Models that can't answer a text request are excluded by name — speech, embedding, image and video models sit in the same catalogues and would just return a 400. And the chain stops after 5 attempts: each one is a real round-trip, and if five models in a row refuse, the problem is the account or the network, not the model.
+
+## OpenRouter spend
+
+If you're logged into OpenRouter, `robin` shows what you've spent — on the startup banner, on the divider between turns, and in full via `/usage`:
+
+```
+💳 $0.0105 today  ·  $0.0137 total  ·  free tier
+```
+
+The figure is cached for 60 seconds and refreshed in the background after each reply, so the prompt never waits on the network. If a limit is set on your key you get a coloured bar and percentage instead of the free-tier badge — green, amber past half, red past 80%. No OpenRouter key, or the request fails? The line is simply omitted.
+
 ## Usage
 
 ```bash
@@ -99,6 +111,7 @@ In a chat session, typing `/` shows a live-filtered popup of matching commands a
 - `/skill use <name>` — load a saved preset as the current system prompt
 - `/skill [list]` — list saved presets
 - `/random` — re-roll onto a randomly chosen provider and model
+- `/usage` — show OpenRouter spend for today, this week, this month and all time
 - `/recall <query>` — search past conversations under `~/.robin/chats/`
 - `/clear` — reset the conversation
 - `/exit` — quit

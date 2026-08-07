@@ -27,6 +27,8 @@ export interface BannerInfo {
   cwd: string;
   sessionId: string;
   toolsEnabled: boolean;
+  /** Pre-rendered usage line, omitted when there is no OpenRouter key or the fetch failed. */
+  usageLine?: string;
 }
 
 function readVersion(): string | undefined {
@@ -52,6 +54,10 @@ function buildLeftColumn(info: BannerInfo): string[] {
     mutedColor(shortenHome(info.cwd)),
     mutedColor(`Session: ${info.sessionId}`),
   ];
+}
+
+function buildUsageLines(info: BannerInfo): string[] {
+  return info.usageLine ? ['', info.usageLine] : [];
 }
 
 // The tagline runs 52 characters, far wider than the left column, so it sits
@@ -120,6 +126,7 @@ export function buildBanner(info: BannerInfo): string[] {
     ...panel.map((row) => `${INDENT}${row}`),
     '',
     ...buildFooter().map((row) => `${INDENT}${row}`),
+    ...buildUsageLines(info).map((row) => (row ? `${INDENT}${row}` : row)),
     '',
   ];
 }

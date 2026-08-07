@@ -17,6 +17,8 @@ import { searchChatLogs } from '../recall.js';
 import { buildFallbackCandidates, type FallbackCandidate } from './fallback.js';
 import { readSlashAwareLine } from './slash-prompt.js';
 import { addToInputHistory } from './input-history.js';
+import { UsageCache } from '../usage/openrouter-usage.js';
+import { renderUsageLine, renderUsageReport } from '../usage/render-usage.js';
 import { assistantColor, errorColor, mutedColor, divider, box } from '../ui/theme.js';
 
 export interface ReplDeps {
@@ -41,6 +43,7 @@ const HELP_ENTRIES: [string, string][] = [
   ['/skill use <name>', 'load a saved preset as the system prompt'],
   ['/skill [list]', 'list saved presets'],
   ['/random', 'switch to a randomly chosen provider and model'],
+  ['/usage', 'show OpenRouter spend for today, this week, this month and all time'],
   ['/recall <query>', 'search past conversations under ~/.robin/chats/'],
   ['/clear', 'reset the conversation'],
   ['/exit', 'quit'],
@@ -104,13 +107,18 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   const skillStore = new SkillStore();
   const chatLog = new ChatLog();
   const askForApproval = createApprovalGate();
+  const usageCache = new UsageCache();
 
+  // Fetched before the banner so the figure is on screen from the first
+  // frame; null (no key, no network) simply omits the line.
+  const startupUsage = await usageCache.get();
   printBanner({
     providerName: provider.name,
     model,
     cwd: process.cwd(),
     sessionId: newSessionId(),
     toolsEnabled,
+    usageLine: startupUsage ? renderUsageLine(startupUsage) : undefined,
   });
   console.log(chalk.gray('Type your message, or / for commands.'));
 
@@ -118,7 +126,10 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
 
   while (true) {
     if (!isFirstTurn) {
-      console.log(divider());
+      // peek() only — the divider must never wait on the network. The value
+      // is refreshed in the background after each turn instead.
+      const usage = usageCache.peek();
+      console.log(usage ? `${divider()}\n${renderUsageLine(usage)}` : divider());
     }
     isFirstTurn = false;
 
@@ -162,6 +173,18 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       history = [];
       chatLog.startNewSession();
       printConnectionLine(provider.name, model);
+      continue;
+    }
+
+    if (cmd.type === 'usage') {
+      const usage = await usageCache.get();
+      console.log(
+        usage
+          ? renderUsageReport(usage)
+          : mutedColor(
+              'No OpenRouter usage available — run `robin login openrouter`, or check your connection.'
+            )
+      );
       continue;
     }
 
@@ -418,6 +441,11 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
         printConnectionLine(provider.name, model);
       }
       await chatLog.write(provider.name, model, history);
+      // Refresh in the background so the next divider has a fresh figure
+      // without the user ever waiting on it. Failures are already swallowed
+      // inside the cache; the catch is belt-and-braces against an unhandled
+      // rejection taking down the process.
+      void usageCache.get().catch(() => {});
     } else {
       // Drop the user message so a failed turn doesn't leave two consecutive
       // user messages in the history sent to the API next time.

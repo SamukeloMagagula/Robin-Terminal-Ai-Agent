@@ -12,6 +12,7 @@ export interface ParsedCommand {
     | 'copy'
     | 'skill'
     | 'random'
+    | 'usage'
     | 'recall'
     | 'message'
     | 'unknown';
@@ -35,6 +36,7 @@ const KNOWN_COMMANDS: Record<string, ParsedCommand['type']> = Object.assign(Obje
   '/copy': 'copy',
   '/skill': 'skill',
   '/random': 'random',
+  '/usage': 'usage',
   '/recall': 'recall',
 });
 
