@@ -1,9 +1,21 @@
 import type { Provider } from '../providers/types.js';
+import { isChatCapableModel } from './model-capability.js';
 
 export interface FallbackCandidate {
   provider: Provider;
   model: string;
 }
+
+/**
+ * Cap on how many models a single failed turn will retry against.
+ *
+ * Without one, a rate-limited provider makes the loop walk its entire
+ * catalogue — a user watched eight consecutive failures scroll past before a
+ * model answered. Each attempt is a real API round-trip, so the wait is worse
+ * than the failure. If a handful of models in a row all refuse, the problem is
+ * the account or the network, not the model.
+ */
+export const MAX_FALLBACK_CANDIDATES = 5;
 
 async function safeListModels(provider: Provider): Promise<string[]> {
   try {
@@ -36,7 +48,9 @@ export async function buildFallbackCandidates(
 
   const sameProviderModels = await safeListModels(currentProvider);
   for (const model of sameProviderModels) {
-    if (model !== currentModel) candidates.push({ provider: currentProvider, model });
+    if (model !== currentModel && isChatCapableModel(model)) {
+      candidates.push({ provider: currentProvider, model });
+    }
   }
 
   for (const provider of allProviders) {
@@ -44,9 +58,9 @@ export async function buildFallbackCandidates(
     if (!(await safeIsAuthenticated(provider))) continue;
     const models = await safeListModels(provider);
     for (const model of models) {
-      candidates.push({ provider, model });
+      if (isChatCapableModel(model)) candidates.push({ provider, model });
     }
   }
 
-  return candidates;
+  return candidates.slice(0, MAX_FALLBACK_CANDIDATES);
 }

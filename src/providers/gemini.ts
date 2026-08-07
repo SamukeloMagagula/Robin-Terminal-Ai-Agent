@@ -10,8 +10,20 @@ const API_KEY_PAGE = 'https://aistudio.google.com/apikey';
 
 interface GeminiPart {
   text?: string;
+  /**
+   * Set on reasoning parts. Gemini and Gemma thinking models return the
+   * model's private reasoning in the same `parts` array as the answer, marked
+   * with this flag — without checking it, the reasoning gets printed to the
+   * user as though it were the reply.
+   */
+  thought?: boolean;
   functionCall?: { name: string; args: Record<string, unknown> };
   functionResponse?: { name: string; response: Record<string, unknown> };
+}
+
+/** True for parts that carry the answer, as opposed to the model's private reasoning. */
+export function isAnswerPart(part: { text?: string; thought?: boolean }): boolean {
+  return typeof part.text === 'string' && part.text.length > 0 && part.thought !== true;
 }
 
 interface GeminiContent {
@@ -161,12 +173,17 @@ export class GeminiProvider implements Provider {
         if (!trimmed.startsWith('data:')) continue;
         const jsonText = trimmed.slice('data:'.length).trim();
         if (!jsonText) continue;
-        const parsed = JSON.parse(jsonText) as {
-          candidates?: { content?: { parts?: GeminiPart[] } }[];
-        };
+        // One malformed frame must not abort the turn and discard the text
+        // already streamed — skip it and keep reading.
+        let parsed: { candidates?: { content?: { parts?: GeminiPart[] } }[] };
+        try {
+          parsed = JSON.parse(jsonText);
+        } catch {
+          continue;
+        }
         const parts = parsed.candidates?.[0]?.content?.parts ?? [];
         for (const part of parts) {
-          if (part.text) yield { type: 'text', text: part.text };
+          if (isAnswerPart(part)) yield { type: 'text', text: part.text as string };
           if (part.functionCall) {
             yield {
               type: 'tool_call',
