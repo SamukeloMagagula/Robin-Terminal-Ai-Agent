@@ -4,6 +4,11 @@ import { openBrowser } from '../browser.js';
 import { toOpenAiWireMessage, toOpenAiToolsPayload, streamOpenAiCompatibleChat } from './openai-compatible.js';
 
 const CLIENT_ID = '01ab8ac9400c4e429b23';
+const COPILOT_API = 'https://api.githubcopilot.com';
+const EDITOR_VERSION = 'vscode/1.85.1';
+const INTEGRATION_ID = 'vscode-chat';
+/** Used only when the catalogue call fails, so the picker is never empty. */
+const FALLBACK_MODELS = ['gpt-4o', 'gpt-4o-mini'];
 
 interface DeviceCodeResponse {
   device_code: string;
@@ -113,20 +118,48 @@ export class CopilotProvider implements Provider {
     return this.copilotToken;
   }
 
+  /**
+   * The catalogue is served by the API, not hardcoded — it currently lists ~50
+   * models against the two this used to return.
+   *
+   * `capabilities.type` is the authoritative chat/embeddings discriminator;
+   * `model_picker_enabled` is false on every entry, including working models,
+   * so it cannot be used as a filter. If the call fails, fall back to a pair
+   * known to exist rather than leaving the user with no models at all.
+   */
   async listModels(): Promise<string[]> {
-    return ['gpt-4o', 'gpt-4o-mini'];
+    try {
+      const token = await this.getCopilotToken();
+      const res = await fetch(`${COPILOT_API}/models`, {
+        headers: {
+          authorization: `Bearer ${token}`,
+          'Editor-Version': EDITOR_VERSION,
+          'Copilot-Integration-Id': INTEGRATION_ID,
+        },
+      });
+      if (!res.ok) return FALLBACK_MODELS;
+      const body = (await res.json()) as {
+        data?: { id?: string; capabilities?: { type?: string } }[];
+      };
+      const ids = (body.data ?? [])
+        .filter((m) => m.capabilities?.type === 'chat' && typeof m.id === 'string')
+        .map((m) => m.id as string);
+      return ids.length > 0 ? ids : FALLBACK_MODELS;
+    } catch {
+      return FALLBACK_MODELS;
+    }
   }
 
   async *chat(model: string, messages: Message[], tools?: ToolDefinition[]): AsyncIterable<ChatEvent> {
     const token = await this.getCopilotToken();
-    const res = await fetch('https://api.githubcopilot.com/chat/completions', {
+    const res = await fetch(`${COPILOT_API}/chat/completions`, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${token}`,
         'content-type': 'application/json',
-        'Editor-Version': 'vscode/1.85.1',
+        'Editor-Version': EDITOR_VERSION,
         'Editor-Plugin-Version': 'copilot-chat/0.12.0',
-        'Copilot-Integration-Id': 'vscode-chat',
+        'Copilot-Integration-Id': INTEGRATION_ID,
       },
       body: JSON.stringify({
         model,

@@ -50,7 +50,7 @@ This opens Chrome to Google AI Studio's API key page. Create/copy a key there, t
 robin login openrouter
 ```
 
-This opens Chrome to OpenRouter's API keys page. Create/copy a key there, then paste it back into the terminal when prompted. `/model` on OpenRouter lists every model currently available on the platform — a large and constantly growing catalog spanning most major providers.
+This opens Chrome to OpenRouter's API keys page. Create/copy a key there, then paste it back into the terminal when prompted. `/model` on OpenRouter lists every model currently available on the platform — around 400 at the time of writing.
 
 **Ollama:**
 
@@ -60,6 +60,12 @@ ollama serve              # if it isn't already running as a background service
 ```
 
 No login needed — `robin` just checks `http://localhost:11434` is reachable. Older/smaller Ollama models that don't support tool-calling will still chat normally; they just won't be able to use tools.
+
+### Picking a model
+
+Catalogues are large — Copilot reports ~49 chat models, Gemini ~42, OpenRouter ~400 — so once a provider lists more than 20, `/model` switches from an arrow-key list to a type-to-filter search. Terms match in any order, so `claude son` finds `claude-sonnet-5`. Providers with a handful of models (a local Ollama, say) keep the plain list, which is faster than typing.
+
+Copilot's list comes from its own API rather than being hardcoded, filtered to models the API marks as chat-capable. If that call fails, `/model` falls back to `gpt-4o` and `gpt-4o-mini` so the picker is never empty.
 
 ### Chrome, or a link if there's no browser to open
 

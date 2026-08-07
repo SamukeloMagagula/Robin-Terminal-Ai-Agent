@@ -7,6 +7,7 @@ import { runLogin, runLogout } from './commands/auth-commands.js';
 import { runStatus } from './commands/status-command.js';
 import { runRepl } from './repl/run-repl.js';
 import { pickRandomProviderAndModel } from './random-pick.js';
+import { pickFromChoices, toChoices } from './ui/model-picker.js';
 
 const RANDOM = '__random__';
 
@@ -40,10 +41,7 @@ async function chooseProvider(): Promise<ProviderChoice> {
 
 async function pickModel(provider: Provider): Promise<string> {
   const models = await provider.listModels();
-  return select({
-    message: 'Select a model:',
-    choices: models.map((m) => ({ name: m, value: m })),
-  });
+  return pickFromChoices('Select a model:', toChoices(models));
 }
 
 const BACK = '__back__';
@@ -51,10 +49,9 @@ const BACK = '__back__';
 /** Same as pickModel, but with a "← Back" choice for returning to provider selection. */
 async function pickModelWithBack(provider: Provider): Promise<string> {
   const models = await provider.listModels();
-  return select({
-    message: 'Select a model:',
-    choices: [{ name: '← Back to provider list', value: BACK }, ...models.map((m) => ({ name: m, value: m }))],
-  });
+  return pickFromChoices('Select a model:', toChoices(models), [
+    { name: '← Back to provider list', value: BACK },
+  ]);
 }
 
 async function ensureAuthenticated(provider: Provider): Promise<void> {
