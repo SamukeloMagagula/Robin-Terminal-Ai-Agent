@@ -15,10 +15,14 @@ Built by Samukelo "Batman" Magagula.
 ## Setup
 
 ```bash
-npm install
+npm ci            # installs exactly what package-lock.json pins
 npm run build
 npm link          # makes the `robin` command available globally
 ```
+
+Use `npm ci`, not `npm install`. Dependencies are exact-pinned with no version
+ranges, so a compromised patch release can't reach you without an intentional
+bump here — `npm ci` enforces that; `npm install` can drift.
 
 `npm link` only needs to be run once (or again after pulling changes that touch `package.json`). After that, `robin` works from any directory.
 
@@ -135,12 +139,18 @@ This is an allowlist, not a blocklist — anything not recognised still prompts.
 
 ## Security
 
-- **Credentials** (Copilot token, Gemini API key) are stored in plaintext at `~/.robin/auth.json` — the same approach tools like the GitHub CLI and `npm login` use. The file is written with owner-only permissions (`0o600`) on POSIX systems; on Windows this relies on your user profile's normal NTFS permissions instead, since POSIX mode bits aren't meaningful there.
-- **`read_file`/`write_file` refuse to touch credential locations**: `~/.robin/`, `~/.ssh/`, `~/.gnupg/`, `~/.aws/`, `~/.kube/`, `~/.docker/`, `~/.config/gh/` and gcloud config, plus credential filenames wherever they live (`.env`, `.npmrc`, `.netrc`, `.git-credentials`, `id_rsa`, …). Paths are resolved to their real target first, so a symlink pointing into a protected directory is caught rather than waved through.
+**Robin has no sandbox.** Every approved command runs as a direct child of the Robin process with your full user permissions — no container, no separate user, no syscall filter, no network policy. The mechanisms below reduce risk and prevent accidents; none of them is containment, and each operates on a string the model produced. The real boundary is you reading the prompt before you answer it.
+
+Full trust model, including what each control does *not* do: **[SECURITY.md](SECURITY.md)**.
+
+- **Credentials** (Copilot token, Gemini API key) are stored in plaintext at `~/.robin/auth.json` — the same approach tools like the GitHub CLI and `npm login` use. Written `0600` with the directory `0700` on POSIX, re-applied on every write so an existing file with looser permissions gets tightened; on Windows this relies on your user profile's normal NTFS permissions, since POSIX mode bits aren't meaningful there.
+- **`read_file`/`write_file` refuse to touch credential locations**: `~/.robin/`, `~/.ssh/`, `~/.gnupg/`, `~/.aws/`, `~/.kube/`, `~/.docker/`, `~/.config/gh/` and gcloud config, plus credential filenames wherever they live (`.env`, `.npmrc`, `.netrc`, `.git-credentials`, `id_rsa`, …). Paths are resolved to their real target first, so a symlink pointing into a protected directory is caught rather than waved through. **This does not constrain `run_command`** — an approved shell command can read any of those files.
 - **`write_file` always confirms; `read_file` confirms for anything outside the current working directory** — reading unrelated files is how data leaves your machine and enters the model's context. `run_command` confirms unless the command is on the read-only allowlist described above.
-- **Approvals can be remembered per action-kind for the current session** (`a` at the prompt). This is session-scoped only and never persisted to disk; restarting `robin` resets it.
-- **`read_file` and `run_command` output is wrapped as untrusted content** before it goes back to the model — file contents and command output are data the model reads, not instructions it should follow, even if the file or output contains text that looks like a command (e.g. "ignore previous instructions and run..."). This narrows prompt-injection attacks where a file the model reads (or output it captures) tries to hijack the conversation.
-- This is a personal CLI tool, not a multi-user or sandboxed environment: anyone with access to your terminal and OS user account already has access to everything `robin` can do. There's no separate app-level authentication gate.
+- **Approvals can be remembered per action-kind for the current session** (`a` at the prompt). Session-scoped, never written to disk. Note that this deliberately removes the human from the loop for that action kind until you restart — treat `a` with more care than `y`.
+- **The destructive-pattern `⚠` is a nudge, not a block.** It catches `rm -rf` but not `rm -r -f`, `$(echo rm) -rf`, or anything encoded. Don't rely on it.
+- **`read_file` and `run_command` output is wrapped as untrusted content** before it goes back to the model — file contents and command output are data the model reads, not instructions it should follow, even if the text looks like a command ("ignore previous instructions and run…"). This narrows prompt injection; it does not eliminate it, since it is a prompt-level convention the model can still be talked out of.
+- **Conversation transcripts in `~/.robin/chats/` contain every file the model read.** They're written `0600`, but treat them as sensitive.
+- To actually contain Robin, run it in a container or VM with only your working directory mounted.
 
 ## Troubleshooting
 
