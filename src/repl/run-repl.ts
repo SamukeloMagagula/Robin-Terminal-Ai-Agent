@@ -1,5 +1,5 @@
-import * as readline from 'node:readline/promises';
 import chalk from 'chalk';
+import { confirm as confirmPrompt } from '@inquirer/prompts';
 import type { Provider, Message } from '../providers/types.js';
 import { listProviders } from '../providers/index.js';
 import { parseCommand } from './parse-command.js';
@@ -8,6 +8,7 @@ import { executeTool } from '../tools/execute.js';
 import { TOOL_DEFINITIONS } from '../tools/definitions.js';
 import { printBanner, printConnectionLine } from '../ui/banner.js';
 import { newSessionId } from '../session-id.js';
+import { environmentPrompt } from '../environment-prompt.js';
 import { ConversationStore } from '../conversation-store.js';
 import { SkillStore } from '../skill-store.js';
 import { copyToClipboard } from '../clipboard.js';
@@ -57,7 +58,6 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   const conversationStore = new ConversationStore();
   const skillStore = new SkillStore();
   const chatLog = new ChatLog();
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
   printBanner({
     providerName: provider.name,
@@ -136,6 +136,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
             ? mutedColor(systemPrompt)
             : mutedColor('No system prompt set. Usage: /system <text>  or  /system clear')
         );
+        console.log(mutedColor(`\nAlways sent:\n${environmentPrompt()}`));
       } else if (cmd.arg === 'clear') {
         systemPrompt = undefined;
         console.log(chalk.gray('System prompt cleared.'));
@@ -306,9 +307,16 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
 
     while (true) {
       try {
-        const messagesForTurn: Message[] = systemPrompt
-          ? [{ role: 'system', content: systemPrompt }, ...history]
-          : history;
+        // The environment preamble is always sent, and always first: /system
+        // controls the user's own instructions, not what Robin knows about
+        // the machine it is running on.
+        const systemContent = systemPrompt
+          ? `${environmentPrompt()}\n\n${systemPrompt}`
+          : environmentPrompt();
+        const messagesForTurn: Message[] = [
+          { role: 'system', content: systemContent },
+          ...history,
+        ];
         const newMessages = await runAgentTurn(
           activeProvider,
           activeModel,
@@ -319,12 +327,12 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
             executeTool,
             confirm: async (message) => {
               console.log(`\n${box(message.split('\n'))}`);
-              while (true) {
-                const answer = (await rl.question(chalk.yellow('(y/n) '))).trim();
-                if (/^y(es)?$/i.test(answer)) return true;
-                if (/^n(o)?$/i.test(answer)) return false;
-                console.log(mutedColor('Please answer y or n.'));
-              }
+              const approved = await confirmPrompt({ message: 'Run it?', default: false });
+              // Every prompt here closes its own readline.Interface on the
+              // shared stdin, which pauses the stream; see the note by the
+              // /model handler above.
+              process.stdin.resume();
+              return approved;
             },
           }
         );
@@ -361,6 +369,4 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       console.log(errorColor(`\n✖ ${lastError?.message}`));
     }
   }
-
-  rl.close();
 }
