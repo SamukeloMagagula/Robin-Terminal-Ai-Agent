@@ -89,7 +89,7 @@ Errors show the provider's own explanation, not just a status code — "400 (req
 If you're logged into OpenRouter, `robin` shows what you've spent — on the startup banner, on the divider between turns, and in full via `/usage`:
 
 ```
-💳 $0.0105 UTC day  ·  $0.0137 this key  ·  -$0.0137 account balance
+💳 $0.0420 UTC day  ·  $1.37 this key  ·  $8.63 account balance
 ```
 
 Every label is the figure OpenRouter actually reports, not a friendlier paraphrase:
