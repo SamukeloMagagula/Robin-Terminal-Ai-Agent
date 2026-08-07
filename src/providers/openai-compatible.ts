@@ -1,5 +1,6 @@
 import type { Message, ChatEvent, ToolCall, ToolDefinition } from './types.js';
-import { describeChatError } from './http-error.js';
+import { describeChatError, extractErrorCode } from './http-error.js';
+import { ChatRequestError } from './chat-error.js';
 
 export interface OpenAiWireMessage {
   role: Message['role'];
@@ -35,7 +36,14 @@ export function toOpenAiToolsPayload(tools?: ToolDefinition[]): Record<string, u
 /** Parses an OpenAI-compatible chat/completions SSE stream (`data: {...}` lines, terminated by `data: [DONE]`). */
 export async function* streamOpenAiCompatibleChat(response: Response, errorLabel: string): AsyncIterable<ChatEvent> {
   if (!response.ok || !response.body) {
-    throw new Error(describeChatError(errorLabel, response.status));
+    // Read the body before throwing: the provider's own message ("The
+    // requested model is not supported") is the only thing that distinguishes
+    // one 400 from another, and it used to be discarded.
+    const body = await response.text().catch(() => undefined);
+    throw new ChatRequestError(describeChatError(errorLabel, response.status, body), {
+      status: response.status,
+      code: extractErrorCode(body),
+    });
   }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();

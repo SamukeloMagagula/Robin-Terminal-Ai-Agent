@@ -17,6 +17,8 @@ import { searchChatLogs } from '../recall.js';
 import { buildFallbackCandidates, type FallbackCandidate } from './fallback.js';
 import { readSlashAwareLine } from './slash-prompt.js';
 import { addToInputHistory } from './input-history.js';
+import { isModelUnsupported } from '../providers/chat-error.js';
+import { UnsupportedModelStore } from '../providers/unsupported-models.js';
 import { UsageCache } from '../usage/openrouter-usage.js';
 import { renderUsageLine, renderUsageReport } from '../usage/render-usage.js';
 import { assistantColor, errorColor, mutedColor, divider, box } from '../ui/theme.js';
@@ -108,6 +110,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   const chatLog = new ChatLog();
   const askForApproval = createApprovalGate();
   const usageCache = new UsageCache();
+  const unsupportedStore = new UnsupportedModelStore();
 
   // Fetched before the banner so the figure is on screen from the first
   // frame; null (no key, no network) simply omits the line.
@@ -421,6 +424,12 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
         break;
       } catch (err) {
         lastError = err as Error;
+        // A model the provider says it does not support will never work, so
+        // remember it and drop every other candidate on that provider that is
+        // already known-bad, instead of retrying into the same wall.
+        if (isModelUnsupported(err)) {
+          await unsupportedStore.record(activeProvider.id, activeModel);
+        }
         if (!fallbackCandidates) {
           fallbackCandidates = await buildFallbackCandidates(activeProvider, activeModel, listProviders());
         }

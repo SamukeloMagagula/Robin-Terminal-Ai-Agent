@@ -1,5 +1,6 @@
 import type { Provider } from '../providers/types.js';
 import { isChatCapableModel } from './model-capability.js';
+import { UnsupportedModelStore } from '../providers/unsupported-models.js';
 
 export interface FallbackCandidate {
   provider: Provider;
@@ -42,12 +43,17 @@ async function safeIsAuthenticated(provider: Provider): Promise<boolean> {
 export async function buildFallbackCandidates(
   currentProvider: Provider,
   currentModel: string,
-  allProviders: Provider[]
+  allProviders: Provider[],
+  unsupportedStore: UnsupportedModelStore = new UnsupportedModelStore()
 ): Promise<FallbackCandidate[]> {
   const candidates: FallbackCandidate[] = [];
 
-  const sameProviderModels = await safeListModels(currentProvider);
-  for (const model of sameProviderModels) {
+  // Models a provider has already rejected as unsupported will reject again.
+  // Retrying into them is what turned one failure into five.
+  const usable = async (provider: Provider): Promise<string[]> =>
+    unsupportedStore.filter(provider.id, await safeListModels(provider));
+
+  for (const model of await usable(currentProvider)) {
     if (model !== currentModel && isChatCapableModel(model)) {
       candidates.push({ provider: currentProvider, model });
     }
@@ -56,8 +62,7 @@ export async function buildFallbackCandidates(
   for (const provider of allProviders) {
     if (provider.id === currentProvider.id) continue;
     if (!(await safeIsAuthenticated(provider))) continue;
-    const models = await safeListModels(provider);
-    for (const model of models) {
+    for (const model of await usable(provider)) {
       if (isChatCapableModel(model)) candidates.push({ provider, model });
     }
   }

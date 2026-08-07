@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto';
 import type { Provider, Message, ChatEvent, ToolDefinition } from './types.js';
 import { AuthStore } from '../auth-store.js';
 import { announceAndOpen } from '../browser.js';
-import { describeChatError } from './http-error.js';
+import { describeChatError, extractErrorCode } from './http-error.js';
+import { ChatRequestError } from './chat-error.js';
 
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 const API_KEY_PAGE = 'https://aistudio.google.com/apikey';
@@ -156,7 +157,11 @@ export class GeminiProvider implements Provider {
       body: JSON.stringify(body),
     });
     if (!res.ok || !res.body) {
-      throw new Error(describeChatError('Gemini', res.status));
+      const body = await res.text().catch(() => undefined);
+      throw new ChatRequestError(describeChatError('Gemini', res.status, body), {
+        status: res.status,
+        code: extractErrorCode(body),
+      });
     }
 
     const reader = res.body.getReader();

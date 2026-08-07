@@ -1,6 +1,7 @@
 import type { Provider, Message, ChatEvent, ToolDefinition } from './types.js';
 import { AuthStore } from '../auth-store.js';
 import { openBrowser } from '../browser.js';
+import { UnsupportedModelStore } from './unsupported-models.js';
 import { toOpenAiWireMessage, toOpenAiToolsPayload, streamOpenAiCompatibleChat } from './openai-compatible.js';
 
 const CLIENT_ID = '01ab8ac9400c4e429b23';
@@ -40,7 +41,10 @@ export class CopilotProvider implements Provider {
   private copilotToken: string | undefined;
   private copilotTokenExpiresAt = 0;
 
-  constructor(private readonly authStore: AuthStore = new AuthStore()) {}
+  constructor(
+    private readonly authStore: AuthStore = new AuthStore(),
+    private readonly unsupportedStore: UnsupportedModelStore = new UnsupportedModelStore()
+  ) {}
 
   async isAuthenticated(): Promise<boolean> {
     const stored = await this.authStore.get(this.id);
@@ -144,7 +148,11 @@ export class CopilotProvider implements Provider {
       const ids = (body.data ?? [])
         .filter((m) => m.capabilities?.type === 'chat' && typeof m.id === 'string')
         .map((m) => m.id as string);
-      return ids.length > 0 ? ids : FALLBACK_MODELS;
+      if (ids.length === 0) return FALLBACK_MODELS;
+      // The catalogue advertises models this account cannot call and nothing
+      // in it says which, so drop the ones already proven unsupported.
+      const usable = await this.unsupportedStore.filter(this.id, ids);
+      return usable.length > 0 ? usable : FALLBACK_MODELS;
     } catch {
       return FALLBACK_MODELS;
     }
