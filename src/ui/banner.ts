@@ -1,7 +1,7 @@
 import os from 'node:os';
 import { createRequire } from 'node:module';
 import chalk from 'chalk';
-import { GRADIENT, mutedColor } from './theme.js';
+import { GRADIENT, mutedColor, ruleWidth } from './theme.js';
 import { buildCowl, COWL_WIDTH } from './cowl.js';
 import { buildWordmark, buildPlainWordmark, WORDMARK_WIDTH } from './wordmark.js';
 import { renderPanel } from './panel.js';
@@ -135,10 +135,11 @@ export function printBanner(info: BannerInfo): void {
   console.log(buildBanner(info).join('\n'));
 }
 
-const SUBTITLE_WIDTH = 44;
-
 export function printConnectionLine(providerName: string, model: string): void {
   const label = `${providerName} · ${model}`;
-  const fillLength = Math.max(SUBTITLE_WIDTH - label.length - 4, 0);
+  // Tracks the terminal like the banner and the divider do. A model id can be
+  // long (`anthropic/claude-3.5-sonnet`), so the fill floors at zero rather
+  // than going negative.
+  const fillLength = Math.max(ruleWidth() - label.length - 6, 0);
   console.log(`   ${mutedColor('──')} ${label} ${mutedColor('─'.repeat(fillLength))}`);
 }

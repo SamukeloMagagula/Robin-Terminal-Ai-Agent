@@ -115,6 +115,8 @@ robin chat random        # let Robin roll a provider and model for you
 robin login copilot      # log in to Copilot ahead of time
 robin logout copilot     # clear stored Copilot credentials
 robin status              # show login/reachability status for every provider
+robin models              # list models recorded as unsupported
+robin models forget gemini  # clear those records so they're offered again
 ```
 
 In a chat session, typing `/` shows a live-filtered popup of matching commands as you keep typing — arrow keys to move the highlight, **Tab** to fill in the highlighted command without submitting (so you can still type an argument), **Enter** to submit the highlighted command (or your typed line, if the popup isn't open), **Esc** to dismiss the popup and keep typing free text.

@@ -1,0 +1,17 @@
+{
+  // Tests are excluded from the build config (rootDir: src, and they must not
+  // be emitted into dist), so without this they were never typechecked at all —
+  // a test could call an API with the wrong types and only fail at runtime.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    // Vitest resolves extensionless relative imports; NodeNext does not, and
+    // would report 84 TS2835s for imports that work perfectly at runtime.
+    // "bundler" models vitest's actual resolution.
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": ["node"]
+  },
+  "include": ["src", "tests"]
+}

@@ -5,6 +5,7 @@ import type { Provider } from './providers/types.js';
 import { listProviders, getProvider } from './providers/index.js';
 import { runLogin, runLogout } from './commands/auth-commands.js';
 import { runStatus } from './commands/status-command.js';
+import { runModelsList, runModelsForget } from './commands/models-command.js';
 import { runRepl } from './repl/run-repl.js';
 import { pickRandomProviderAndModel } from './random-pick.js';
 import { pickFromChoices, toChoices } from './ui/model-picker.js';
@@ -119,6 +120,24 @@ program
   .description('Show login/reachability status for every provider')
   .action(async () => {
     await runStatus(listProviders());
+  });
+
+const models = program
+  .command('models')
+  .description('Inspect models Robin has recorded as unsupported');
+
+models
+  .command('list', { isDefault: true })
+  .description('List models recorded as unsupported, per provider')
+  .action(async () => {
+    await runModelsList(listProviders());
+  });
+
+models
+  .command('forget <provider>')
+  .description('Forget a provider’s unsupported-model records so they are offered again')
+  .action(async (providerId: string) => {
+    await runModelsForget(getProvider(providerId));
   });
 
 program

@@ -30,8 +30,9 @@ const UNSUPPORTED_CODES = new Set([
 /**
  * Phrases that describe a permanent property of the model rather than a
  * temporary condition. Message matching is a heuristic and deliberately narrow:
- * being wrong here costs one fallback option, never access, because the model
- * stays selectable by hand and `robin models forget` clears the record.
+ * being wrong here costs one fallback option, never access: the model stays
+ * selectable by hand, `robin models list` shows what has been recorded, and
+ * `robin models forget <provider>` clears it.
  */
 const UNSUPPORTED_PHRASES = [
   /\bnot supported\b/i,
