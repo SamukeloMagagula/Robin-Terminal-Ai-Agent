@@ -16,6 +16,7 @@ import { ChatLog } from '../chat-log.js';
 import { searchChatLogs } from '../recall.js';
 import { buildFallbackCandidates, type FallbackCandidate } from './fallback.js';
 import { readSlashAwareLine } from './slash-prompt.js';
+import { addToInputHistory } from './input-history.js';
 import { assistantColor, errorColor, mutedColor, divider, box } from '../ui/theme.js';
 
 export interface ReplDeps {
@@ -94,6 +95,9 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   let provider = deps.provider;
   let model = deps.model;
   let history: Message[] = [];
+  // Prompt lines, for up/down recall. Session-only; deliberately never
+  // persisted, since prompts carry the same sensitive material as transcripts.
+  let inputHistory: string[] = [];
   let systemPrompt: string | undefined;
   let toolsEnabled = true;
   const conversationStore = new ConversationStore();
@@ -118,7 +122,10 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     }
     isFirstTurn = false;
 
-    const line = await readSlashAwareLine();
+    // `inputHistory` is what the user typed at the prompt; `history` above is
+    // the conversation sent to the model. Distinct names on purpose.
+    const line = await readSlashAwareLine(inputHistory);
+    inputHistory = addToInputHistory(inputHistory, line);
     const cmd = parseCommand(line);
 
     if (cmd.type === 'exit') break;

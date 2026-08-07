@@ -85,6 +85,8 @@ robin status              # show login/reachability status for every provider
 
 In a chat session, typing `/` shows a live-filtered popup of matching commands as you keep typing — arrow keys to move the highlight, **Tab** to fill in the highlighted command without submitting (so you can still type an argument), **Enter** to submit the highlighted command (or your typed line, if the popup isn't open), **Esc** to dismiss the popup and keep typing free text.
 
+**↑ / ↓ recall what you've already sent.** With the popup closed, ↑ walks back through the lines you've submitted this session and ↓ walks forward again. Come all the way back down and you get your half-typed line returned to you, exactly as you left it. Consecutive duplicates collapse, and history is session-only — it's held in memory and never written to disk, since what you type carries the same sensitive material as the transcripts.
+
 - `/help` (or just `/`) — list commands
 - `/model` — pick a different model from the ones available on the current provider
 - `/provider` — switch provider (e.g. Copilot ↔ Gemini ↔ OpenRouter ↔ Ollama), or pick `🎲 Random`

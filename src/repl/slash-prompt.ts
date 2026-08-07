@@ -31,18 +31,57 @@ export function filterSlashCommands(buffer: string, commands: SlashCommandEntry[
 
 const NAME_WIDTH = 12;
 
-export const promptWithSlashMenu = createPrompt<string, Record<string, never>>((_config, done) => {
+export interface SlashPromptConfig {
+  /** Lines submitted earlier this session, oldest first. Walked with up/down. */
+  history?: string[];
+}
+
+export const promptWithSlashMenu = createPrompt<string, SlashPromptConfig>((config, done) => {
+  const history = config.history ?? [];
   const [value, setValue] = useState('');
   const [matches, setMatches] = useState<SlashCommandEntry[]>([]);
   const [selected, setSelected] = useState(0);
+  // `history.length` means "the present" — the line being typed, one past the
+  // newest entry. Anything lower indexes into history.
+  const [cursor, setCursor] = useState(history.length);
+  const [draft, setDraft] = useState('');
 
   useKeypress((key, rl) => {
+    // Replaces the buffer without re-running the slash filter. Recalling a
+    // command like "/random" must NOT reopen the popup: if it did, the next
+    // `up` would move the popup selection instead of continuing back through
+    // history, and recall would jam after a single step.
+    const replaceBuffer = (text: string) => {
+      rl.clearLine(0);
+      rl.write(text);
+      setValue(rl.line);
+      setMatches([]);
+      setSelected(0);
+    };
+
     if (key.name === 'up' && matches.length > 0) {
       setSelected((selected - 1 + matches.length) % matches.length);
       return;
     }
     if (key.name === 'down' && matches.length > 0) {
       setSelected((selected + 1) % matches.length);
+      return;
+    }
+    if (key.name === 'up') {
+      if (history.length === 0) return;
+      // Stash what's being typed the moment we leave the present, so `down`
+      // can hand it back.
+      if (cursor === history.length) setDraft(rl.line);
+      const next = Math.max(cursor - 1, 0);
+      setCursor(next);
+      replaceBuffer(history[next]);
+      return;
+    }
+    if (key.name === 'down') {
+      if (cursor >= history.length) return;
+      const next = cursor + 1;
+      setCursor(next);
+      replaceBuffer(next === history.length ? draft : history[next]);
       return;
     }
     if (key.name === 'tab' && matches.length > 0) {
@@ -75,6 +114,9 @@ export const promptWithSlashMenu = createPrompt<string, Record<string, never>>((
       done(matches.length > 0 ? matches[selected].name : value);
       return;
     }
+    // Keep the stash in sync while the cursor is at the present, so typing a
+    // draft then walking up and back down restores what was actually typed.
+    if (cursor === history.length) setDraft(rl.line);
     setValue(rl.line);
     setMatches(filterSlashCommands(rl.line));
     setSelected(0);
@@ -94,7 +136,7 @@ export const promptWithSlashMenu = createPrompt<string, Record<string, never>>((
   return [top, bottom];
 });
 
-/** Same contract as readline's rl.question(): resolves with the submitted line. Shows a live-filtered slash-command popup while the buffer starts with "/". */
-export function readSlashAwareLine(): Promise<string> {
-  return promptWithSlashMenu({});
+/** Same contract as readline's rl.question(): resolves with the submitted line. Shows a live-filtered slash-command popup while the buffer starts with "/", and walks `history` with the up/down arrows. */
+export function readSlashAwareLine(history: string[] = []): Promise<string> {
+  return promptWithSlashMenu({ history });
 }

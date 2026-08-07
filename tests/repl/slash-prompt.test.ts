@@ -54,6 +54,144 @@ describe('promptWithSlashMenu', () => {
   });
 });
 
+const UP = '[A';
+const DOWN = '[B';
+
+describe('promptWithSlashMenu — up/down history', () => {
+  /** Feeds an escape sequence as one unit; typing it char-by-char is not a keypress. */
+  async function press(term: ReturnType<typeof fakeTerminal>, seq: string) {
+    term.input.write(seq);
+    await term.settle();
+  }
+
+  it('recalls the newest entry on up', async () => {
+    const term = fakeTerminal();
+    const answer = promptWithSlashMenu(
+      { history: ['first', 'second'] },
+      { input: term.input, output: term.output }
+    );
+    await term.settle();
+    await press(term, UP);
+    await term.type('\r');
+    expect(await answer).toBe('second');
+  });
+
+  it('walks further back on repeated up', async () => {
+    const term = fakeTerminal();
+    const answer = promptWithSlashMenu(
+      { history: ['first', 'second', 'third'] },
+      { input: term.input, output: term.output }
+    );
+    await term.settle();
+    await press(term, UP);
+    await press(term, UP);
+    await term.type('\r');
+    expect(await answer).toBe('second');
+  });
+
+  it('stops at the oldest entry rather than wrapping around', async () => {
+    const term = fakeTerminal();
+    const answer = promptWithSlashMenu(
+      { history: ['first', 'second'] },
+      { input: term.input, output: term.output }
+    );
+    await term.settle();
+    for (let i = 0; i < 5; i++) await press(term, UP);
+    await term.type('\r');
+    expect(await answer).toBe('first');
+  });
+
+  it('comes back toward the present on down', async () => {
+    const term = fakeTerminal();
+    const answer = promptWithSlashMenu(
+      { history: ['first', 'second', 'third'] },
+      { input: term.input, output: term.output }
+    );
+    await term.settle();
+    await press(term, UP);
+    await press(term, UP);
+    await press(term, DOWN);
+    await term.type('\r');
+    expect(await answer).toBe('third');
+  });
+
+  // The "present" half of the request: an unsent draft must survive the trip.
+  it('restores an unsent draft when coming back down to the present', async () => {
+    const term = fakeTerminal();
+    const answer = promptWithSlashMenu(
+      { history: ['old one'] },
+      { input: term.input, output: term.output }
+    );
+    await term.settle();
+    await term.type('my draft');
+    await press(term, UP);
+    await press(term, DOWN);
+    await term.type('\r');
+    expect(await answer).toBe('my draft');
+  });
+
+  it('does nothing on up when there is no history', async () => {
+    const term = fakeTerminal();
+    const answer = promptWithSlashMenu({ history: [] }, { input: term.input, output: term.output });
+    await term.settle();
+    await term.type('typed');
+    await press(term, UP);
+    await term.type('\r');
+    expect(await answer).toBe('typed');
+  });
+
+  it('does nothing on down while already at the present', async () => {
+    const term = fakeTerminal();
+    const answer = promptWithSlashMenu(
+      { history: ['old one'] },
+      { input: term.input, output: term.output }
+    );
+    await term.settle();
+    await term.type('typed');
+    await press(term, DOWN);
+    await term.type('\r');
+    expect(await answer).toBe('typed');
+  });
+
+  // Recalling a slash command must not reopen the popup, or the next `up`
+  // would move the popup selection and history navigation would jam.
+  it('does not reopen the popup when recalling a slash command', async () => {
+    const term = fakeTerminal();
+    const answer = promptWithSlashMenu(
+      { history: ['/model', '/random'] },
+      { input: term.input, output: term.output }
+    );
+    await term.settle();
+    await press(term, UP); // -> /random
+    await press(term, UP); // -> /model, not a popup move
+    await term.type('\r');
+    expect(await answer).toBe('/model');
+  });
+
+  it('still drives the popup with up/down while it is open', async () => {
+    const term = fakeTerminal();
+    const answer = promptWithSlashMenu(
+      { history: ['unused entry'] },
+      { input: term.input, output: term.output }
+    );
+    await term.settle();
+    await term.type('/s'); // popup opens: /system, /save, /skill
+    await press(term, DOWN); // -> /save
+    await term.type('\r');
+    expect(await answer).toBe('/save');
+  });
+
+  it('defaults to no history when the config omits it', async () => {
+    const term = fakeTerminal();
+    const answer = promptWithSlashMenu({}, { input: term.input, output: term.output });
+    await term.settle();
+    await term.type('plain');
+    await press(term, UP);
+    await term.type('\r');
+    expect(await answer).toBe('plain');
+  });
+});
+
 describe('filterSlashCommands', () => {
   it('returns nothing when the buffer does not start with "/"', () => {
     expect(filterSlashCommands('hello')).toEqual([]);
