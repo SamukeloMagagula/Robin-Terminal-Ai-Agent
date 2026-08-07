@@ -4,6 +4,9 @@ import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ToolCall } from '../providers/types.js';
 import { checkPath, defaultSensitiveDirs } from './sensitive-paths.js';
+import { isReadOnlyCommand } from './command-safety.js';
+
+export { isReadOnlyCommand } from './command-safety.js';
 
 export {
   defaultSensitiveDirs,
@@ -51,7 +54,16 @@ export function wrapUntrusted(source: string, content: string): string {
   return `[UNTRUSTED CONTENT — ${source}]\n${UNTRUSTED_NOTICE}\n---\n${content}\n---\n[END UNTRUSTED CONTENT]`;
 }
 
-export type ConfirmFn = (message: string) => Promise<boolean>;
+/**
+ * What is being asked for, not just the words to print. The caller needs the
+ * kind to offer "don't ask again for this kind of action this session".
+ */
+export interface ConfirmRequest {
+  kind: 'run_command' | 'write_file' | 'read_file';
+  message: string;
+}
+
+export type ConfirmFn = (request: ConfirmRequest) => Promise<boolean>;
 
 /** Tool arguments arrive as model-generated JSON, so nothing about their shape is guaranteed. */
 function requireString(value: unknown, field: string): string {
@@ -64,6 +76,8 @@ function requireString(value: unknown, field: string): string {
 export interface ExecuteOptions {
   /** Overridable so tests can assert the timeout path without waiting it out. */
   commandTimeoutMs?: number;
+  /** Called instead of confirming, when a command is recognised as read-only. */
+  onAutoApproved?: (command: string) => void;
 }
 
 export async function executeTool(
@@ -96,7 +110,8 @@ export async function executeTool(
         return await runCommandTool(
           requireString(args.command, 'command'),
           confirm,
-          options.commandTimeoutMs ?? COMMAND_TIMEOUT_MS
+          options.commandTimeoutMs ?? COMMAND_TIMEOUT_MS,
+          options.onAutoApproved
         );
       default:
         return `Error: unknown tool "${toolCall.name}".`;
@@ -120,7 +135,10 @@ async function readFileTool(
   // stay friction-free. Anything outside it is a potential exfiltration of
   // unrelated files into the model's context, so the user gets a say.
   if (!isInsideCwd(verdict.realPath)) {
-    const approved = await confirm(`Read ${verdict.realPath}?\n(outside the current working directory)`);
+    const approved = await confirm({
+      kind: 'read_file',
+      message: `Read ${verdict.realPath}?\n(outside the current working directory)`,
+    });
     if (!approved) {
       return `Reading ${filePath} was declined by the user.`;
     }
@@ -156,7 +174,10 @@ async function writeFileTool(
   }
   const preview =
     content.length > MAX_PREVIEW_LENGTH ? `${content.slice(0, MAX_PREVIEW_LENGTH)}...` : content;
-  const approved = await confirm(`Write to ${verdict.realPath}?\n---\n${preview}\n---`);
+  const approved = await confirm({
+    kind: 'write_file',
+    message: `Write to ${verdict.realPath}?\n---\n${preview}\n---`,
+  });
   if (!approved) {
     return `Write to ${filePath} was declined by the user.`;
   }
@@ -172,14 +193,22 @@ async function writeFileTool(
 async function runCommandTool(
   command: string,
   confirm: ConfirmFn,
-  timeoutMs: number
+  timeoutMs: number,
+  onAutoApproved?: (command: string) => void
 ): Promise<string> {
-  const warning = isDangerousCommand(command)
-    ? '⚠ This command looks potentially destructive — review it carefully.\n'
-    : '';
-  const approved = await confirm(`${warning}Run "${command}"?`);
-  if (!approved) {
-    return `Command "${command}" was declined by the user.`;
+  // Listing and inspecting cost the user nothing to allow, and asking about
+  // every `ls` trains them to approve without reading. Anything the allowlist
+  // does not positively recognise still goes to a prompt.
+  if (isReadOnlyCommand(command)) {
+    onAutoApproved?.(command);
+  } else {
+    const warning = isDangerousCommand(command)
+      ? '⚠ This command looks potentially destructive — review it carefully.\n'
+      : '';
+    const approved = await confirm({ kind: 'run_command', message: `${warning}Run "${command}"?` });
+    if (!approved) {
+      return `Command "${command}" was declined by the user.`;
+    }
   }
   try {
     // Without a timeout a command that waits on stdin (which it never gets —

@@ -168,8 +168,8 @@ describe('executeTool', () => {
 
   it('run_command includes a warning for destructive commands in the confirmation prompt', async () => {
     const messages: string[] = [];
-    await executeTool(call('run_command', { command: 'sudo rm -rf /tmp/x' }), async (message) => {
-      messages.push(message);
+    await executeTool(call('run_command', { command: 'sudo rm -rf /tmp/x' }), async (request) => {
+      messages.push(request.message);
       return false;
     });
     expect(messages[0]).toContain('potentially destructive');
@@ -177,8 +177,9 @@ describe('executeTool', () => {
 
   it('run_command does not include a warning for ordinary commands', async () => {
     const messages: string[] = [];
-    await executeTool(call('run_command', { command: 'echo hi' }), async (message) => {
-      messages.push(message);
+    // Not read-only, so it still prompts — but carries no destructive warning.
+    await executeTool(call('run_command', { command: 'npm install lodash' }), async (request) => {
+      messages.push(request.message);
       return false;
     });
     expect(messages[0]).not.toContain('potentially destructive');

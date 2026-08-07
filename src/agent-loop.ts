@@ -1,6 +1,7 @@
 import type { Provider, Message, ToolCall, ToolDefinition } from './providers/types.js';
+import type { ConfirmFn } from './tools/execute.js';
 
-export type ConfirmFn = (message: string) => Promise<boolean>;
+export type { ConfirmFn };
 
 export interface AgentDeps {
   confirm: ConfirmFn;

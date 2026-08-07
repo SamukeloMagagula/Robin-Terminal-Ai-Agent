@@ -1,10 +1,10 @@
 import chalk from 'chalk';
-import { confirm as confirmPrompt } from '@inquirer/prompts';
+import { expand } from '@inquirer/prompts';
 import type { Provider, Message } from '../providers/types.js';
 import { listProviders } from '../providers/index.js';
 import { parseCommand } from './parse-command.js';
 import { runAgentTurn } from '../agent-loop.js';
-import { executeTool, wrapUntrusted } from '../tools/execute.js';
+import { executeTool, wrapUntrusted, type ConfirmRequest } from '../tools/execute.js';
 import { TOOL_DEFINITIONS } from '../tools/definitions.js';
 import { printBanner, printConnectionLine } from '../ui/banner.js';
 import { newSessionId } from '../session-id.js';
@@ -43,6 +43,45 @@ const HELP_ENTRIES: [string, string][] = [
   ['/exit', 'quit'],
 ];
 
+const APPROVAL_WORDING: Record<ConfirmRequest['kind'], { question: string; scope: string }> = {
+  run_command: { question: 'Run it?', scope: 'commands' },
+  write_file: { question: 'Write it?', scope: 'file writes' },
+  read_file: { question: 'Read it?', scope: 'reads outside this directory' },
+};
+
+/**
+ * Approval gate for one session. Remembering a decision per *kind* is what
+ * makes this bearable: a model exploring a project issues a stream of
+ * near-identical requests, and being asked about each one individually trains
+ * the user to approve without reading — the opposite of what the gate is for.
+ */
+function createApprovalGate(): (request: ConfirmRequest) => Promise<boolean> {
+  const alwaysAllow = new Set<ConfirmRequest['kind']>();
+
+  return async (request: ConfirmRequest): Promise<boolean> => {
+    if (alwaysAllow.has(request.kind)) return true;
+
+    const { question, scope } = APPROVAL_WORDING[request.kind];
+    console.log(`\n${box(request.message.split('\n'))}`);
+    const answer = await expand<'yes' | 'no' | 'always'>({
+      message: question,
+      default: 'n',
+      choices: [
+        { key: 'y', name: 'yes, this once', value: 'yes' },
+        { key: 'n', name: 'no', value: 'no' },
+        { key: 'a', name: `yes, and stop asking about ${scope} this session`, value: 'always' },
+      ],
+    });
+
+    if (answer === 'always') {
+      alwaysAllow.add(request.kind);
+      console.log(mutedColor(`Will not ask about ${scope} again until you restart Robin.`));
+      return true;
+    }
+    return answer === 'yes';
+  };
+}
+
 function printHelp(): void {
   for (const [name, description] of HELP_ENTRIES) {
     console.log(`  ${assistantColor(name.padEnd(20))}${mutedColor(description)}`);
@@ -58,6 +97,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   const conversationStore = new ConversationStore();
   const skillStore = new SkillStore();
   const chatLog = new ChatLog();
+  const askForApproval = createApprovalGate();
 
   printBanner({
     providerName: provider.name,
@@ -318,11 +358,13 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
           toolsEnabled ? TOOL_DEFINITIONS : [],
           {
             onText: (text) => process.stdout.write(text),
-            executeTool,
-            confirm: async (message) => {
-              console.log(`\n${box(message.split('\n'))}`);
-              return confirmPrompt({ message: 'Run it?', default: false });
-            },
+            executeTool: (toolCall, confirm) =>
+              executeTool(toolCall, confirm, {
+                // Read-only commands run unannounced otherwise; showing them
+                // keeps the user aware of what Robin actually did.
+                onAutoApproved: (command) => console.log(mutedColor(`\n  $ ${command}`)),
+              }),
+            confirm: askForApproval,
           }
         );
         history.push(...newMessages);

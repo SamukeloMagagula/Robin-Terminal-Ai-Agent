@@ -107,29 +107,38 @@ Use `/recall <query>` to search across all past markdown transcripts from inside
 
 Every chat session gives the model access to three tools:
 
-- `read_file` — reads a file's contents (no confirmation needed)
-- `write_file` — writes/overwrites a file (asks for y/n confirmation first)
-- `run_command` — runs a shell command in the current directory (asks for y/n confirmation first)
+- `read_file` — reads a file's contents (confirms only for paths outside the current directory)
+- `write_file` — writes/overwrites a file (always confirms)
+- `run_command` — runs a shell command in the current directory (confirms unless the command is recognised as read-only)
 
-When the model wants to write a file or run a command, you'll see a prompt like:
+When the model wants to write a file or run a command that needs approval, you'll see a prompt like:
 
 ```
-Write to hello.txt?
----
-hi from the agent
----
- (y/n)
+╭──────────────────────────╮
+│ Run "npm install lodash"? │
+╰──────────────────────────╯
+? Run it? (yna)
+  y) yes, this once
+  n) no
+  a) yes, and stop asking about commands this session
 ```
 
-Answer `y`/`yes` to proceed or anything else to decline. Declined actions are reported back to the model so it can adjust its next step instead of silently failing.
+`a` remembers your answer for that *kind* of action — commands, file writes, or outside-directory reads — until you restart `robin`. Declined actions are reported back to the model so it can adjust instead of silently failing.
 
-`run_command` executes with the same permissions as the terminal you're running `robin` in — there's no sandboxing, so only approve commands you'd be comfortable running yourself. Commands matching common destructive patterns (`rm -rf`, `sudo`, `curl … | bash`, `mkfs`, `shutdown`, etc.) get an extra `⚠` warning above the confirmation prompt — it's a heuristic nudge to look twice, not a block, since `run_command` can still do anything a shell command can do once approved.
+### Read-only commands run without asking
+
+A model exploring a project issues a stream of near-identical `ls`/`dir`/`git status` calls, and being asked about each one trains you to approve without reading. So commands positively recognised as read-only run automatically and are echoed as `$ ls -la` so you can still see what happened.
+
+This is an allowlist, not a blocklist — anything not recognised still prompts. A command is auto-approved only if its head token is a known reader (`ls`, `dir`, `cat`, `grep`, `find`, `git status`/`log`/`diff`, `npm ls`, …) **and** it contains no shell control characters at all: `;`, `&`, `|`, `>`, `<`, backticks, `$(…)`, `${…}`, or newlines. So `ls` runs; `ls; rm -rf ~` does not. Flags that turn a reader into a writer or executor (`find -exec`, `find -delete`, `sort -o`, `git diff --output`, `rg --pre`) also force a prompt, and `env` is deliberately excluded because `env FOO=1 <anything>` runs a command.
+
+`run_command` executes with the same permissions as the terminal you're running `robin` in — there's no sandboxing, so only approve commands you'd be comfortable running yourself. Commands matching common destructive patterns (`rm -rf`, `sudo`, `curl … | bash`, `mkfs`, `shutdown`, etc.) get an extra `⚠` warning above the confirmation prompt — a heuristic nudge to look twice, not a block.
 
 ## Security
 
 - **Credentials** (Copilot token, Gemini API key) are stored in plaintext at `~/.robin/auth.json` — the same approach tools like the GitHub CLI and `npm login` use. The file is written with owner-only permissions (`0o600`) on POSIX systems; on Windows this relies on your user profile's normal NTFS permissions instead, since POSIX mode bits aren't meaningful there.
-- **`read_file`/`write_file` refuse to touch two directories**: `~/.robin/` (robin's own credentials) and `~/.ssh/` (your SSH keys) — regardless of how the path is spelled, including `..` traversal. This stops a model from accidentally (or if convinced by malicious content it read) exfiltrating or overwriting those files through the tools robin gives it.
-- **`write_file` and `run_command` always require an explicit y/n confirmation** before touching disk or running anything; `run_command` additionally flags commands matching destructive patterns (see above). `read_file` has no confirmation by design (matches the tool's low-risk, read-only nature) beyond the protected-directory guard above.
+- **`read_file`/`write_file` refuse to touch credential locations**: `~/.robin/`, `~/.ssh/`, `~/.gnupg/`, `~/.aws/`, `~/.kube/`, `~/.docker/`, `~/.config/gh/` and gcloud config, plus credential filenames wherever they live (`.env`, `.npmrc`, `.netrc`, `.git-credentials`, `id_rsa`, …). Paths are resolved to their real target first, so a symlink pointing into a protected directory is caught rather than waved through.
+- **`write_file` always confirms; `read_file` confirms for anything outside the current working directory** — reading unrelated files is how data leaves your machine and enters the model's context. `run_command` confirms unless the command is on the read-only allowlist described above.
+- **Approvals can be remembered per action-kind for the current session** (`a` at the prompt). This is session-scoped only and never persisted to disk; restarting `robin` resets it.
 - **`read_file` and `run_command` output is wrapped as untrusted content** before it goes back to the model — file contents and command output are data the model reads, not instructions it should follow, even if the file or output contains text that looks like a command (e.g. "ignore previous instructions and run..."). This narrows prompt-injection attacks where a file the model reads (or output it captures) tries to hijack the conversation.
 - This is a personal CLI tool, not a multi-user or sandboxed environment: anyone with access to your terminal and OS user account already has access to everything `robin` can do. There's no separate app-level authentication gate.
 

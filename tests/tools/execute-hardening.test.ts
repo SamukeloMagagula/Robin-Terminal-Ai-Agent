@@ -90,6 +90,46 @@ describe('read_file confirmation', () => {
   });
 });
 
+describe('read-only auto-approval', () => {
+  it('runs a read-only command without confirming, and reports it', async () => {
+    let asked = false;
+    const announced: string[] = [];
+    const result = await executeTool(
+      call('run_command', { command: 'node --version' }),
+      async () => {
+        asked = true;
+        return true;
+      },
+      { onAutoApproved: (c) => announced.push(c) }
+    );
+    expect(asked).toBe(false);
+    expect(announced).toEqual(['node --version']);
+    expect(result).toContain('Exit code: 0');
+  }, 15_000);
+
+  it('still confirms a command that is not read-only', async () => {
+    let asked = false;
+    const result = await executeTool(
+      call('run_command', { command: 'node -e "require(\'fs\').writeFileSync(\'x\',\'y\')"' }),
+      async () => {
+        asked = true;
+        return false;
+      }
+    );
+    expect(asked).toBe(true);
+    expect(result).toContain('declined by the user');
+  });
+
+  it('does not auto-approve a read-only head with a chained command', async () => {
+    let asked = false;
+    await executeTool(call('run_command', { command: 'ls && rm -rf /tmp/nope' }), async () => {
+      asked = true;
+      return false;
+    });
+    expect(asked).toBe(true);
+  });
+});
+
 describe('run_command timeout', () => {
   it('kills a command that never returns and reports the timeout', async () => {
     const result = await executeTool(
