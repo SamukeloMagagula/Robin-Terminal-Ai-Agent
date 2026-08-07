@@ -1,5 +1,5 @@
 import type { Message, ChatEvent, ToolCall, ToolDefinition } from './types.js';
-import { describeChatError, extractErrorCode } from './http-error.js';
+import { describeChatError, extractErrorCode, extractServerMessage } from './http-error.js';
 import { ChatRequestError } from './chat-error.js';
 
 export interface OpenAiWireMessage {
@@ -43,6 +43,7 @@ export async function* streamOpenAiCompatibleChat(response: Response, errorLabel
     throw new ChatRequestError(describeChatError(errorLabel, response.status, body), {
       status: response.status,
       code: extractErrorCode(body),
+      serverMessage: extractServerMessage(body),
     });
   }
   const reader = response.body.getReader();

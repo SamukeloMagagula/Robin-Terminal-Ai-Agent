@@ -48,13 +48,23 @@ function truncate(text: string): string {
     : single;
 }
 
-/** Machine-readable error code, where the provider supplies one (e.g. `model_not_supported`). */
+/**
+ * Machine-readable error code, where the provider supplies one.
+ *
+ * Providers disagree about where it lives. OpenAI-compatible APIs put a string
+ * in `error.code` ("model_not_supported"). Google puts the HTTP status *number*
+ * there and the string in `error.status` ("NOT_FOUND", "RESOURCE_EXHAUSTED"),
+ * so reading only `error.code` silently returned nothing for Gemini.
+ */
 export function extractErrorCode(body: string | undefined): string | undefined {
   if (!body) return undefined;
   try {
-    const parsed = JSON.parse(body) as { error?: { code?: unknown } };
+    const parsed = JSON.parse(body) as { error?: { code?: unknown; status?: unknown } };
     const code = parsed?.error?.code;
-    return typeof code === 'string' ? code : undefined;
+    if (typeof code === 'string' && code.trim()) return code;
+    const status = parsed?.error?.status;
+    if (typeof status === 'string' && status.trim()) return status;
+    return undefined;
   } catch {
     return undefined;
   }

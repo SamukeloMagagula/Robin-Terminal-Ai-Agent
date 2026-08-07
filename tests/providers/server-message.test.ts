@@ -69,6 +69,22 @@ describe('extractErrorCode', () => {
     expect(extractErrorCode('not json')).toBeUndefined();
     expect(extractErrorCode(undefined)).toBeUndefined();
   });
+
+  // Google puts the HTTP status *number* in error.code and the machine-readable
+  // string in error.status, so reading only error.code found nothing.
+  it('falls back to error.status when error.code is a number', () => {
+    const geminiBody = JSON.stringify({
+      error: { code: 404, message: 'no longer available', status: 'NOT_FOUND' },
+    });
+    expect(extractErrorCode(geminiBody)).toBe('NOT_FOUND');
+  });
+
+  it('prefers a string error.code over error.status', () => {
+    const body = JSON.stringify({
+      error: { code: 'model_not_supported', status: 'INVALID_ARGUMENT' },
+    });
+    expect(extractErrorCode(body)).toBe('model_not_supported');
+  });
 });
 
 describe('describeChatError', () => {

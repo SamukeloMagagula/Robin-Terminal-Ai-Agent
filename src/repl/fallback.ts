@@ -18,6 +18,17 @@ export interface FallbackCandidate {
  */
 export const MAX_FALLBACK_CANDIDATES = 5;
 
+/**
+ * How many of those slots the current provider may take.
+ *
+ * The rest are reserved for other providers. Without this reservation the
+ * current provider fills every slot, so when it refuses for an account-wide
+ * reason — a rate limit, exhausted credit — the whole chain is models that
+ * will refuse identically, and a perfectly good second provider is never
+ * reached.
+ */
+export const MAX_SAME_PROVIDER_CANDIDATES = 3;
+
 async function safeListModels(provider: Provider): Promise<string[]> {
   try {
     return await provider.listModels();
@@ -54,18 +65,30 @@ export async function buildFallbackCandidates(
     unsupportedStore.filter(provider.id, await safeListModels(provider));
 
   for (const model of await usable(currentProvider)) {
+    if (candidates.length >= MAX_SAME_PROVIDER_CANDIDATES) break;
     if (model !== currentModel && isChatCapableModel(model)) {
       candidates.push({ provider: currentProvider, model });
     }
   }
 
+  // Round-robin across the other providers so a single large catalogue cannot
+  // consume every remaining slot.
+  const otherModels: { provider: Provider; models: string[] }[] = [];
   for (const provider of allProviders) {
     if (provider.id === currentProvider.id) continue;
     if (!(await safeIsAuthenticated(provider))) continue;
-    for (const model of await usable(provider)) {
-      if (isChatCapableModel(model)) candidates.push({ provider, model });
+    const models = (await usable(provider)).filter(isChatCapableModel);
+    if (models.length > 0) otherModels.push({ provider, models });
+  }
+
+  for (let round = 0; candidates.length < MAX_FALLBACK_CANDIDATES; round++) {
+    const added = otherModels.filter((entry) => entry.models.length > round);
+    if (added.length === 0) break;
+    for (const entry of added) {
+      if (candidates.length >= MAX_FALLBACK_CANDIDATES) break;
+      candidates.push({ provider: entry.provider, model: entry.models[round] });
     }
   }
 
-  return candidates.slice(0, MAX_FALLBACK_CANDIDATES);
+  return candidates;
 }

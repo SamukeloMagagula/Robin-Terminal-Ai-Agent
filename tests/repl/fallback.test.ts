@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { buildFallbackCandidates, MAX_FALLBACK_CANDIDATES } from '../../src/repl/fallback';
+import {
+  buildFallbackCandidates,
+  MAX_FALLBACK_CANDIDATES,
+  MAX_SAME_PROVIDER_CANDIDATES,
+} from '../../src/repl/fallback';
 import type { Provider } from '../../src/providers/types';
 
 function fakeProvider(overrides: Partial<Provider> & { id: string; name: string }): Provider {
@@ -121,7 +125,7 @@ describe('buildFallbackCandidates', () => {
     expect(candidates.map((c) => c.model)).toEqual(['gemini-2.5-pro']);
   });
 
-  it('caps how many models one failed turn will retry against', async () => {
+  it('caps how many models on the current provider one failed turn retries', async () => {
     const current = fakeProvider({
       id: 'gemini',
       name: 'Gemini',
@@ -131,8 +135,50 @@ describe('buildFallbackCandidates', () => {
     });
 
     const candidates = await buildFallbackCandidates(current, 'model-0', [current]);
-    expect(candidates).toHaveLength(MAX_FALLBACK_CANDIDATES);
+    expect(candidates).toHaveLength(MAX_SAME_PROVIDER_CANDIDATES);
     expect(candidates[0].model).toBe('model-1');
+  });
+
+  // Without a reservation, a 300-model current provider fills every slot — so a
+  // rate limit, which refuses every model on that account, leaves nothing to
+  // fall back to even though another provider is logged in and working.
+  it('reserves slots for other providers when the current one has a huge catalogue', async () => {
+    const current = fakeProvider({
+      id: 'openrouter',
+      name: 'OpenRouter',
+      listModels: vi.fn().mockResolvedValue(Array.from({ length: 300 }, (_, i) => `or-${i}`)),
+    });
+    const other = fakeProvider({
+      id: 'ollama',
+      name: 'Ollama',
+      isAuthenticated: vi.fn().mockResolvedValue(true),
+      listModels: vi.fn().mockResolvedValue(['llama3.1']),
+    });
+
+    const candidates = await buildFallbackCandidates(current, 'or-0', [current, other]);
+    expect(candidates.filter((c) => c.provider.id === 'openrouter')).toHaveLength(
+      MAX_SAME_PROVIDER_CANDIDATES
+    );
+    expect(candidates.some((c) => c.provider.id === 'ollama')).toBe(true);
+  });
+
+  it('round-robins the other providers rather than draining one', async () => {
+    const current = fakeProvider({ id: 'gemini', name: 'Gemini' });
+    const a = fakeProvider({
+      id: 'a',
+      name: 'A',
+      isAuthenticated: vi.fn().mockResolvedValue(true),
+      listModels: vi.fn().mockResolvedValue(['a1', 'a2', 'a3', 'a4']),
+    });
+    const b = fakeProvider({
+      id: 'b',
+      name: 'B',
+      isAuthenticated: vi.fn().mockResolvedValue(true),
+      listModels: vi.fn().mockResolvedValue(['b1', 'b2']),
+    });
+
+    const candidates = await buildFallbackCandidates(current, 'x', [current, a, b]);
+    expect(candidates.map((c) => c.model)).toEqual(['a1', 'b1', 'a2', 'b2', 'a3']);
   });
 
   it('counts the cap across providers, not per provider', async () => {

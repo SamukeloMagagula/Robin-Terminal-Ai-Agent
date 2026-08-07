@@ -75,7 +75,14 @@ Anywhere `robin` needs you to visit a page (Copilot/Gemini/OpenRouter login), it
 
 If a request to the current model fails (rate-limited, unreachable, etc.), `robin` automatically retries the message on the next model — first other models on the same provider, then models on any other provider you're logged into. Once a fallback succeeds, the session sticks with it (same as switching with `/model`/`/provider` yourself) rather than retrying the original model every turn.
 
-Two limits keep this from turning into a long wait. Models that can't answer a text request are excluded by name — speech, embedding, image and video models sit in the same catalogues and would just return a 400. And the chain stops after 5 attempts: each one is a real round-trip, and if five models in a row refuse, the problem is the account or the network, not the model.
+Several limits keep this from turning into a long wait:
+
+- **Non-chat models are excluded by name.** Speech, embedding, image and video models sit in the same catalogues and would just return a 400.
+- **The chain stops after 5 attempts**, and at most 3 of those may be on the provider that just failed. The reservation matters: without it a 300-model provider fills every slot, so an account-wide refusal leaves nothing to fall back to even though another provider is logged in and working.
+- **A quota refusal skips the rest of that provider.** Rate limits and exhausted credit are account-wide, so every sibling model would refuse identically.
+- **Models a provider rejects as unsupported are remembered** in `~/.robin/unsupported-models.json` and never offered again — in the picker or the fallback chain. Only explicit "model not supported" / "not found" style refusals are recorded; a rate limit is transient and never is. Delete that file to start over.
+
+Errors show the provider's own explanation, not just a status code — "400 (request failed)" becomes "400 (request failed) — The requested model is not supported.", which is the difference between a mystery and something you can act on.
 
 ## OpenRouter spend
 

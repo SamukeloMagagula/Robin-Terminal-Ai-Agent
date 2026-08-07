@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Provider, Message, ChatEvent, ToolDefinition } from './types.js';
-import { describeChatError, extractErrorCode } from './http-error.js';
+import { describeChatError, extractErrorCode, extractServerMessage } from './http-error.js';
 import { ChatRequestError } from './chat-error.js';
 
 const BASE_URL = 'http://localhost:11434';
@@ -94,6 +94,7 @@ export class OllamaProvider implements Provider {
       throw new ChatRequestError(describeChatError('Ollama', res.status, body), {
         status: res.status,
         code: extractErrorCode(body),
+        serverMessage: extractServerMessage(body),
       });
     }
     const reader = res.body.getReader();

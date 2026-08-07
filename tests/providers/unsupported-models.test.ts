@@ -3,7 +3,11 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { UnsupportedModelStore } from '../../src/providers/unsupported-models';
-import { ChatRequestError, isModelUnsupported } from '../../src/providers/chat-error';
+import {
+  ChatRequestError,
+  isModelUnsupported,
+  isProviderQuotaExhausted,
+} from '../../src/providers/chat-error';
 
 let dir: string;
 let file: string;
@@ -47,6 +51,94 @@ describe('isModelUnsupported', () => {
     expect(isModelUnsupported(new Error('model_not_supported'))).toBe(false);
     expect(isModelUnsupported(null)).toBe(false);
     expect(isModelUnsupported('model_not_supported')).toBe(false);
+  });
+
+  // Google reports 404 with error.status "NOT_FOUND" and a *number* in
+  // error.code, so the OpenAI-shaped string check found nothing.
+  it('treats a 404 as a permanently missing model', () => {
+    expect(
+      isModelUnsupported(
+        new ChatRequestError('gone', {
+          status: 404,
+          code: 'NOT_FOUND',
+          serverMessage: 'This model models/gemini-2.5-flash is no longer available to new users.',
+        })
+      )
+    ).toBe(true);
+  });
+
+  it('recognises a 404 even with no code at all', () => {
+    expect(isModelUnsupported(new ChatRequestError('gone', { status: 404 }))).toBe(true);
+  });
+
+  // Real Gemini response: permanent, but a bare 400 with no distinguishing code.
+  it('recognises "only supports Interactions API" as permanent', () => {
+    expect(
+      isModelUnsupported(
+        new ChatRequestError('nope', {
+          status: 400,
+          serverMessage: 'This model only supports Interactions API.',
+        })
+      )
+    ).toBe(true);
+  });
+
+  it('recognises "no longer available" as permanent', () => {
+    expect(
+      isModelUnsupported(
+        new ChatRequestError('nope', {
+          status: 400,
+          serverMessage: 'This model is no longer available to new users.',
+        })
+      )
+    ).toBe(true);
+  });
+
+  it('does not treat an unrecognised 400 message as permanent', () => {
+    expect(
+      isModelUnsupported(
+        new ChatRequestError('nope', { status: 400, serverMessage: 'Invalid JSON payload.' })
+      )
+    ).toBe(false);
+  });
+
+  // Quota messages sometimes mention models; they must never be recorded.
+  it('never records a 429 however it is worded', () => {
+    expect(
+      isModelUnsupported(
+        new ChatRequestError('slow', {
+          status: 429,
+          code: 'RESOURCE_EXHAUSTED',
+          serverMessage: 'Quota exceeded — model not supported on the free tier.',
+        })
+      )
+    ).toBe(false);
+  });
+
+  it('never records a server fault', () => {
+    expect(
+      isModelUnsupported(
+        new ChatRequestError('boom', { status: 503, serverMessage: 'model not supported' })
+      )
+    ).toBe(false);
+  });
+});
+
+describe('isProviderQuotaExhausted', () => {
+  it('is true for a rate limit and for exhausted credit', () => {
+    expect(isProviderQuotaExhausted(new ChatRequestError('x', { status: 429 }))).toBe(true);
+    expect(isProviderQuotaExhausted(new ChatRequestError('x', { status: 402 }))).toBe(true);
+  });
+
+  it('is false for model and server problems', () => {
+    expect(isProviderQuotaExhausted(new ChatRequestError('x', { status: 404 }))).toBe(false);
+    expect(isProviderQuotaExhausted(new ChatRequestError('x', { status: 400 }))).toBe(false);
+    expect(isProviderQuotaExhausted(new ChatRequestError('x', { status: 500 }))).toBe(false);
+  });
+
+  it('ignores non-ChatRequestError values', () => {
+    expect(isProviderQuotaExhausted(new Error('429'))).toBe(false);
+    expect(isProviderQuotaExhausted(null)).toBe(false);
   });
 });
 

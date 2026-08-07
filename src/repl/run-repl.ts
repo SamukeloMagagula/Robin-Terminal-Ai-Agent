@@ -17,7 +17,7 @@ import { searchChatLogs } from '../recall.js';
 import { buildFallbackCandidates, type FallbackCandidate } from './fallback.js';
 import { readSlashAwareLine } from './slash-prompt.js';
 import { addToInputHistory } from './input-history.js';
-import { isModelUnsupported } from '../providers/chat-error.js';
+import { isModelUnsupported, isProviderQuotaExhausted } from '../providers/chat-error.js';
 import { UnsupportedModelStore } from '../providers/unsupported-models.js';
 import { UsageCache } from '../usage/openrouter-usage.js';
 import { renderUsageLine, renderUsageReport } from '../usage/render-usage.js';
@@ -388,6 +388,9 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     let fallbackCandidates: FallbackCandidate[] | undefined;
     let fallbackIndex = 0;
     let lastError: Error | undefined;
+    // Providers that refused this turn on quota. Reset per turn, because a
+    // rate-limit window can reopen between messages.
+    const quotaBlocked = new Set<string>();
     let succeeded = false;
 
     while (true) {
@@ -430,8 +433,20 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
         if (isModelUnsupported(err)) {
           await unsupportedStore.record(activeProvider.id, activeModel);
         }
+        // A quota refusal is about the account, not the model, so every sibling
+        // model on that provider will refuse identically. Skip the rest of them
+        // rather than printing the same rate-limit message five times.
+        if (isProviderQuotaExhausted(err)) {
+          quotaBlocked.add(activeProvider.id);
+        }
         if (!fallbackCandidates) {
           fallbackCandidates = await buildFallbackCandidates(activeProvider, activeModel, listProviders());
+        }
+        while (
+          fallbackIndex < fallbackCandidates.length &&
+          quotaBlocked.has(fallbackCandidates[fallbackIndex].provider.id)
+        ) {
+          fallbackIndex++;
         }
         if (fallbackIndex >= fallbackCandidates.length) break;
         const next = fallbackCandidates[fallbackIndex];
