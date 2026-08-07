@@ -6,7 +6,8 @@ import { parseCommand } from './parse-command.js';
 import { runAgentTurn } from '../agent-loop.js';
 import { executeTool } from '../tools/execute.js';
 import { TOOL_DEFINITIONS } from '../tools/definitions.js';
-import { printConnectionLine } from '../ui/banner.js';
+import { printBanner, printConnectionLine } from '../ui/banner.js';
+import { newSessionId } from '../session-id.js';
 import { ConversationStore } from '../conversation-store.js';
 import { SkillStore } from '../skill-store.js';
 import { copyToClipboard } from '../clipboard.js';
@@ -58,7 +59,13 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   const chatLog = new ChatLog();
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
-  printConnectionLine(provider.name, model);
+  printBanner({
+    providerName: provider.name,
+    model,
+    cwd: process.cwd(),
+    sessionId: newSessionId(),
+    toolsEnabled,
+  });
   console.log(chalk.gray('Type your message, or / for commands.'));
 
   let isFirstTurn = true;

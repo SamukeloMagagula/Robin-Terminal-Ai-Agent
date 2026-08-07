@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 
-const GRADIENT = ['#22d3ee', '#38bdf8', '#60a5fa', '#818cf8'];
+export const GRADIENT = ['#22d3ee', '#38bdf8', '#60a5fa', '#818cf8'];
 
 export function gradientText(text: string): string {
   return text

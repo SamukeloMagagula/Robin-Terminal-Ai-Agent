@@ -1,109 +1,131 @@
+import os from 'node:os';
+import { createRequire } from 'node:module';
 import chalk from 'chalk';
-import { mutedColor } from './theme.js';
+import { GRADIENT, mutedColor } from './theme.js';
+import { buildCowl, COWL_WIDTH } from './cowl.js';
+import { buildWordmark, buildPlainWordmark, WORDMARK_WIDTH } from './wordmark.js';
+import { renderPanel } from './panel.js';
+import { SLASH_COMMANDS } from '../repl/slash-prompt.js';
+import { TOOL_DEFINITIONS } from '../tools/definitions.js';
 
-const WORD_INDENT = '  ';
+const MAX_WIDTH = 100;
+const MIN_WIDTH = 60;
+const DEFAULT_WIDTH = 80;
+const STACK_BELOW = 90;
+// The `Session: <id>` line is 29 wide and is the widest thing in the left
+// column, so the gutter is sized from that, not from the cowl.
+const LEFT_WIDTH = COWL_WIDTH + 7;
+const COMMAND_NAME_WIDTH = 10;
+const TOOL_NAME_WIDTH = 13;
 
-// 9-row block glyphs, each row a fixed 9-char-wide string.
-const ROBIN_LETTERS: Record<string, string[]> = {
-  R: [
-    '█████████',
-    '██     ██',
-    '██     ██',
-    '██     ██',
-    '█████████',
-    '██  ██   ',
-    '██   ██  ',
-    '██    ██ ',
-    '██     ██',
-  ],
-  O: [
-    '█████████',
-    '██     ██',
-    '██     ██',
-    '██     ██',
-    '██     ██',
-    '██     ██',
-    '██     ██',
-    '██     ██',
-    '█████████',
-  ],
-  B: [
-    '█████████',
-    '██     ██',
-    '██     ██',
-    '██     ██',
-    '█████████',
-    '██     ██',
-    '██     ██',
-    '██     ██',
-    '█████████',
-  ],
-  I: [
-    '█████████',
-    '    █    ',
-    '    █    ',
-    '    █    ',
-    '    █    ',
-    '    █    ',
-    '    █    ',
-    '    █    ',
-    '█████████',
-  ],
-  N: [
-    '██     ██',
-    '███    ██',
-    '████   ██',
-    '██ ██  ██',
-    '██  ██ ██',
-    '██   ████',
-    '██    ███',
-    '██     ██',
-    '██     ██',
-  ],
-};
+const borderColor = chalk.hex(GRADIENT[0]);
+const headingColor = chalk.hex(GRADIENT[2]).bold;
 
-const WORD_WIDTH = 9 * 5 + 4; // 5 letters, 9 cols each, 4 single-space gaps
+export interface BannerInfo {
+  providerName: string;
+  model: string;
+  cwd: string;
+  sessionId: string;
+  toolsEnabled: boolean;
+}
 
-function buildWordmark(): string[] {
-  const letters = 'ROBIN'.split('');
-  const rows: string[] = [];
-  for (let row = 0; row < 9; row++) {
-    const rowText = letters.map((letter) => ROBIN_LETTERS[letter][row]).join(' ');
-    rows.push(`${WORD_INDENT}${chalk.whiteBright(rowText)}`);
+function readVersion(): string | undefined {
+  try {
+    const require = createRequire(import.meta.url);
+    const pkg = require('../../package.json') as { version?: string };
+    return pkg.version;
+  } catch {
+    return undefined;
   }
-  return rows;
 }
 
-// A hooded cowl: pointed ears, an eye box with two lenses, cheek accents, tapered jaw.
-const MASK_WIDTH = 26;
-
-function buildMask(): string[] {
-  const maskIndent = ' '.repeat(WORD_INDENT.length + Math.floor((WORD_WIDTH - MASK_WIDTH) / 2));
-  const rows = [
-    `${maskIndent}       /\\       /\\        `,
-    `${maskIndent}      /  \\_____/  \\       `,
-    `${maskIndent}     /   ╭───────╮  \\     `,
-    `${maskIndent}    /    │  ${chalk.redBright('●')}  ${chalk.redBright('●')}  │   \\   `,
-    `${maskIndent}   █     │         │    █ `,
-    `${maskIndent}    \\    ╰───────╯    /   `,
-    `${maskIndent}     \\_______________/    `,
-    `${maskIndent}         ▀▀▀▀▀▀▀▀▀        `,
-  ];
-  return rows.map((row) => chalk.whiteBright(row));
+function shortenHome(dir: string): string {
+  const home = os.homedir();
+  return home && dir.startsWith(home) ? `~${dir.slice(home.length)}` : dir;
 }
 
-export function printBanner(): void {
-  const lines = [
+function buildLeftColumn(info: BannerInfo): string[] {
+  return [
+    ...buildCowl(),
     '',
-    ...buildMask(),
+    mutedColor(`${info.providerName} · ${info.model}`),
+    mutedColor(shortenHome(info.cwd)),
+    mutedColor(`Session: ${info.sessionId}`),
+  ];
+}
+
+// The tagline runs 52 characters, far wider than the left column, so it sits
+// below the panel as full-width text rather than being truncated inside it.
+function buildFooter(): string[] {
+  return [
+    mutedColor('Robin is a terminal agent that lets you run your AI.'),
+    mutedColor('built by Samukelo "Batman" Magagula'),
+  ];
+}
+
+function buildRightColumn(info: BannerInfo): string[] {
+  const commands = SLASH_COMMANDS.map(
+    (command) =>
+      `${chalk.whiteBright(command.name.padEnd(COMMAND_NAME_WIDTH))}${mutedColor(command.description)}`,
+  );
+  const tools = TOOL_DEFINITIONS.map(
+    (tool) => `${chalk.whiteBright(tool.name.padEnd(TOOL_NAME_WIDTH))}${mutedColor(tool.description)}`,
+  );
+  const toolState = info.toolsEnabled ? 'enabled' : 'disabled';
+  const stats = `${TOOL_DEFINITIONS.length} tools · ${SLASH_COMMANDS.length} commands · /help for commands`;
+
+  return [
+    headingColor('Commands'),
+    ...commands,
     '',
-    ...buildWordmark(),
+    `${headingColor('Tools')} ${mutedColor(`(${toolState})`)}`,
+    ...tools,
     '',
-    `${WORD_INDENT}${mutedColor('Robin is a terminal agent that lets you run your AI.')}`,
-    `${WORD_INDENT}${mutedColor('built by Samukelo "Batman" Magagula')}`,
+    mutedColor(stats),
+  ];
+}
+
+const INDENT = '  ';
+
+function panelWidth(): number {
+  const columns = process.stdout.columns ?? DEFAULT_WIDTH;
+  return Math.max(Math.min(columns - INDENT.length, MAX_WIDTH), MIN_WIDTH);
+}
+
+export function buildBanner(info: BannerInfo): string[] {
+  const columns = process.stdout.columns ?? DEFAULT_WIDTH;
+  const width = panelWidth();
+  const version = readVersion();
+  const title = version ? `Robin v${version}` : 'Robin';
+
+  const left = buildLeftColumn(info);
+  const right = buildRightColumn(info);
+  const stacked = columns < STACK_BELOW;
+
+  const panel = renderPanel({
+    title,
+    left: stacked ? [...left, '', ...right] : left,
+    right: stacked ? [] : right,
+    width,
+    leftWidth: stacked ? width - 4 : LEFT_WIDTH,
+    borderColor,
+  });
+
+  const wordmark = columns < WORDMARK_WIDTH + 2 ? buildPlainWordmark() : buildWordmark();
+
+  return [
+    '',
+    ...wordmark.map((row) => `${INDENT}${row}`),
+    '',
+    ...panel.map((row) => `${INDENT}${row}`),
+    '',
+    ...buildFooter().map((row) => `${INDENT}${row}`),
     '',
   ];
-  console.log(lines.join('\n'));
+}
+
+export function printBanner(info: BannerInfo): void {
+  console.log(buildBanner(info).join('\n'));
 }
 
 const SUBTITLE_WIDTH = 44;

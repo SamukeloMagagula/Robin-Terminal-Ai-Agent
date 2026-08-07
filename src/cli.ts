@@ -6,7 +6,6 @@ import { listProviders, getProvider } from './providers/index.js';
 import { runLogin, runLogout } from './commands/auth-commands.js';
 import { runStatus } from './commands/status-command.js';
 import { runRepl } from './repl/run-repl.js';
-import { printBanner } from './ui/banner.js';
 
 async function pickProvider(): Promise<Provider> {
   const id = await select({
@@ -57,7 +56,6 @@ async function pickProviderAndModel(): Promise<{ provider: Provider; model: stri
 }
 
 async function startChat(providerId?: string): Promise<void> {
-  printBanner();
   if (providerId) {
     const provider = getProvider(providerId);
     await ensureAuthenticated(provider);

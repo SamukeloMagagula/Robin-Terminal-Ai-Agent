@@ -147,7 +147,7 @@ export function buildPlainWordmark(): string[]; // ['ROBIN'] gradient-colored
 The mask art moves here from `banner.ts`, unchanged.
 
 ```ts
-export const COWL_WIDTH: number; // 26
+export const COWL_WIDTH: number; // 25
 export function buildCowl(): string[]; // 8 rows
 ```
 
@@ -185,7 +185,11 @@ export function printConnectionLine(providerName: string, model: string): void;
 ```
 
 Left column, in order: cowl rows, blank, `provider · model`, home-shortened
-cwd, `Session: <id>`, blank, tagline, author.
+cwd, `Session: <id>`.
+
+The tagline and author are **not** in the left column. At 52 characters the
+tagline is nearly twice the column width and truncates to uselessness, so both
+lines print below the panel as full-width dim text.
 
 Right column, in order: `Commands` heading; one row per entry in
 `SLASH_COMMANDS` from `src/repl/slash-prompt.ts`, formatted as the name padded
@@ -201,16 +205,22 @@ duplicated in the banner. Both `SLASH_COMMANDS` and `TOOL_DEFINITIONS` are
 already exported and their shapes do not change.
 
 `printBanner` prints, in order: a blank line, the wordmark, a blank line, the
-panel, a blank line. The `Type your message, or / for commands.` line stays
+panel, a blank line, the tagline and author, a blank line. Everything is
+indented two spaces. The `Type your message, or / for commands.` line stays
 where it is in `run-repl.ts` and is not part of the banner.
+
+`buildBanner(info)` returns those lines and is what the tests exercise;
+`printBanner` is a thin `console.log` wrapper around it.
 
 Home-shortening: if `cwd` starts with `os.homedir()`, that prefix is replaced
 with `~`. Path separators are left as the platform produced them.
 
 ## Sizing
 
-- `width = min(process.stdout.columns ?? 80, 100)`, floored at 60.
-- `leftWidth = COWL_WIDTH + 3` (29).
+- `width = min((process.stdout.columns ?? 80) - 2, 100)`, floored at 60. The
+  subtraction covers the banner's two-space indent.
+- `leftWidth = COWL_WIDTH + 7` (32). The cowl is 25 wide but `Session: <id>` is
+  29, so the gutter is sized from the metadata line, not the art.
 - Below 90 columns the panel stacks. `renderPanel` is still used, called with
   `left: [...leftLines, '', ...rightLines]`, `right: []`, and
   `leftWidth = width - 4`, so everything renders as one full-width column.
