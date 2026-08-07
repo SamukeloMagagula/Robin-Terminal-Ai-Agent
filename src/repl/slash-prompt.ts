@@ -16,6 +16,7 @@ export const SLASH_COMMANDS: SlashCommandEntry[] = [
   { name: '/load', description: 'load a saved conversation' },
   { name: '/copy', description: "copy the assistant's last reply" },
   { name: '/skill', description: 'save/use/list system-prompt presets' },
+  { name: '/random', description: 'switch to a random provider and model' },
   { name: '/recall', description: 'search past conversations' },
   { name: '/clear', description: 'reset the conversation' },
   { name: '/exit', description: 'quit' },

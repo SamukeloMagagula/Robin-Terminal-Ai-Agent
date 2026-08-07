@@ -6,13 +6,36 @@ import { listProviders, getProvider } from './providers/index.js';
 import { runLogin, runLogout } from './commands/auth-commands.js';
 import { runStatus } from './commands/status-command.js';
 import { runRepl } from './repl/run-repl.js';
+import { pickRandomProviderAndModel } from './random-pick.js';
 
-async function pickProvider(): Promise<Provider> {
+const RANDOM = '__random__';
+
+/**
+ * A provider chosen from the menu still needs a model picked; a random roll
+ * already has one. Keeping them distinct stops the roll's model being
+ * announced and then thrown away by the model picker.
+ */
+type ProviderChoice =
+  | { kind: 'chosen'; provider: Provider }
+  | { kind: 'rolled'; provider: Provider; model: string };
+
+async function rollRandom(): Promise<{ provider: Provider; model: string }> {
+  const choice = await pickRandomProviderAndModel(listProviders());
+  // A random pick the user can't see leaves them unable to judge the reply.
+  console.log(`🎲 Rolled ${choice.provider.name} · ${choice.model}`);
+  return choice;
+}
+
+async function chooseProvider(): Promise<ProviderChoice> {
   const id = await select({
     message: 'Select a provider:',
-    choices: listProviders().map((p) => ({ name: p.name, value: p.id })),
+    choices: [
+      { name: '🎲 Random', value: RANDOM },
+      ...listProviders().map((p) => ({ name: p.name, value: p.id })),
+    ],
   });
-  return getProvider(id);
+  if (id === RANDOM) return { kind: 'rolled', ...(await rollRandom()) };
+  return { kind: 'chosen', provider: getProvider(id) };
 }
 
 async function pickModel(provider: Provider): Promise<string> {
@@ -43,28 +66,38 @@ async function ensureAuthenticated(provider: Provider): Promise<void> {
 
 /** Picks a provider, then a model — looping back to provider selection if the model picker's "Back" choice is taken. */
 async function pickProviderAndModel(): Promise<{ provider: Provider; model: string }> {
-  let provider = await pickProvider();
+  let choice = await chooseProvider();
   while (true) {
-    await ensureAuthenticated(provider);
-    const modelChoice = await pickModelWithBack(provider);
+    // A rolled pair is already complete, and the roll only considers providers
+    // that are authenticated, so there is nothing left to ask.
+    if (choice.kind === 'rolled') {
+      return { provider: choice.provider, model: choice.model };
+    }
+    await ensureAuthenticated(choice.provider);
+    const modelChoice = await pickModelWithBack(choice.provider);
     if (modelChoice === BACK) {
-      provider = await pickProvider();
+      choice = await chooseProvider();
       continue;
     }
-    return { provider, model: modelChoice };
+    return { provider: choice.provider, model: modelChoice };
   }
 }
 
 async function startChat(providerId?: string): Promise<void> {
+  if (providerId === 'random') {
+    const { provider, model } = await rollRandom();
+    await runRepl({ provider, model, pickModel, pickProviderAndModel, rollRandom });
+    return;
+  }
   if (providerId) {
     const provider = getProvider(providerId);
     await ensureAuthenticated(provider);
     const model = await pickModel(provider);
-    await runRepl({ provider, model, pickModel, pickProvider, pickProviderAndModel });
+    await runRepl({ provider, model, pickModel, pickProviderAndModel, rollRandom });
     return;
   }
   const { provider, model } = await pickProviderAndModel();
-  await runRepl({ provider, model, pickModel, pickProvider, pickProviderAndModel });
+  await runRepl({ provider, model, pickModel, pickProviderAndModel, rollRandom });
 }
 
 const program = new Command();
@@ -93,7 +126,7 @@ program
 
 program
   .command('chat [provider]')
-  .description('Start a chat session')
+  .description('Start a chat session — pass a provider id, or "random" to roll one')
   .action(async (providerId?: string) => {
     await startChat(providerId);
   });

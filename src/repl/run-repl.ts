@@ -22,8 +22,9 @@ export interface ReplDeps {
   provider: Provider;
   model: string;
   pickModel: (provider: Provider) => Promise<string>;
-  pickProvider: () => Promise<Provider>;
   pickProviderAndModel: () => Promise<{ provider: Provider; model: string }>;
+  /** Re-rolls a random provider/model pair, announcing what it landed on. */
+  rollRandom: () => Promise<{ provider: Provider; model: string }>;
 }
 
 const HELP_ENTRIES: [string, string][] = [
@@ -38,6 +39,7 @@ const HELP_ENTRIES: [string, string][] = [
   ['/skill save <name>', 'save the current system prompt as a reusable named preset'],
   ['/skill use <name>', 'load a saved preset as the system prompt'],
   ['/skill [list]', 'list saved presets'],
+  ['/random', 'switch to a randomly chosen provider and model'],
   ['/recall <query>', 'search past conversations under ~/.robin/chats/'],
   ['/clear', 'reset the conversation'],
   ['/exit', 'quit'],
@@ -153,6 +155,22 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       history = [];
       chatLog.startNewSession();
       printConnectionLine(provider.name, model);
+      continue;
+    }
+
+    if (cmd.type === 'random') {
+      // A re-roll is a provider switch, so it resets history and starts a new
+      // transcript exactly like /model and /provider do.
+      try {
+        const rolled = await deps.rollRandom();
+        provider = rolled.provider;
+        model = rolled.model;
+        history = [];
+        chatLog.startNewSession();
+        printConnectionLine(provider.name, model);
+      } catch (err) {
+        console.log(errorColor(`✖ ${(err as Error).message}`));
+      }
       continue;
     }
 

@@ -77,6 +77,7 @@ robin chat copilot       # jump straight into Copilot
 robin chat gemini        # jump straight into Gemini
 robin chat openrouter    # jump straight into OpenRouter
 robin chat ollama        # jump straight into Ollama
+robin chat random        # let Robin roll a provider and model for you
 robin login copilot      # log in to Copilot ahead of time
 robin logout copilot     # clear stored Copilot credentials
 robin status              # show login/reachability status for every provider
@@ -86,7 +87,7 @@ In a chat session, typing `/` shows a live-filtered popup of matching commands a
 
 - `/help` (or just `/`) — list commands
 - `/model` — pick a different model from the ones available on the current provider
-- `/provider` — switch provider (e.g. Copilot ↔ Gemini ↔ OpenRouter ↔ Ollama)
+- `/provider` — switch provider (e.g. Copilot ↔ Gemini ↔ OpenRouter ↔ Ollama), or pick `🎲 Random`
 - `/system [text]` — view the current system prompt, set one (`/system be terse`), or clear it (`/system clear`)
 - `/tools [list]` — toggle tool-calling on/off for the session, or `/tools list` to see what's available
 - `/save [name]` — save the current conversation under `~/.robin/conversations/<name>.json`; `/save` with no name lists what's saved
@@ -95,6 +96,7 @@ In a chat session, typing `/` shows a live-filtered popup of matching commands a
 - `/skill save <name>` — save the current system prompt as a reusable named preset under `~/.robin/skills/<name>.json`
 - `/skill use <name>` — load a saved preset as the current system prompt
 - `/skill [list]` — list saved presets
+- `/random` — re-roll onto a randomly chosen provider and model
 - `/recall <query>` — search past conversations under `~/.robin/chats/`
 - `/clear` — reset the conversation
 - `/exit` — quit

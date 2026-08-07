@@ -97,4 +97,12 @@ describe('parseCommand', () => {
   it('parses /recall with no argument', () => {
     expect(parseCommand('/recall')).toEqual({ type: 'recall' });
   });
+
+  it('parses /random', () => {
+    expect(parseCommand('/random')).toEqual({ type: 'random', arg: undefined });
+  });
+
+  it('ignores an argument to /random', () => {
+    expect(parseCommand('/random please')).toEqual({ type: 'random', arg: 'please' });
+  });
 });
