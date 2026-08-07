@@ -77,10 +77,6 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     isFirstTurn = false;
 
     const line = await readSlashAwareLine();
-    // Same reasoning as the process.stdin.resume() calls below: this prompt
-    // closes its own internal readline.Interface on the shared stdin when it
-    // resolves, which pauses the stream — resume it before the next read.
-    process.stdin.resume();
     const cmd = parseCommand(line);
 
     if (cmd.type === 'exit') break;
@@ -104,14 +100,6 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
 
     if (cmd.type === 'model') {
       model = await deps.pickModel(provider);
-      // @inquirer/prompts closes its own internal readline.Interface on the
-      // shared process.stdin when a prompt finishes, which pauses the stream
-      // at the OS/stream level. Our own readline.Interface (created once,
-      // above) doesn't know that happened — its own .resume() is a no-op
-      // because its internal `paused` flag was never set — so without this,
-      // the next rl.question() would await input that never arrives and the
-      // process would exit silently once nothing else keeps the loop alive.
-      process.stdin.resume();
       history = [];
       chatLog.startNewSession();
       printConnectionLine(provider.name, model);
@@ -120,7 +108,6 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
 
     if (cmd.type === 'provider') {
       const picked = await deps.pickProviderAndModel();
-      process.stdin.resume();
       provider = picked.provider;
       model = picked.model;
       history = [];
@@ -327,12 +314,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
             executeTool,
             confirm: async (message) => {
               console.log(`\n${box(message.split('\n'))}`);
-              const approved = await confirmPrompt({ message: 'Run it?', default: false });
-              // Every prompt here closes its own readline.Interface on the
-              // shared stdin, which pauses the stream; see the note by the
-              // /model handler above.
-              process.stdin.resume();
-              return approved;
+              return confirmPrompt({ message: 'Run it?', default: false });
             },
           }
         );
