@@ -16,6 +16,8 @@ export interface TurnOptions {
   unsupportedStore: UnsupportedModelStore;
   /** Printed when a read-only command runs without asking. */
   onAutoApproved?: (command: string) => void;
+  /** Live command output, for display only — the model still gets the whole result. */
+  onOutput?: (chunk: string) => void;
   /** Called before each retry on a different model. */
   onFallback?: (info: { error: Error; next: FallbackCandidate }) => void;
   /**
@@ -84,7 +86,10 @@ export async function runTurn(
         {
           onText: options.onText,
           executeTool: (toolCall, confirm) =>
-            executeTool(toolCall, confirm, { onAutoApproved: options.onAutoApproved }),
+            executeTool(toolCall, confirm, {
+              onAutoApproved: options.onAutoApproved,
+              onOutput: options.onOutput,
+            }),
           confirm: options.confirm,
           signal: options.signal,
         }

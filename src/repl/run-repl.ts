@@ -202,6 +202,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       // Read-only commands run unannounced otherwise; showing them keeps the
       // user aware of what Robin actually did.
       onAutoApproved: (command) => console.log(mutedColor(`\n  $ ${command}`)),
+      onOutput: (chunk) => process.stdout.write(mutedColor(chunk)),
       onFallback: ({ error, next }) => {
         console.log(
           mutedColor(`\n  ${error.message} — trying ${next.provider.name} · ${next.model}...`)
