@@ -3,6 +3,8 @@ import { expand } from '@inquirer/prompts';
 import { parseCommand, type ParsedCommand } from './parse-command.js';
 import { type ConfirmRequest } from '../tools/execute.js';
 import { printBanner, printConnectionLine } from '../ui/banner.js';
+import { gatherTelemetry } from '../ui/hud/telemetry.js';
+import { TOOL_DEFINITIONS } from '../tools/definitions.js';
 import { newSessionId } from '../session-id.js';
 import { ConversationStore } from '../conversation-store.js';
 import { SkillStore } from '../skills/store.js';
@@ -209,7 +211,17 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   // Fetched before the banner so the figure is on screen from the first
   // frame; null (no key, no network) simply omits the line.
   const startupUsage = await usageCache.get();
+  // Local reads only — gatherTelemetry never touches the network, so the
+  // banner does not wait on a socket to draw.
+  const hudStats = await gatherTelemetry({
+    memory: memoryStore,
+    skills: skillStore,
+    toolCount: TOOL_DEFINITIONS.length + mcpRegistry.toolDefinitions().length + 4,
+    mcpServerCount: mcpRegistry.toolDefinitions().length > 0 ? 1 : 0,
+  });
+
   printBanner({
+    stats: hudStats,
     providerName: session.provider.name,
     model: session.model,
     cwd: process.cwd(),

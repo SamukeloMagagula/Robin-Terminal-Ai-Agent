@@ -9,7 +9,8 @@ function shellName(): string {
   return SHELLS[process.platform] ?? '/bin/sh';
 }
 
-function platformName(): string {
+/** Exported so the HUD shows the same platform name the model is told. */
+export function platformName(): string {
   switch (process.platform) {
     case 'win32':
       return 'Windows';
