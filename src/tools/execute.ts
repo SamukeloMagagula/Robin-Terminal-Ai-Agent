@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import type { ToolCall } from '../providers/types.js';
 import { checkPath, defaultSensitiveDirs } from './sensitive-paths.js';
 import { isReadOnlyCommand } from './command-safety.js';
+import type { MemoryStore, MemoryType } from '../memory/store.js';
 
 export { isReadOnlyCommand } from './command-safety.js';
 
@@ -86,6 +87,8 @@ export interface ExecuteOptions {
     has(name: string): boolean;
     call(name: string, args: Record<string, unknown>): Promise<string>;
   };
+  /** Enables the `remember` and `recall_memory` tools when present. */
+  memory?: MemoryStore;
 }
 
 export async function executeTool(
@@ -120,6 +123,12 @@ export async function executeTool(
           requireString(args.content, 'content'),
           confirm
         );
+      case 'remember':
+        if (!options.memory) return 'Error: memory is not available in this session.';
+        return await rememberTool(args, options.memory);
+      case 'recall_memory':
+        if (!options.memory) return 'Error: memory is not available in this session.';
+        return await recallMemoryTool(args, options.memory);
       case 'run_command':
         return await runCommandTool(
           requireString(args.command, 'command'),
@@ -203,6 +212,46 @@ async function writeFileTool(
   } catch (err) {
     return `Error: ${(err as Error).message}`;
   }
+}
+
+/**
+ * Writes a memory.
+ *
+ * Deliberately **not** behind the approval gate: memory is agent-curated by
+ * design, and asking before every write would make it a manual feature. The
+ * mitigations are after the fact and real — plain markdown, listed by
+ * /memory, removable with /memory forget. Routing this through `confirm`
+ * instead is the one-line change if that ever feels wrong.
+ */
+async function rememberTool(
+  args: Record<string, unknown>,
+  memory: MemoryStore
+): Promise<string> {
+  const name = requireString(args.name, 'name');
+  const rawType = typeof args.type === 'string' ? args.type : 'reference';
+  const type: MemoryType =
+    rawType === 'user' || rawType === 'project' ? rawType : 'reference';
+
+  const existing = await memory.read(name);
+  await memory.write({
+    name,
+    description: requireString(args.description, 'description'),
+    type,
+    body: requireString(args.body, 'body'),
+  });
+  return existing ? `Updated memory "${name}".` : `Saved memory "${name}".`;
+}
+
+async function recallMemoryTool(
+  args: Record<string, unknown>,
+  memory: MemoryStore
+): Promise<string> {
+  const name = requireString(args.name, 'name');
+  const found = await memory.read(name);
+  if (!found) return `No memory named "${name}".`;
+  // Not wrapped as untrusted: a memory is Robin's own note, written by this
+  // agent in an earlier turn, not third-party content arriving from outside.
+  return `# ${found.name} (${found.type})\n${found.description}\n\n${found.body}`;
 }
 
 /**

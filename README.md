@@ -235,6 +235,26 @@ Approvals are recorded in `~/.robin/personality-trust.json`. Your own global fil
 
 Long-running commands stream their output as it arrives, dimmed, rather than appearing all at once when they finish.
 
+## Memory
+
+Robin keeps notes for itself across sessions in `~/.robin/memory/` — one markdown file per memory, plus `profile.md`, the accumulating picture of how you work. Plain files: readable, greppable, and deletable with `rm`.
+
+**Robin decides what to keep.** It calls a `remember` tool when something looks worth persisting — a stable preference, a project constraint, a correction you made — and every tenth turn of a session it's reminded to consider whether anything qualifies. Without that nudge the tool exists but rarely gets used.
+
+**Only the index is sent each turn.** `profile.md` and one line per memory go into the system prompt; the bodies stay on disk until the model pulls one with `recall_memory`. That keeps the per-turn cost flat as memory grows, rather than making a long-time user pay for their whole history on every request.
+
+The index is capped at 8 KB and the profile at 4 KB. Past that, the oldest entries stop being *sent* but stay on disk — `/memory` marks which ones those are.
+
+| Command | Does |
+|---|---|
+| `/memory` | List what Robin has remembered, marking anything no longer sent |
+| `/memory show <name>` | Print one in full |
+| `/memory forget <name>` | Delete it |
+
+**Worth being clear about the trade.** Robin writes these without asking first — that is what makes the feature work, and it means things about you land on disk as a side effect of conversation. The mitigations are all after the fact: it's plain text in a directory you own, `/memory` lists everything, `/memory forget` removes it, and you can edit or delete the files directly. If you'd rather approve each one, that's a small change to a single function — open an issue.
+
+Never stored: credentials, tokens or key material. The tool description forbids it.
+
 ## MCP servers
 
 Robin can connect to [Model Context Protocol](https://modelcontextprotocol.io) servers over stdio, adding their tools alongside its own three. Declare them in `~/.robin/mcp.json` — the same shape other MCP hosts use, so you can paste server blocks straight from their docs:

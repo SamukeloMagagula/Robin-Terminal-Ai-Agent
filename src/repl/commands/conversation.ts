@@ -13,6 +13,10 @@ const CLEAR_SCREEN = '\x1b[2J\x1b[3J\x1b[H';
 
 export async function handleClear(ctx: ReplContext): Promise<void> {
   ctx.session.history = [];
+  // Resets the memory nudge with the conversation: the nudge exists to catch
+  // what was learned in *this* exchange, so carrying the count across a clear
+  // would fire it on turn one of an unrelated one.
+  ctx.session.turnCount = 0;
   ctx.session.chatLog.startNewSession();
   process.stdout.write(CLEAR_SCREEN);
   // Reprinted after the wipe, because clearing the screen also removes the

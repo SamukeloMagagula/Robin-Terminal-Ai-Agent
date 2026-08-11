@@ -6,6 +6,7 @@ import type { UnsupportedModelStore } from '../providers/unsupported-models.js';
 import type { UsageCache } from '../usage/openrouter-usage.js';
 import type { InputHistoryStore } from './input-history.js';
 import type { PersonalityTrustStore } from '../personality-trust.js';
+import type { MemoryStore } from '../memory/store.js';
 import type { ConfirmFn } from '../tools/execute.js';
 
 /**
@@ -38,6 +39,7 @@ export interface ReplContext {
     usage: UsageCache;
     inputHistory: InputHistoryStore;
     personalityTrust: PersonalityTrustStore;
+    memory: MemoryStore;
   };
   confirm: ConfirmFn;
   deps: ReplDeps;

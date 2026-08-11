@@ -16,3 +16,4 @@ export {
 } from './connection.js';
 export { handleHistory } from './history.js';
 export { handlePersonality, loadPersonality } from './personality.js';
+export { handleMemory } from './memory.js';

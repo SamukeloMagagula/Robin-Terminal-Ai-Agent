@@ -17,6 +17,7 @@ import { TrustStore } from '../trust-store.js';
 import { loadMcpConfig } from '../mcp/config.js';
 import { McpRegistry } from '../mcp/registry.js';
 import { filterTrustedServers } from '../mcp/trust.js';
+import { MemoryStore } from '../memory/store.js';
 import { UsageCache } from '../usage/openrouter-usage.js';
 import { renderUsageLine } from '../usage/render-usage.js';
 import { assistantColor, errorColor, mutedColor, divider, box } from '../ui/theme.js';
@@ -39,6 +40,7 @@ import {
   handleTools,
   handleHistory,
   handlePersonality,
+  handleMemory,
   loadPersonality,
 } from './commands/index.js';
 
@@ -65,6 +67,7 @@ const HANDLERS: Partial<Record<ParsedCommand['type'], CommandHandler>> = {
   tools: handleTools,
   history: handleHistory,
   personality: handlePersonality,
+  memory: handleMemory,
 };
 
 const APPROVAL_WORDING: Record<ConfirmRequest['kind'], { question: string; scope: string }> = {
@@ -168,6 +171,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   const usageCache = new UsageCache();
   const unsupportedStore = new UnsupportedModelStore();
   const personalityTrust = new PersonalityTrustStore();
+  const memoryStore = new MemoryStore();
 
   // Before the banner, deliberately: the trust prompt asks the user to approve
   // text that becomes the system prompt, and burying it under the banner is
@@ -191,6 +195,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       usage: usageCache,
       inputHistory: inputHistoryStore,
       personalityTrust,
+      memory: memoryStore,
     },
     confirm: askForApproval,
     deps,
@@ -265,6 +270,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       onOutput: (chunk) => process.stdout.write(mutedColor(chunk)),
       onThinking: (text) => process.stdout.write(mutedColor(text)),
       mcp: mcpRegistry,
+      memory: memoryStore,
       onFallback: ({ error, next }) => {
         console.log(
           mutedColor(`\n  ${error.message} — trying ${next.provider.name} · ${next.model}...`)
