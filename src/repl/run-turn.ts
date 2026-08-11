@@ -18,6 +18,8 @@ export interface TurnOptions {
   onAutoApproved?: (command: string) => void;
   /** Live command output, for display only — the model still gets the whole result. */
   onOutput?: (chunk: string) => void;
+  /** Reasoning summaries, where the provider streams them. Display only. */
+  onThinking?: (text: string) => void;
   /** Called before each retry on a different model. */
   onFallback?: (info: { error: Error; next: FallbackCandidate }) => void;
   /**
@@ -85,6 +87,7 @@ export async function runTurn(
         useTools ? TOOL_DEFINITIONS : [],
         {
           onText: options.onText,
+          onThinking: options.onThinking,
           executeTool: (toolCall, confirm) =>
             executeTool(toolCall, confirm, {
               onAutoApproved: options.onAutoApproved,

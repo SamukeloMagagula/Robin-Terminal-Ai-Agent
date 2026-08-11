@@ -1,12 +1,13 @@
 # robin
 
-Robin is a terminal agent that lets you run your AI. Supports GitHub Copilot, Google Gemini, OpenRouter (via API key), and local Ollama models, with tool-calling (read files, write files, run shell commands) built in.
+Robin is a terminal agent that lets you run your AI. Supports Anthropic (Claude), GitHub Copilot, Google Gemini, OpenRouter (via API key), and local Ollama models, with tool-calling (read files, write files, run shell commands) built in.
 
 Built by Samukelo "Batman" Magagula.
 
 ## Requirements
 
 - Node.js >= 18
+- For Anthropic: a Claude API key from [platform.claude.com](https://platform.claude.com/settings/keys)
 - For Copilot: a GitHub account with Copilot access
 - For Gemini: a Google AI Studio API key
 - For OpenRouter: an OpenRouter API key (gives access to a large, constantly growing catalog of models from many providers — OpenAI, Anthropic, Google, Meta, Mistral, and more — under one key)
@@ -70,6 +71,23 @@ lives in `~/.robin/` — conversations, transcripts, credentials, input history 
 so remove that directory too if you want it gone.
 
 ### Setting up a provider
+
+**Anthropic (Claude):**
+
+```bash
+robin login anthropic
+```
+
+Opens the Claude Console's API keys page; create or copy a key and paste it back. Stored in `~/.robin/auth.json` like every other provider.
+
+Robin talks to Anthropic through the official `@anthropic-ai/sdk` rather than raw HTTP, because the Messages API differs from the OpenAI shape the other providers share — the system prompt is a top-level field, tool results are blocks inside a user message, and tool arguments arrive parsed rather than as a JSON string.
+
+Two behaviours are specific to this provider:
+
+- **Reasoning is shown.** Current Claude models think by default; Robin asks for summarised reasoning and prints it dimmed as it streams, so a thinking pause looks like progress rather than a hang. It is never added to the conversation history.
+- **No temperature knob.** Current models reject `temperature`, `top_p` and `top_k` outright, so Robin doesn't send them. Steer with `/system` or a `PERSONALITY.md` instead.
+
+`/model` lists what your key can reach, defaulting to `claude-opus-5`.
 
 **GitHub Copilot:**
 
@@ -152,6 +170,7 @@ The figure is cached for 60 seconds and refreshed in the background after each r
 robin                    # interactive provider + model picker
 robin chat copilot       # jump straight into Copilot
 robin chat gemini        # jump straight into Gemini
+robin chat anthropic     # jump straight into Claude
 robin chat openrouter    # jump straight into OpenRouter
 robin chat ollama        # jump straight into Ollama
 robin chat random        # let Robin roll a provider and model for you

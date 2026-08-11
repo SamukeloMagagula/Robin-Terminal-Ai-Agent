@@ -203,6 +203,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       // user aware of what Robin actually did.
       onAutoApproved: (command) => console.log(mutedColor(`\n  $ ${command}`)),
       onOutput: (chunk) => process.stdout.write(mutedColor(chunk)),
+      onThinking: (text) => process.stdout.write(mutedColor(text)),
       onFallback: ({ error, next }) => {
         console.log(
           mutedColor(`\n  ${error.message} — trying ${next.provider.name} · ${next.model}...`)

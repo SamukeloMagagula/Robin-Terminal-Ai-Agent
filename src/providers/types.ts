@@ -12,6 +12,12 @@ export interface ToolDefinition {
 
 export type ChatEvent =
   | { type: 'text'; text: string }
+  /**
+   * A summary of the model's reasoning, where the provider streams one.
+   * Shown to the user but never added to the conversation history — the raw
+   * chain of thought is not part of the assistant's reply.
+   */
+  | { type: 'thinking'; text: string }
   | { type: 'tool_call'; toolCall: ToolCall };
 
 export interface Message {
