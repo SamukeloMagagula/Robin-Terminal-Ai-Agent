@@ -20,6 +20,7 @@ export const SLASH_COMMANDS: SlashCommandEntry[] = [
   { name: '/personality', description: 'show, reload, or drop the active personality' },
   { name: '/memory', description: 'list, show, or forget stored memories' },
   { name: '/session', description: 'open, switch between, or close sessions' },
+  { name: '/workflow', description: 'run a plan/build/test/validate pipeline' },
   { name: '/random', description: 'switch to a random provider and model' },
   { name: '/usage', description: 'show OpenRouter spend' },
   { name: '/recall', description: 'search past conversations' },

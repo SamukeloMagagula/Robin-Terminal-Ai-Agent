@@ -22,6 +22,7 @@ import { loadMcpConfig } from '../mcp/config.js';
 import { McpRegistry } from '../mcp/registry.js';
 import { filterTrustedServers } from '../mcp/trust.js';
 import { MemoryStore } from '../memory/store.js';
+import { WorkflowStore } from '../workflow/store.js';
 import { RecallSearch } from '../recall/search.js';
 import { UsageCache } from '../usage/openrouter-usage.js';
 import { renderUsageLine } from '../usage/render-usage.js';
@@ -47,6 +48,7 @@ import {
   handlePersonality,
   handleMemory,
   handleSession,
+  handleWorkflow,
   loadPersonality,
 } from './commands/index.js';
 
@@ -75,6 +77,7 @@ const HANDLERS: Partial<Record<ParsedCommand['type'], CommandHandler>> = {
   personality: handlePersonality,
   memory: handleMemory,
   session: handleSession,
+  workflow: handleWorkflow,
 };
 
 const APPROVAL_WORDING: Record<ConfirmRequest['kind'], { question: string; scope: string }> = {
@@ -180,6 +183,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   const unsupportedStore = new UnsupportedModelStore();
   const personalityTrust = new PersonalityTrustStore();
   const memoryStore = new MemoryStore();
+  const workflowStore = new WorkflowStore();
   const recallSearch = new RecallSearch(undefined, (count) =>
     console.log(mutedColor(`Indexing ${count} transcript(s) for search...`))
   );
@@ -211,6 +215,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       personalityTrust,
       memory: memoryStore,
       recall: recallSearch,
+      workflow: workflowStore,
     },
     confirm: askForApproval,
     deps,

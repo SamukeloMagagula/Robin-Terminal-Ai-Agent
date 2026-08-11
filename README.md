@@ -237,6 +237,24 @@ Approvals are recorded in `~/.robin/personality-trust.json`. Your own global fil
 
 Long-running commands stream their output as it arrives, dimmed, rather than appearing all at once when they finish.
 
+## Workflows
+
+`/workflow` runs a piece of work through four roles, each on a model you choose: **planner** decides what to do, **builder** makes the change, **tester** runs the checks, **validator** judges whether it met the goal.
+
+```bash
+/workflow new            # name it, then pick a provider and model per role
+/workflow run <goal>     # start
+/workflow show <name>    # see which model has which role
+```
+
+**It stops after every stage** and asks: approve, retry with a note, skip, or quit. Nothing runs unattended.
+
+Each stage is a **fresh conversation** given only the artifacts it needs — the validator sees the plan, what was built and the test results, but never a transcript of the builder explaining why its own work is correct. That bias is the reason the role is separate.
+
+The validator ends with `VERDICT: PASS` or `VERDICT: FAIL`. A failure goes back to the builder with the reasons attached, capped at **three build attempts** — past that the loop isn't converging and Robin reports rather than burning tokens. If the verdict line is missing or unreadable, Robin says so and asks you; it will not guess a pass.
+
+The planner runs with **tools off** — a stage whose job is deciding what to do shouldn't be editing files while it decides. The other three have tools, and **every tool call still asks for approval**. A workflow automates the prompting, not the consent.
+
 ## Sessions
 
 Robin holds up to nine conversations at once. `/session new` opens one (picking its own provider and model), `/session 2` switches, `/session` lists what's open, `/session name <label>` labels the current one, and `/session close [n]` closes one.

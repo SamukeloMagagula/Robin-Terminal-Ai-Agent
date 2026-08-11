@@ -9,6 +9,7 @@ import type { InputHistoryStore } from './input-history.js';
 import type { PersonalityTrustStore } from '../personality-trust.js';
 import type { MemoryStore } from '../memory/store.js';
 import type { RecallSearch } from '../recall/search.js';
+import type { WorkflowStore } from '../workflow/store.js';
 import type { ConfirmFn } from '../tools/execute.js';
 
 /**
@@ -45,6 +46,7 @@ export interface ReplContext {
     personalityTrust: PersonalityTrustStore;
     memory: MemoryStore;
     recall: RecallSearch;
+    workflow: WorkflowStore;
   };
   confirm: ConfirmFn;
   deps: ReplDeps;
