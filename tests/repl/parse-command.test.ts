@@ -110,4 +110,10 @@ describe('parseCommand', () => {
     expect(parseCommand('/history')).toEqual({ type: 'history', arg: undefined });
     expect(parseCommand('/history clear')).toEqual({ type: 'history', arg: 'clear' });
   });
+
+  it('recognises /personality and its subcommands', () => {
+    expect(parseCommand('/personality')).toEqual({ type: 'personality', arg: undefined });
+    expect(parseCommand('/personality reload')).toEqual({ type: 'personality', arg: 'reload' });
+    expect(parseCommand('/personality off')).toEqual({ type: 'personality', arg: 'off' });
+  });
 });

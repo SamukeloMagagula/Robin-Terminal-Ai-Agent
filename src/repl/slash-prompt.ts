@@ -16,6 +16,7 @@ export const SLASH_COMMANDS: SlashCommandEntry[] = [
   { name: '/load', description: 'load a saved conversation' },
   { name: '/copy', description: "copy the assistant's last reply" },
   { name: '/skill', description: 'save/use/list system-prompt presets' },
+  { name: '/personality', description: 'show, reload, or drop the active personality' },
   { name: '/random', description: 'switch to a random provider and model' },
   { name: '/usage', description: 'show OpenRouter spend' },
   { name: '/recall', description: 'search past conversations' },

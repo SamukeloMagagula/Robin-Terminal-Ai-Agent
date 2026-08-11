@@ -16,6 +16,7 @@ export const HELP_ENTRIES: [string, string][] = [
   ['/skill save <name>', 'save the current system prompt as a reusable named preset'],
   ['/skill use <name>', 'load a saved preset as the system prompt'],
   ['/skill [list]', 'list saved presets'],
+  ['/personality [reload|off]', 'show the active PERSONALITY.md, reload it, or drop it'],
   ['/random', 'switch to a randomly chosen provider and model'],
   ['/usage', 'OpenRouter spend for this key, and the account balance'],
   ['/recall <query>', 'search past conversations under ~/.robin/chats/'],

@@ -11,6 +11,7 @@ import { runTurn } from './run-turn.js';
 import { readSlashAwareLine } from './slash-prompt.js';
 import { addToInputHistory, InputHistoryStore } from './input-history.js';
 import { UnsupportedModelStore } from '../providers/unsupported-models.js';
+import { PersonalityTrustStore } from '../personality-trust.js';
 import { UsageCache } from '../usage/openrouter-usage.js';
 import { renderUsageLine } from '../usage/render-usage.js';
 import { assistantColor, errorColor, mutedColor, divider, box } from '../ui/theme.js';
@@ -32,6 +33,8 @@ import {
   handleSystem,
   handleTools,
   handleHistory,
+  handlePersonality,
+  loadPersonality,
 } from './commands/index.js';
 
 // Re-exported so src/cli.ts keeps importing ReplDeps from here unchanged.
@@ -56,6 +59,7 @@ const HANDLERS: Partial<Record<ParsedCommand['type'], CommandHandler>> = {
   system: handleSystem,
   tools: handleTools,
   history: handleHistory,
+  personality: handlePersonality,
 };
 
 const APPROVAL_WORDING: Record<ConfirmRequest['kind'], { question: string; scope: string }> = {
@@ -111,6 +115,13 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   const askForApproval = createApprovalGate();
   const usageCache = new UsageCache();
   const unsupportedStore = new UnsupportedModelStore();
+  const personalityTrust = new PersonalityTrustStore();
+
+  // Before the banner, deliberately: the trust prompt asks the user to approve
+  // text that becomes the system prompt, and burying it under the banner is
+  // how people learn to approve without reading.
+  const { text: personality } = await loadPersonality(personalityTrust);
+  session.personality = personality;
 
   // Built once. `session` is never reassigned — commands mutate its fields —
   // so this reference stays correct for the life of the loop.
@@ -123,6 +134,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       unsupported: unsupportedStore,
       usage: usageCache,
       inputHistory: inputHistoryStore,
+      personalityTrust,
     },
     confirm: askForApproval,
     deps,
