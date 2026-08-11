@@ -49,10 +49,16 @@ export class OpenRouterProvider implements Provider {
     return data.data.map((m) => m.id);
   }
 
-  async *chat(model: string, messages: Message[], tools?: ToolDefinition[]): AsyncIterable<ChatEvent> {
+  async *chat(
+    model: string,
+    messages: Message[],
+    tools?: ToolDefinition[],
+    signal?: AbortSignal
+  ): AsyncIterable<ChatEvent> {
     const apiKey = await this.getApiKey();
     const res = await fetch(`${BASE_URL}/chat/completions`, {
       method: 'POST',
+      signal,
       headers: {
         authorization: `Bearer ${apiKey}`,
         'content-type': 'application/json',

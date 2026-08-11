@@ -158,10 +158,16 @@ export class CopilotProvider implements Provider {
     }
   }
 
-  async *chat(model: string, messages: Message[], tools?: ToolDefinition[]): AsyncIterable<ChatEvent> {
+  async *chat(
+    model: string,
+    messages: Message[],
+    tools?: ToolDefinition[],
+    signal?: AbortSignal
+  ): AsyncIterable<ChatEvent> {
     const token = await this.getCopilotToken();
     const res = await fetch(`${COPILOT_API}/chat/completions`, {
       method: 'POST',
+      signal,
       headers: {
         authorization: `Bearer ${token}`,
         'content-type': 'application/json',

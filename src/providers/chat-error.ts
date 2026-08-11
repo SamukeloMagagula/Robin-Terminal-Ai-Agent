@@ -79,3 +79,18 @@ export function isProviderQuotaExhausted(error: unknown): boolean {
   if (!(error instanceof ChatRequestError)) return false;
   return error.status === 429 || error.status === 402;
 }
+
+/**
+ * Whether an error is a user-requested cancellation rather than a failure.
+ *
+ * This distinction decides whether the fallback chain runs. Treating an abort
+ * as a provider failure would send the same prompt to a second model
+ * immediately after the user asked for it to stop — the opposite of what they
+ * pressed Esc for.
+ *
+ * DOMException (what fetch throws) extends Error, so the one check covers both
+ * it and a hand-rolled Error with the same name.
+ */
+export function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}

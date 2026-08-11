@@ -71,9 +71,15 @@ export class OllamaProvider implements Provider {
     return data.models.map((m) => m.name);
   }
 
-  async *chat(model: string, messages: Message[], tools?: ToolDefinition[]): AsyncIterable<ChatEvent> {
+  async *chat(
+    model: string,
+    messages: Message[],
+    tools?: ToolDefinition[],
+    signal?: AbortSignal
+  ): AsyncIterable<ChatEvent> {
     const res = await fetch(`${BASE_URL}/api/chat`, {
       method: 'POST',
+      signal,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         model,
