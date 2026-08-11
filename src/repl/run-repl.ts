@@ -1,12 +1,9 @@
 import chalk from 'chalk';
 import { expand } from '@inquirer/prompts';
-import type { Provider } from '../providers/types.js';
 import { parseCommand, type ParsedCommand } from './parse-command.js';
 import { type ConfirmRequest } from '../tools/execute.js';
-import { TOOL_DEFINITIONS } from '../tools/definitions.js';
 import { printBanner, printConnectionLine } from '../ui/banner.js';
 import { newSessionId } from '../session-id.js';
-import { environmentPrompt } from '../environment-prompt.js';
 import { ConversationStore } from '../conversation-store.js';
 import { SkillStore } from '../skill-store.js';
 import { createSession } from './session.js';
@@ -20,6 +17,7 @@ import { assistantColor, errorColor, mutedColor, divider, box } from '../ui/them
 import {
   type ReplContext,
   type CommandHandler,
+  type ReplDeps,
   handleHelp,
   handleUsage,
   handleRecall,
@@ -28,16 +26,15 @@ import {
   handleSkill,
   handleSave,
   handleLoad,
+  handleModel,
+  handleProvider,
+  handleRandom,
+  handleSystem,
+  handleTools,
 } from './commands/index.js';
 
-export interface ReplDeps {
-  provider: Provider;
-  model: string;
-  pickModel: (provider: Provider) => Promise<string>;
-  pickProviderAndModel: () => Promise<{ provider: Provider; model: string }>;
-  /** Re-rolls a random provider/model pair, announcing what it landed on. */
-  rollRandom: () => Promise<{ provider: Provider; model: string }>;
-}
+// Re-exported so src/cli.ts keeps importing ReplDeps from here unchanged.
+export type { ReplDeps } from './repl-context.js';
 
 /**
  * Commands that are wholly handled by a module under ./commands/. Anything
@@ -52,6 +49,11 @@ const HANDLERS: Partial<Record<ParsedCommand['type'], CommandHandler>> = {
   skill: handleSkill,
   save: handleSave,
   load: handleLoad,
+  model: handleModel,
+  provider: handleProvider,
+  random: handleRandom,
+  system: handleSystem,
+  tools: handleTools,
 };
 
 const APPROVAL_WORDING: Record<ConfirmRequest['kind'], { question: string; scope: string }> = {
@@ -118,6 +120,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       usage: usageCache,
     },
     confirm: askForApproval,
+    deps,
   };
 
   // Fetched before the banner so the figure is on screen from the first
@@ -160,70 +163,6 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     const handler = HANDLERS[cmd.type];
     if (handler) {
       await handler(ctx, cmd.arg);
-      continue;
-    }
-
-    if (cmd.type === 'model') {
-      session.model = await deps.pickModel(session.provider);
-      session.history = [];
-      session.chatLog.startNewSession();
-      printConnectionLine(session.provider.name, session.model);
-      continue;
-    }
-
-    if (cmd.type === 'provider') {
-      const picked = await deps.pickProviderAndModel();
-      session.provider = picked.provider;
-      session.model = picked.model;
-      session.history = [];
-      session.chatLog.startNewSession();
-      printConnectionLine(session.provider.name, session.model);
-      continue;
-    }
-
-    if (cmd.type === 'random') {
-      // A re-roll is a provider switch, so it resets history and starts a new
-      // transcript exactly like /model and /provider do.
-      try {
-        const rolled = await deps.rollRandom();
-        session.provider = rolled.provider;
-        session.model = rolled.model;
-        session.history = [];
-        session.chatLog.startNewSession();
-        printConnectionLine(session.provider.name, session.model);
-      } catch (err) {
-        console.log(errorColor(`✖ ${(err as Error).message}`));
-      }
-      continue;
-    }
-
-    if (cmd.type === 'system') {
-      if (!cmd.arg) {
-        console.log(
-          session.systemPrompt
-            ? mutedColor(session.systemPrompt)
-            : mutedColor('No system prompt set. Usage: /system <text>  or  /system clear')
-        );
-        console.log(mutedColor(`\nAlways sent:\n${environmentPrompt()}`));
-      } else if (cmd.arg === 'clear') {
-        session.systemPrompt = undefined;
-        console.log(chalk.gray('System prompt cleared.'));
-      } else {
-        session.systemPrompt = cmd.arg;
-        console.log(chalk.gray('System prompt set.'));
-      }
-      continue;
-    }
-
-    if (cmd.type === 'tools') {
-      if (cmd.arg === 'list') {
-        for (const tool of TOOL_DEFINITIONS) {
-          console.log(`  ${assistantColor(tool.name.padEnd(14))}${mutedColor(tool.description)}`);
-        }
-      } else {
-        session.toolsEnabled = !session.toolsEnabled;
-        console.log(chalk.gray(`Tools ${session.toolsEnabled ? 'enabled' : 'disabled'}.`));
-      }
       continue;
     }
 

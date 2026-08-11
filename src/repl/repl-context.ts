@@ -1,9 +1,23 @@
 import type { Session } from './session.js';
+import type { Provider } from '../providers/types.js';
 import type { ConversationStore } from '../conversation-store.js';
 import type { SkillStore } from '../skill-store.js';
 import type { UnsupportedModelStore } from '../providers/unsupported-models.js';
 import type { UsageCache } from '../usage/openrouter-usage.js';
 import type { ConfirmFn } from '../tools/execute.js';
+
+/**
+ * The pickers, injected by the CLI so the REPL never imports inquirer's
+ * provider/model menus directly.
+ */
+export interface ReplDeps {
+  provider: Provider;
+  model: string;
+  pickModel: (provider: Provider) => Promise<string>;
+  pickProviderAndModel: () => Promise<{ provider: Provider; model: string }>;
+  /** Re-rolls a random provider/model pair, announcing what it landed on. */
+  rollRandom: () => Promise<{ provider: Provider; model: string }>;
+}
 
 /**
  * Everything a command handler is allowed to touch.
@@ -22,6 +36,7 @@ export interface ReplContext {
     usage: UsageCache;
   };
   confirm: ConfirmFn;
+  deps: ReplDeps;
 }
 
 export type CommandHandler = (ctx: ReplContext, arg?: string) => Promise<void>;

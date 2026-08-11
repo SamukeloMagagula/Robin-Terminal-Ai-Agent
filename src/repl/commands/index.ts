@@ -1,4 +1,4 @@
-export type { ReplContext, CommandHandler } from '../repl-context.js';
+export type { ReplContext, CommandHandler, ReplDeps } from '../repl-context.js';
 export { HELP_ENTRIES, handleHelp, handleUsage, handleRecall } from './info.js';
 export {
   handleClear,
@@ -7,3 +7,10 @@ export {
   handleSave,
   handleLoad,
 } from './conversation.js';
+export {
+  handleModel,
+  handleProvider,
+  handleRandom,
+  handleSystem,
+  handleTools,
+} from './connection.js';
