@@ -19,6 +19,7 @@ export const SLASH_COMMANDS: SlashCommandEntry[] = [
   { name: '/random', description: 'switch to a random provider and model' },
   { name: '/usage', description: 'show OpenRouter spend' },
   { name: '/recall', description: 'search past conversations' },
+  { name: '/history', description: 'show or clear stored input history' },
   { name: '/clear', description: 'reset the conversation' },
   { name: '/exit', description: 'quit' },
 ];

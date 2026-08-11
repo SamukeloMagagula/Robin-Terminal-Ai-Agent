@@ -14,3 +14,4 @@ export {
   handleSystem,
   handleTools,
 } from './connection.js';
+export { handleHistory } from './history.js';

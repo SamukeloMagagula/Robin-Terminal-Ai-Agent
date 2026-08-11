@@ -9,7 +9,7 @@ import { SkillStore } from '../skill-store.js';
 import { createSession } from './session.js';
 import { runTurn } from './run-turn.js';
 import { readSlashAwareLine } from './slash-prompt.js';
-import { addToInputHistory } from './input-history.js';
+import { addToInputHistory, InputHistoryStore } from './input-history.js';
 import { UnsupportedModelStore } from '../providers/unsupported-models.js';
 import { UsageCache } from '../usage/openrouter-usage.js';
 import { renderUsageLine } from '../usage/render-usage.js';
@@ -31,6 +31,7 @@ import {
   handleRandom,
   handleSystem,
   handleTools,
+  handleHistory,
 } from './commands/index.js';
 
 // Re-exported so src/cli.ts keeps importing ReplDeps from here unchanged.
@@ -54,6 +55,7 @@ const HANDLERS: Partial<Record<ParsedCommand['type'], CommandHandler>> = {
   random: handleRandom,
   system: handleSystem,
   tools: handleTools,
+  history: handleHistory,
 };
 
 const APPROVAL_WORDING: Record<ConfirmRequest['kind'], { question: string; scope: string }> = {
@@ -99,9 +101,11 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   // Never reassigned — commands mutate its fields. Task 4's handlers depend on
   // that, since they hold a reference to this object rather than re-reading it.
   const session = createSession(deps.provider, deps.model);
-  // Prompt lines, for up/down recall. Session-only; deliberately never
-  // persisted, since prompts carry the same sensitive material as transcripts.
-  let inputHistory: string[] = [];
+  // Prompt lines, for up/down recall. Persisted to ~/.robin/input-history —
+  // the same private tree that already holds full transcripts, so this adds no
+  // new class of exposure. ROBIN_NO_HISTORY_FILE=1 keeps it session-only.
+  const inputHistoryStore = new InputHistoryStore();
+  let inputHistory: string[] = await inputHistoryStore.load();
   const conversationStore = new ConversationStore();
   const skillStore = new SkillStore();
   const askForApproval = createApprovalGate();
@@ -118,6 +122,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       skill: skillStore,
       unsupported: unsupportedStore,
       usage: usageCache,
+      inputHistory: inputHistoryStore,
     },
     confirm: askForApproval,
     deps,
@@ -151,6 +156,12 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     // the conversation sent to the model. Distinct names on purpose.
     const line = await readSlashAwareLine(inputHistory);
     inputHistory = addToInputHistory(inputHistory, line);
+    // addToInputHistory returns a new array, so the context needs re-pointing
+    // at it — /history reads and clears the live one.
+    ctx.inputHistory = inputHistory;
+    // Fire-and-forget: the store swallows its own errors, and the prompt must
+    // never wait on a disk write.
+    void inputHistoryStore.append(line);
     const cmd = parseCommand(line);
 
     if (cmd.type === 'exit') break;

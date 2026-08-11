@@ -19,6 +19,7 @@ export const HELP_ENTRIES: [string, string][] = [
   ['/random', 'switch to a randomly chosen provider and model'],
   ['/usage', 'OpenRouter spend for this key, and the account balance'],
   ['/recall <query>', 'search past conversations under ~/.robin/chats/'],
+  ['/history', 'show where input history is stored, or "/history clear" to wipe it'],
   ['/clear', 'reset the conversation'],
   ['/exit', 'quit'],
 ];

@@ -105,4 +105,9 @@ describe('parseCommand', () => {
   it('ignores an argument to /random', () => {
     expect(parseCommand('/random please')).toEqual({ type: 'random', arg: 'please' });
   });
+
+  it('recognises /history and its clear subcommand', () => {
+    expect(parseCommand('/history')).toEqual({ type: 'history', arg: undefined });
+    expect(parseCommand('/history clear')).toEqual({ type: 'history', arg: 'clear' });
+  });
 });

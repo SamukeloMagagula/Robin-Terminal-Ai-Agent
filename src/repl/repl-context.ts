@@ -4,6 +4,7 @@ import type { ConversationStore } from '../conversation-store.js';
 import type { SkillStore } from '../skill-store.js';
 import type { UnsupportedModelStore } from '../providers/unsupported-models.js';
 import type { UsageCache } from '../usage/openrouter-usage.js';
+import type { InputHistoryStore } from './input-history.js';
 import type { ConfirmFn } from '../tools/execute.js';
 
 /**
@@ -34,6 +35,7 @@ export interface ReplContext {
     skill: SkillStore;
     unsupported: UnsupportedModelStore;
     usage: UsageCache;
+    inputHistory: InputHistoryStore;
   };
   confirm: ConfirmFn;
   deps: ReplDeps;
