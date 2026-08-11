@@ -8,6 +8,7 @@ import { ConversationStore } from '../conversation-store.js';
 import { SkillStore } from '../skill-store.js';
 import { createSession } from './session.js';
 import { runTurn } from './run-turn.js';
+import { listenForInterrupt } from './interrupt.js';
 import { readSlashAwareLine } from './slash-prompt.js';
 import { addToInputHistory, InputHistoryStore } from './input-history.js';
 import { UnsupportedModelStore } from '../providers/unsupported-models.js';
@@ -192,7 +193,9 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     if (!cmd.arg) continue;
 
     process.stdout.write(assistantColor('» '));
+    const interrupt = listenForInterrupt();
     const result = await runTurn(session, cmd.arg, {
+      signal: interrupt.signal,
       onText: (text) => process.stdout.write(text),
       confirm: askForApproval,
       unsupportedStore,
@@ -207,8 +210,15 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       },
     });
 
+    // Must run whatever the outcome — leaving the terminal in raw mode would
+    // make the next prompt unusable.
+    interrupt.dispose();
+
     if (result.ok) {
       process.stdout.write('\n');
+      if (result.aborted) {
+        console.log(mutedColor('Interrupted. Your next message continues from here.'));
+      }
       if (result.provider.id !== session.provider.id || result.model !== session.model) {
         session.provider = result.provider;
         session.model = result.model;
