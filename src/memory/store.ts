@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { parseFrontmatter } from '../frontmatter.js';
 
 export type MemoryType = 'user' | 'project' | 'reference';
 
@@ -167,23 +168,3 @@ export class MemoryStore {
   }
 }
 
-/**
- * A deliberately small frontmatter reader: `key: value` lines between `---`
- * fences. Memories are written by Robin and hand-edited by the user, so a full
- * YAML parser would be a dependency bought for nothing.
- */
-function parseFrontmatter(raw: string): { fields: Record<string, string>; body: string } | undefined {
-  const normalised = raw.replace(/\r\n/g, '\n');
-  if (!normalised.startsWith('---\n')) return undefined;
-  const end = normalised.indexOf('\n---', 3);
-  if (end === -1) return undefined;
-
-  const fields: Record<string, string> = {};
-  for (const line of normalised.slice(4, end).split('\n')) {
-    const separator = line.indexOf(':');
-    if (separator === -1) continue;
-    fields[line.slice(0, separator).trim()] = line.slice(separator + 1).trim();
-  }
-  const body = normalised.slice(end + '\n---'.length).replace(/^\n+/, '').trimEnd();
-  return { fields, body };
-}

@@ -3,6 +3,8 @@ import type { ConfirmFn } from '../tools/execute.js';
 import type { Session } from './session.js';
 import { buildSystemPrompt } from './session.js';
 import type { MemoryStore } from '../memory/store.js';
+import type { SkillStore } from '../skills/store.js';
+import { SKILL_TOOL_DEFINITIONS, composeSkillContext } from '../skills/tools.js';
 import {
   MEMORY_TOOL_DEFINITIONS,
   NUDGE_EVERY,
@@ -28,6 +30,8 @@ export interface TurnOptions {
   onThinking?: (text: string) => void;
   /** Enables the memory tools, the memory block, and the nudge. */
   memory?: MemoryStore;
+  /** Enables the skill tools and the skills index. */
+  skills?: SkillStore;
   /** MCP tools for this turn, offered to the model alongside the built-ins. */
   mcp?: {
     toolDefinitions(): ToolDefinition[];
@@ -83,6 +87,9 @@ export async function runTurn(
       await options.memory.index()
     );
   }
+  if (options.skills) {
+    session.skills = composeSkillContext(await options.skills.index());
+  }
   session.turnCount += 1;
   const nudge = Boolean(options.memory) && session.turnCount % NUDGE_EVERY === 0;
 
@@ -113,6 +120,7 @@ export async function runTurn(
           ? [
               ...TOOL_DEFINITIONS,
               ...(options.memory ? MEMORY_TOOL_DEFINITIONS : []),
+              ...(options.skills ? SKILL_TOOL_DEFINITIONS : []),
               ...(options.mcp?.toolDefinitions() ?? []),
             ]
           : [],
@@ -125,6 +133,7 @@ export async function runTurn(
               onOutput: options.onOutput,
               mcp: options.mcp,
               memory: options.memory,
+              skills: options.skills,
             }),
           confirm: options.confirm,
           signal: options.signal,

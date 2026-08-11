@@ -5,7 +5,7 @@ import { type ConfirmRequest } from '../tools/execute.js';
 import { printBanner, printConnectionLine } from '../ui/banner.js';
 import { newSessionId } from '../session-id.js';
 import { ConversationStore } from '../conversation-store.js';
-import { SkillStore } from '../skill-store.js';
+import { SkillStore } from '../skills/store.js';
 import { createSession } from './session.js';
 import { runTurn } from './run-turn.js';
 import { listenForInterrupt } from './interrupt.js';
@@ -277,6 +277,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       onThinking: (text) => process.stdout.write(mutedColor(text)),
       mcp: mcpRegistry,
       memory: memoryStore,
+      skills: skillStore,
       onFallback: ({ error, next }) => {
         console.log(
           mutedColor(`\n  ${error.message} — trying ${next.provider.name} · ${next.model}...`)

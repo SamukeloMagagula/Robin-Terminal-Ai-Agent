@@ -1,7 +1,7 @@
 import type { Session } from './session.js';
 import type { Provider } from '../providers/types.js';
 import type { ConversationStore } from '../conversation-store.js';
-import type { SkillStore } from '../skill-store.js';
+import type { SkillStore } from '../skills/store.js';
 import type { UnsupportedModelStore } from '../providers/unsupported-models.js';
 import type { UsageCache } from '../usage/openrouter-usage.js';
 import type { InputHistoryStore } from './input-history.js';

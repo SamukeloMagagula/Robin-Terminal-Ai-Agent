@@ -5,6 +5,7 @@ import type { ToolCall } from '../providers/types.js';
 import { checkPath, defaultSensitiveDirs } from './sensitive-paths.js';
 import { isReadOnlyCommand } from './command-safety.js';
 import type { MemoryStore, MemoryType } from '../memory/store.js';
+import type { SkillStore } from '../skills/store.js';
 
 export { isReadOnlyCommand } from './command-safety.js';
 
@@ -89,6 +90,8 @@ export interface ExecuteOptions {
   };
   /** Enables the `remember` and `recall_memory` tools when present. */
   memory?: MemoryStore;
+  /** Enables the `use_skill` and `create_skill` tools when present. */
+  skills?: SkillStore;
 }
 
 export async function executeTool(
@@ -129,6 +132,12 @@ export async function executeTool(
       case 'recall_memory':
         if (!options.memory) return 'Error: memory is not available in this session.';
         return await recallMemoryTool(args, options.memory);
+      case 'use_skill':
+        if (!options.skills) return 'Error: skills are not available in this session.';
+        return await useSkillTool(args, options.skills);
+      case 'create_skill':
+        if (!options.skills) return 'Error: skills are not available in this session.';
+        return await createSkillTool(args, confirm, options.skills);
       case 'run_command':
         return await runCommandTool(
           requireString(args.command, 'command'),
@@ -252,6 +261,46 @@ async function recallMemoryTool(
   // Not wrapped as untrusted: a memory is Robin's own note, written by this
   // agent in an earlier turn, not third-party content arriving from outside.
   return `# ${found.name} (${found.type})\n${found.description}\n\n${found.body}`;
+}
+
+/** Loads a skill's instructions. Reading Robin's own note needs no gate. */
+async function useSkillTool(
+  args: Record<string, unknown>,
+  skills: SkillStore
+): Promise<string> {
+  const name = requireString(args.name, 'name');
+  const skill = await skills.read(name);
+  if (!skill) return `No skill named "${name}".`;
+  return `# Skill: ${skill.name}\n${skill.description}\n\n${skill.body}`;
+}
+
+/**
+ * Writes a new skill.
+ *
+ * Unlike `remember`, this **is** gated. A memory is a private note; a skill is
+ * a standing instruction set that will shape later sessions, and one written
+ * from a misunderstanding would quietly steer every future task. Cheap to
+ * approve, expensive to discover months later.
+ */
+async function createSkillTool(
+  args: Record<string, unknown>,
+  confirm: ConfirmFn,
+  skills: SkillStore
+): Promise<string> {
+  const name = requireString(args.name, 'name');
+  const description = requireString(args.description, 'description');
+  const body = requireString(args.body, 'body');
+
+  const approved = await confirm({
+    kind: 'write_file',
+    message:
+      `Save a new skill "${name}"?\n${description}\n\n` +
+      `${body.length > MAX_PREVIEW_LENGTH ? `${body.slice(0, MAX_PREVIEW_LENGTH)}...` : body}`,
+  });
+  if (!approved) return `Saving skill "${name}" was declined by the user.`;
+
+  await skills.write({ name, description, body });
+  return `Saved skill "${name}". It will be offered in future sessions.`;
 }
 
 /**

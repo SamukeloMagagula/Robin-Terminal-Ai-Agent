@@ -193,9 +193,11 @@ In a chat session, typing `/` shows a live-filtered popup of matching commands a
 - `/save [name]` — save the current conversation under `~/.robin/conversations/<name>.json`; `/save` with no name lists what's saved
 - `/load [name]` — load a previously saved conversation back into the session; `/load` with no name lists what's saved
 - `/copy` — copy the assistant's last reply to your system clipboard
-- `/skill save <name>` — save the current system prompt as a reusable named preset under `~/.robin/skills/<name>.json`
-- `/skill use <name>` — load a saved preset as the current system prompt
-- `/skill [list]` — list saved presets
+- `/skill save <name>` — save the current system prompt as a reusable skill under `~/.robin/skills/<name>/SKILL.md`
+- `/skill use <name>` — apply a saved skill as the current system prompt
+- `/skill [list]` — list saved skills with their descriptions
+- `/skill forget <name>` — delete a skill
+- `/skill migrate` — convert pre-markdown `.json` presets to the new layout
 - `/personality [reload|off]` — show the active `PERSONALITY.md`, re-read it after an edit, or drop it for the session
 - `/random` — re-roll onto a randomly chosen provider and model
 - `/usage` — OpenRouter spend for this key (UTC day/week/month, all time) and the account balance
@@ -234,6 +236,18 @@ Approvals are recorded in `~/.robin/personality-trust.json`. Your own global fil
 | `Ctrl+C` | Quit |
 
 Long-running commands stream their output as it arrives, dimmed, rather than appearing all at once when they finish.
+
+## Skills
+
+A skill is a reusable instruction set. Each lives in its own directory as `~/.robin/skills/<name>/SKILL.md`, with `name` and `description` frontmatter — the [agentskills.io](https://agentskills.io) layout, so a skill written here can be shared with other tools and one written elsewhere can be dropped in.
+
+Save the current system prompt as a skill with `/skill save <name>`, apply one with `/skill use <name>`, and `/skill` lists them with their descriptions.
+
+**Robin can also write its own.** After working something out, it may call `create_skill` to keep the procedure — but unlike memories, this **asks first**. A memory is a private note; a skill is a standing instruction set that will shape every later session, and one written from a misunderstanding would quietly steer future work. Cheap to approve now, expensive to find months later.
+
+Only the descriptions go into the system prompt. The bodies are whole instruction sets, so the model pulls one with `use_skill` when a line matches the task — the same index/body split memory uses.
+
+**Migrating from the old format.** Robin used to store skills as flat `<name>.json` files holding a bare system prompt. Those still load, so nothing you saved has stopped working. `/skill migrate` converts them to the new layout and **leaves the originals in place** — a conversion you didn't ask for shouldn't be able to lose the only copy of something you wrote. Delete the `.json` files yourself once you're happy.
 
 ## Memory
 

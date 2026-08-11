@@ -22,6 +22,8 @@ export interface Session {
   personality?: string;
   /** Profile plus the one-line memory index. Refreshed before each turn. */
   memory?: string;
+  /** One-line index of available skills. Refreshed before each turn. */
+  skills?: string;
   /**
    * Turns taken in this session, for nudge cadence. Session-scoped and reset
    * by /clear: the nudge exists to catch what was learned in *this*
@@ -63,6 +65,7 @@ export function buildSystemPrompt(
   // Memory is context, so it sits after standing behaviour and before the
   // user's own instructions — /system stays the last word.
   if (session.memory) parts.push(session.memory);
+  if (session.skills) parts.push(session.skills);
   if (session.systemPrompt) parts.push(session.systemPrompt);
   if (options.nudge) parts.push(MEMORY_NUDGE);
   return parts.join('\n\n');
