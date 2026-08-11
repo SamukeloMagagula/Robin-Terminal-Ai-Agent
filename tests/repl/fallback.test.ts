@@ -5,6 +5,23 @@ import {
   MAX_SAME_PROVIDER_CANDIDATES,
 } from '../../src/repl/fallback';
 import type { Provider } from '../../src/providers/types';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { UnsupportedModelStore } from '../../src/providers/unsupported-models';
+
+/**
+ * A store pointed at a file that does not exist.
+ *
+ * buildFallbackCandidates defaults to ~/.robin/unsupported-models.json — the
+ * developer's real one. These tests passed on a clean machine and began
+ * failing the moment someone actually used Robin and a provider rejected a
+ * model named here. A unit test must not read the home directory.
+ */
+function isolatedStore(): UnsupportedModelStore {
+  return new UnsupportedModelStore(
+    path.join(os.tmpdir(), `robin-fallback-test-${Date.now()}-${Math.random()}.json`)
+  );
+}
 
 function fakeProvider(overrides: Partial<Provider> & { id: string; name: string }): Provider {
   return {
@@ -25,7 +42,7 @@ describe('buildFallbackCandidates', () => {
       listModels: vi.fn().mockResolvedValue(['gpt-4o', 'gpt-4o-mini']),
     });
 
-    const candidates = await buildFallbackCandidates(current, 'gpt-4o', [current]);
+    const candidates = await buildFallbackCandidates(current, 'gpt-4o', [current], isolatedStore());
 
     expect(candidates).toEqual([{ provider: current, model: 'gpt-4o-mini' }]);
   });
@@ -37,7 +54,7 @@ describe('buildFallbackCandidates', () => {
       listModels: vi.fn().mockResolvedValue(['gpt-4o']),
     });
 
-    const candidates = await buildFallbackCandidates(current, 'gpt-4o', [current]);
+    const candidates = await buildFallbackCandidates(current, 'gpt-4o', [current], isolatedStore());
 
     expect(candidates).toEqual([]);
   });
@@ -55,7 +72,7 @@ describe('buildFallbackCandidates', () => {
       listModels: vi.fn().mockResolvedValue(['llama3.1:latest']),
     });
 
-    const candidates = await buildFallbackCandidates(current, 'gpt-4o', [current, other]);
+    const candidates = await buildFallbackCandidates(current, 'gpt-4o', [current, other], isolatedStore());
 
     expect(candidates).toEqual([{ provider: other, model: 'llama3.1:latest' }]);
   });
@@ -73,7 +90,7 @@ describe('buildFallbackCandidates', () => {
       listModels: vi.fn().mockResolvedValue(['llama3.1:latest']),
     });
 
-    const candidates = await buildFallbackCandidates(current, 'gpt-4o', [current, other]);
+    const candidates = await buildFallbackCandidates(current, 'gpt-4o', [current, other], isolatedStore());
 
     expect(candidates).toEqual([]);
   });
@@ -85,7 +102,7 @@ describe('buildFallbackCandidates', () => {
       listModels: vi.fn().mockRejectedValue(new Error('unreachable')),
     });
 
-    await expect(buildFallbackCandidates(current, 'gpt-4o', [current])).resolves.toEqual([]);
+    await expect(buildFallbackCandidates(current, 'gpt-4o', [current], isolatedStore())).resolves.toEqual([]);
   });
 
   it('treats an isAuthenticated() failure as unauthenticated rather than throwing', async () => {
@@ -100,7 +117,7 @@ describe('buildFallbackCandidates', () => {
       isAuthenticated: vi.fn().mockRejectedValue(new Error('down')),
     });
 
-    await expect(buildFallbackCandidates(current, 'gpt-4o', [current, other])).resolves.toEqual([]);
+    await expect(buildFallbackCandidates(current, 'gpt-4o', [current, other], isolatedStore())).resolves.toEqual([]);
   });
 
   // Reproduces a real failure: the chain retried onto a text-to-speech model,
@@ -121,7 +138,7 @@ describe('buildFallbackCandidates', () => {
         ]),
     });
 
-    const candidates = await buildFallbackCandidates(current, 'gemini-2.5-flash', [current]);
+    const candidates = await buildFallbackCandidates(current, 'gemini-2.5-flash', [current], isolatedStore());
     expect(candidates.map((c) => c.model)).toEqual(['gemini-2.5-pro']);
   });
 
@@ -134,7 +151,7 @@ describe('buildFallbackCandidates', () => {
         .mockResolvedValue(Array.from({ length: 40 }, (_, i) => `model-${i}`)),
     });
 
-    const candidates = await buildFallbackCandidates(current, 'model-0', [current]);
+    const candidates = await buildFallbackCandidates(current, 'model-0', [current], isolatedStore());
     expect(candidates).toHaveLength(MAX_SAME_PROVIDER_CANDIDATES);
     expect(candidates[0].model).toBe('model-1');
   });
@@ -155,7 +172,7 @@ describe('buildFallbackCandidates', () => {
       listModels: vi.fn().mockResolvedValue(['llama3.1']),
     });
 
-    const candidates = await buildFallbackCandidates(current, 'or-0', [current, other]);
+    const candidates = await buildFallbackCandidates(current, 'or-0', [current, other], isolatedStore());
     expect(candidates.filter((c) => c.provider.id === 'openrouter')).toHaveLength(
       MAX_SAME_PROVIDER_CANDIDATES
     );
@@ -177,7 +194,7 @@ describe('buildFallbackCandidates', () => {
       listModels: vi.fn().mockResolvedValue(['b1', 'b2']),
     });
 
-    const candidates = await buildFallbackCandidates(current, 'x', [current, a, b]);
+    const candidates = await buildFallbackCandidates(current, 'x', [current, a, b], isolatedStore());
     expect(candidates.map((c) => c.model)).toEqual(['a1', 'b1', 'a2', 'b2', 'a3']);
   });
 
@@ -194,7 +211,7 @@ describe('buildFallbackCandidates', () => {
       listModels: vi.fn().mockResolvedValue(['x', 'y', 'z']),
     });
 
-    const candidates = await buildFallbackCandidates(current, 'a', [current, other]);
+    const candidates = await buildFallbackCandidates(current, 'a', [current, other], isolatedStore());
     expect(candidates).toHaveLength(MAX_FALLBACK_CANDIDATES);
     expect(candidates.map((c) => c.model)).toEqual(['b', 'c', 'd', 'x', 'y']);
   });

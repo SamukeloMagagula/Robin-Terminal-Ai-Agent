@@ -1,11 +1,23 @@
 import chalk from 'chalk';
 import type { ReplContext } from '../repl-context.js';
 import { copyToClipboard } from '../../clipboard.js';
+import { printConnectionLine } from '../../ui/banner.js';
 import { errorColor, mutedColor } from '../../ui/theme.js';
+
+/**
+ * 2J wipes the visible screen, 3J wipes the scrollback buffer, H homes the
+ * cursor. 3J matters: without it the cleared conversation is still one scroll
+ * wheel away, which defeats the point of clearing it.
+ */
+const CLEAR_SCREEN = '\x1b[2J\x1b[3J\x1b[H';
 
 export async function handleClear(ctx: ReplContext): Promise<void> {
   ctx.session.history = [];
   ctx.session.chatLog.startNewSession();
+  process.stdout.write(CLEAR_SCREEN);
+  // Reprinted after the wipe, because clearing the screen also removes the
+  // connection line — leaving no on-screen record of which model is answering.
+  printConnectionLine(ctx.session.provider.name, ctx.session.model);
   console.log(chalk.gray('Conversation cleared.'));
 }
 

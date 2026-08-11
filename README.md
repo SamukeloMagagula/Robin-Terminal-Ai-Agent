@@ -12,19 +12,62 @@ Built by Samukelo "Batman" Magagula.
 - For OpenRouter: an OpenRouter API key (gives access to a large, constantly growing catalog of models from many providers — OpenAI, Anthropic, Google, Meta, Mistral, and more — under one key)
 - For Ollama: [Ollama](https://ollama.com) installed and running locally
 
-## Setup
+## Install
+
+**macOS / Linux:**
 
 ```bash
-npm ci            # installs exactly what package-lock.json pins
-npm run build
-npm link          # makes the `robin` command available globally
+git clone https://github.com/SamukeloMagagula/Robin-Terminal-Ai-Agent.git
+cd Robin-Terminal-Ai-Agent
+npm ci && npm run build && npm link
 ```
+
+**Windows (PowerShell):**
+
+```powershell
+git clone https://github.com/SamukeloMagagula/Robin-Terminal-Ai-Agent.git
+cd Robin-Terminal-Ai-Agent
+npm ci; npm run build; npm link
+```
+
+Then start it:
+
+```bash
+robin chat ollama      # local, no API key needed
+robin chat             # pick a provider from a menu
+robin chat random      # roll a random provider and model
+```
+
+`robin chat ollama` is the fastest way to see it working, because Ollama needs
+no account — [install Ollama](https://ollama.com), run `ollama pull llama3.1`,
+and you are chatting in under a minute. Every other provider needs a login
+first; see [Setting up a provider](#setting-up-a-provider) below.
+
+**Check it worked:**
+
+```bash
+robin status           # shows which providers are logged in and reachable
+```
+
+### Notes on the install
 
 Use `npm ci`, not `npm install`. Dependencies are exact-pinned with no version
 ranges, so a compromised patch release can't reach you without an intentional
 bump here — `npm ci` enforces that; `npm install` can drift.
 
-`npm link` only needs to be run once (or again after pulling changes that touch `package.json`). After that, `robin` works from any directory.
+`npm link` only needs to be run once (or again after pulling changes that touch
+`package.json`). After that, `robin` works from any directory. If you would
+rather not link globally, `node dist/cli.js chat` from the repo works the same.
+
+**Updating:**
+
+```bash
+git pull && npm ci && npm run build
+```
+
+**Uninstalling:** `npm unlink -g robin`, then delete the clone. Robin's data
+lives in `~/.robin/` — conversations, transcripts, credentials, input history —
+so remove that directory too if you want it gone.
 
 ### Setting up a provider
 
