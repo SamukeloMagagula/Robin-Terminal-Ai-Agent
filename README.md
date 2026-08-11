@@ -237,6 +237,16 @@ Approvals are recorded in `~/.robin/personality-trust.json`. Your own global fil
 
 Long-running commands stream their output as it arrives, dimmed, rather than appearing all at once when they finish.
 
+## Sessions
+
+Robin holds up to nine conversations at once. `/session new` opens one (picking its own provider and model), `/session 2` switches, `/session` lists what's open, `/session name <label>` labels the current one, and `/session close [n]` closes one.
+
+Each session is genuinely independent: its own history, system prompt, tool setting and markdown transcript. Two sessions on the same model are two conversations, not two views of one. Switching is instant — no network, no re-auth.
+
+Nine is the cap so that `/session 3` stays a single unambiguous keystroke; ids are reused as sessions close.
+
+**If you never use it, nothing changes.** The prompt only grows a session number once a second session exists — `2>` instead of `>`.
+
 ## Skills
 
 A skill is a reusable instruction set. Each lives in its own directory as `~/.robin/skills/<name>/SKILL.md`, with `name` and `description` frontmatter — the [agentskills.io](https://agentskills.io) layout, so a skill written here can be shared with other tools and one written elsewhere can be dropped in.

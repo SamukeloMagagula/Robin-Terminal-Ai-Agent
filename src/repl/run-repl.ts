@@ -8,7 +8,7 @@ import { TOOL_DEFINITIONS } from '../tools/definitions.js';
 import { newSessionId } from '../session-id.js';
 import { ConversationStore } from '../conversation-store.js';
 import { SkillStore } from '../skills/store.js';
-import { createSession } from './session.js';
+import { SessionList } from './session-list.js';
 import { runTurn } from './run-turn.js';
 import { listenForInterrupt } from './interrupt.js';
 import { readSlashAwareLine } from './slash-prompt.js';
@@ -44,6 +44,7 @@ import {
   handleHistory,
   handlePersonality,
   handleMemory,
+  handleSession,
   loadPersonality,
 } from './commands/index.js';
 
@@ -71,6 +72,7 @@ const HANDLERS: Partial<Record<ParsedCommand['type'], CommandHandler>> = {
   history: handleHistory,
   personality: handlePersonality,
   memory: handleMemory,
+  session: handleSession,
 };
 
 const APPROVAL_WORDING: Record<ConfirmRequest['kind'], { question: string; scope: string }> = {
@@ -160,9 +162,10 @@ function createApprovalGate(): (request: ConfirmRequest) => Promise<boolean> {
 }
 
 export async function runRepl(deps: ReplDeps): Promise<void> {
-  // Never reassigned — commands mutate its fields. Task 4's handlers depend on
-  // that, since they hold a reference to this object rather than re-reading it.
-  const session = createSession(deps.provider, deps.model);
+  // The active session is read through sessions.active rather than held in a
+  // variable: /session switches which one that is, and a captured reference
+  // would keep pointing at the conversation the user just left.
+  const sessions = new SessionList(deps.provider, deps.model);
   // Prompt lines, for up/down recall. Persisted to ~/.robin/input-history —
   // the same private tree that already holds full transcripts, so this adds no
   // new class of exposure. ROBIN_NO_HISTORY_FILE=1 keeps it session-only.
@@ -183,7 +186,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   // text that becomes the system prompt, and burying it under the banner is
   // how people learn to approve without reading.
   const { text: personality } = await loadPersonality(personalityTrust);
-  session.personality = personality;
+  sessions.active.personality = personality;
 
   // Same reasoning, same placement: an mcp.json entry is a command Robin will
   // execute, so the user sees it before anything is launched.
@@ -192,7 +195,10 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   // Built once. `session` is never reassigned — commands mutate its fields —
   // so this reference stays correct for the life of the loop.
   const ctx: ReplContext = {
-    session,
+    get session() {
+      return sessions.active;
+    },
+    sessions,
     inputHistory,
     stores: {
       conversation: conversationStore,
@@ -222,11 +228,11 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
 
   printBanner({
     stats: hudStats,
-    providerName: session.provider.name,
-    model: session.model,
+    providerName: sessions.active.provider.name,
+    model: sessions.active.model,
     cwd: process.cwd(),
     sessionId: newSessionId(),
-    toolsEnabled: session.toolsEnabled,
+    toolsEnabled: sessions.active.toolsEnabled,
     usageLine: startupUsage ? renderUsageLine(startupUsage) : undefined,
   });
   console.log(chalk.gray('Type your message, or / for commands.'));
@@ -244,7 +250,10 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
 
     // `inputHistory` is what the user typed at the prompt; `history` above is
     // the conversation sent to the model. Distinct names on purpose.
-    const line = await readSlashAwareLine(inputHistory);
+    const line = await readSlashAwareLine(
+      inputHistory,
+      sessions.list().length > 1 ? String(sessions.active.id) : undefined
+    );
     inputHistory = addToInputHistory(inputHistory, line);
     // addToInputHistory returns a new array, so the context needs re-pointing
     // at it — /history reads and clears the live one.
@@ -277,7 +286,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
 
     process.stdout.write(assistantColor('» '));
     const interrupt = listenForInterrupt();
-    const result = await runTurn(session, cmd.arg, {
+    const result = await runTurn(sessions.active, cmd.arg, {
       signal: interrupt.signal,
       onText: (text) => process.stdout.write(text),
       confirm: askForApproval,
@@ -307,12 +316,12 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       if (result.aborted) {
         console.log(mutedColor('Interrupted. Your next message continues from here.'));
       }
-      if (result.provider.id !== session.provider.id || result.model !== session.model) {
-        session.provider = result.provider;
-        session.model = result.model;
-        printConnectionLine(session.provider.name, session.model);
+      if (result.provider.id !== sessions.active.provider.id || result.model !== sessions.active.model) {
+        sessions.active.provider = result.provider;
+        sessions.active.model = result.model;
+        printConnectionLine(sessions.active.provider.name, sessions.active.model);
       }
-      await session.chatLog.write(session.provider.name, session.model, session.history);
+      await sessions.active.chatLog.write(sessions.active.provider.name, sessions.active.model, sessions.active.history);
       // Refresh in the background so the next divider has a fresh figure
       // without the user ever waiting on it. Failures are already swallowed
       // inside the cache; the catch is belt-and-braces against an unhandled

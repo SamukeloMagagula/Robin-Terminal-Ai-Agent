@@ -17,6 +17,7 @@ export interface ParsedCommand {
     | 'history'
     | 'personality'
     | 'memory'
+    | 'session'
     | 'message'
     | 'unknown';
   arg?: string;
@@ -44,6 +45,7 @@ const KNOWN_COMMANDS: Record<string, ParsedCommand['type']> = Object.assign(Obje
   '/history': 'history',
   '/personality': 'personality',
   '/memory': 'memory',
+  '/session': 'session',
 });
 
 export function parseCommand(input: string): ParsedCommand {

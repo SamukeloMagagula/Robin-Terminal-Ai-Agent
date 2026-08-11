@@ -1,4 +1,5 @@
 import type { Session } from './session.js';
+import type { SessionList } from './session-list.js';
 import type { Provider } from '../providers/types.js';
 import type { ConversationStore } from '../conversation-store.js';
 import type { SkillStore } from '../skills/store.js';
@@ -31,7 +32,9 @@ export interface ReplDeps {
  * means this process, and the stores are one-per-machine.
  */
 export interface ReplContext {
-  session: Session;
+  /** The active conversation. A getter over `sessions` — never reassign it. */
+  readonly session: Session;
+  sessions: SessionList;
   inputHistory: string[];
   stores: {
     conversation: ConversationStore;
