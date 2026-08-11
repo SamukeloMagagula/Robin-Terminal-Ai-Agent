@@ -1,24 +1,34 @@
 import chalk from 'chalk';
 import { expand } from '@inquirer/prompts';
 import type { Provider } from '../providers/types.js';
-import { parseCommand } from './parse-command.js';
-import { wrapUntrusted, type ConfirmRequest } from '../tools/execute.js';
+import { parseCommand, type ParsedCommand } from './parse-command.js';
+import { type ConfirmRequest } from '../tools/execute.js';
 import { TOOL_DEFINITIONS } from '../tools/definitions.js';
 import { printBanner, printConnectionLine } from '../ui/banner.js';
 import { newSessionId } from '../session-id.js';
 import { environmentPrompt } from '../environment-prompt.js';
 import { ConversationStore } from '../conversation-store.js';
 import { SkillStore } from '../skill-store.js';
-import { copyToClipboard } from '../clipboard.js';
 import { createSession } from './session.js';
 import { runTurn } from './run-turn.js';
-import { searchChatLogs } from '../recall.js';
 import { readSlashAwareLine } from './slash-prompt.js';
 import { addToInputHistory } from './input-history.js';
 import { UnsupportedModelStore } from '../providers/unsupported-models.js';
 import { UsageCache } from '../usage/openrouter-usage.js';
-import { renderUsageLine, renderUsageReport } from '../usage/render-usage.js';
+import { renderUsageLine } from '../usage/render-usage.js';
 import { assistantColor, errorColor, mutedColor, divider, box } from '../ui/theme.js';
+import {
+  type ReplContext,
+  type CommandHandler,
+  handleHelp,
+  handleUsage,
+  handleRecall,
+  handleClear,
+  handleCopy,
+  handleSkill,
+  handleSave,
+  handleLoad,
+} from './commands/index.js';
 
 export interface ReplDeps {
   provider: Provider;
@@ -29,24 +39,20 @@ export interface ReplDeps {
   rollRandom: () => Promise<{ provider: Provider; model: string }>;
 }
 
-const HELP_ENTRIES: [string, string][] = [
-  ['/help', 'list commands'],
-  ['/model', 'switch model on the current provider'],
-  ['/provider', 'switch provider (e.g. Copilot ↔ Ollama) — pick "← Back" in the model list to change your mind'],
-  ['/system [text]', 'view, set, or "/system clear" the system prompt'],
-  ['/tools [list]', 'toggle tool-calling on/off, or list available tools'],
-  ['/save [name]', 'save the conversation, or list saved ones'],
-  ['/load [name]', 'load a saved conversation, or list saved ones'],
-  ['/copy', "copy the assistant's last reply to the clipboard"],
-  ['/skill save <name>', 'save the current system prompt as a reusable named preset'],
-  ['/skill use <name>', 'load a saved preset as the system prompt'],
-  ['/skill [list]', 'list saved presets'],
-  ['/random', 'switch to a randomly chosen provider and model'],
-  ['/usage', 'OpenRouter spend for this key, and the account balance'],
-  ['/recall <query>', 'search past conversations under ~/.robin/chats/'],
-  ['/clear', 'reset the conversation'],
-  ['/exit', 'quit'],
-];
+/**
+ * Commands that are wholly handled by a module under ./commands/. Anything
+ * absent here still falls through to the inline branches below.
+ */
+const HANDLERS: Partial<Record<ParsedCommand['type'], CommandHandler>> = {
+  help: handleHelp,
+  usage: handleUsage,
+  recall: handleRecall,
+  clear: handleClear,
+  copy: handleCopy,
+  skill: handleSkill,
+  save: handleSave,
+  load: handleLoad,
+};
 
 const APPROVAL_WORDING: Record<ConfirmRequest['kind'], { question: string; scope: string }> = {
   run_command: { question: 'Run it?', scope: 'commands' },
@@ -87,12 +93,6 @@ function createApprovalGate(): (request: ConfirmRequest) => Promise<boolean> {
   };
 }
 
-function printHelp(): void {
-  for (const [name, description] of HELP_ENTRIES) {
-    console.log(`  ${assistantColor(name.padEnd(20))}${mutedColor(description)}`);
-  }
-}
-
 export async function runRepl(deps: ReplDeps): Promise<void> {
   // Never reassigned — commands mutate its fields. Task 4's handlers depend on
   // that, since they hold a reference to this object rather than re-reading it.
@@ -105,6 +105,20 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   const askForApproval = createApprovalGate();
   const usageCache = new UsageCache();
   const unsupportedStore = new UnsupportedModelStore();
+
+  // Built once. `session` is never reassigned — commands mutate its fields —
+  // so this reference stays correct for the life of the loop.
+  const ctx: ReplContext = {
+    session,
+    inputHistory,
+    stores: {
+      conversation: conversationStore,
+      skill: skillStore,
+      unsupported: unsupportedStore,
+      usage: usageCache,
+    },
+    confirm: askForApproval,
+  };
 
   // Fetched before the banner so the figure is on screen from the first
   // frame; null (no key, no network) simply omits the line.
@@ -143,15 +157,9 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       continue;
     }
 
-    if (cmd.type === 'help') {
-      printHelp();
-      continue;
-    }
-
-    if (cmd.type === 'clear') {
-      session.history = [];
-      session.chatLog.startNewSession();
-      console.log(chalk.gray('Conversation cleared.'));
+    const handler = HANDLERS[cmd.type];
+    if (handler) {
+      await handler(ctx, cmd.arg);
       continue;
     }
 
@@ -170,18 +178,6 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       session.history = [];
       session.chatLog.startNewSession();
       printConnectionLine(session.provider.name, session.model);
-      continue;
-    }
-
-    if (cmd.type === 'usage') {
-      const usage = await usageCache.get();
-      console.log(
-        usage
-          ? renderUsageReport(usage)
-          : mutedColor(
-              'No OpenRouter usage available — run `robin login openrouter`, or check your connection.'
-            )
-      );
       continue;
     }
 
@@ -227,151 +223,6 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       } else {
         session.toolsEnabled = !session.toolsEnabled;
         console.log(chalk.gray(`Tools ${session.toolsEnabled ? 'enabled' : 'disabled'}.`));
-      }
-      continue;
-    }
-
-    if (cmd.type === 'copy') {
-      const lastReply = [...session.history]
-        .reverse()
-        .find((m) => m.role === 'assistant' && m.content);
-      if (!lastReply) {
-        console.log(chalk.gray('Nothing to copy yet.'));
-      } else {
-        try {
-          await copyToClipboard(lastReply.content);
-          console.log(chalk.gray('Copied last reply to clipboard.'));
-        } catch (err) {
-          console.log(errorColor(`✖ Could not copy to clipboard: ${(err as Error).message}`));
-        }
-      }
-      continue;
-    }
-
-    if (cmd.type === 'skill') {
-      const [sub, ...rest] = (cmd.arg ?? '').split(' ').filter(Boolean);
-      const name = rest.join(' ');
-
-      if (!sub || sub === 'list') {
-        const names = await skillStore.list();
-        console.log(
-          names.length
-            ? mutedColor(names.join(', '))
-            : mutedColor('No saved skills yet. Usage: /skill save <name>')
-        );
-      } else if (sub === 'save') {
-        if (!name) {
-          console.log(errorColor('✖ Usage: /skill save <name>'));
-        } else if (!session.systemPrompt) {
-          console.log(errorColor('✖ No system prompt set. Set one with /system <text> first.'));
-        } else {
-          try {
-            await skillStore.save(name, {
-              prompt: session.systemPrompt,
-              savedAt: new Date().toISOString(),
-            });
-            console.log(chalk.gray(`Saved skill "${name}".`));
-          } catch (err) {
-            console.log(errorColor(`✖ ${(err as Error).message}`));
-          }
-        }
-      } else if (sub === 'use') {
-        if (!name) {
-          console.log(errorColor('✖ Usage: /skill use <name>'));
-        } else {
-          try {
-            const skill = await skillStore.load(name);
-            session.systemPrompt = skill.prompt;
-            console.log(chalk.gray(`Using skill "${name}".`));
-          } catch (err) {
-            console.log(errorColor(`✖ Could not load "${name}": ${(err as Error).message}`));
-          }
-        }
-      } else {
-        console.log(errorColor(`✖ Unknown /skill subcommand "${sub}". Usage: /skill save|use|list [name]`));
-      }
-      continue;
-    }
-
-    if (cmd.type === 'recall') {
-      if (!cmd.arg) {
-        console.log(errorColor('✖ Usage: /recall <query>'));
-        continue;
-      }
-      const matches = await searchChatLogs(cmd.arg);
-      if (matches.length === 0) {
-        console.log(mutedColor(`No matches for "${cmd.arg}" in ~/.robin/chats/.`));
-      } else {
-        for (const match of matches) {
-          console.log(`  ${assistantColor(match.file)}${mutedColor(`:${match.lineNumber}`)}`);
-          for (const line of match.context) {
-            console.log(`    ${mutedColor(line)}`);
-          }
-          console.log();
-        }
-        // Add to the conversation (not just the terminal) so a follow-up like
-        // "yep that one" has something for the model to actually refer to.
-        const recalled = matches.map((m) => `[${m.file}:${m.lineNumber}]\n${m.context.join('\n')}`).join('\n\n');
-        // Transcripts contain past tool output — file contents and command
-        // output that were wrapped as untrusted the first time round. Replaying
-        // them as a plain user message would launder that text back into the
-        // context as if the user had typed it, so re-wrap it.
-        session.history.push({
-          role: 'user',
-          content: wrapUntrusted(
-            `recalled excerpts from past conversations matching "${cmd.arg}"`,
-            recalled
-          ),
-        });
-        console.log(mutedColor('(Added to the conversation — you can refer to it in your next message.)'));
-      }
-      continue;
-    }
-
-    if (cmd.type === 'save') {
-      if (!cmd.arg) {
-        const names = await conversationStore.list();
-        console.log(
-          names.length
-            ? mutedColor(names.join(', '))
-            : mutedColor('No saved conversations yet. Usage: /save <name>')
-        );
-        continue;
-      }
-      try {
-        await conversationStore.save(cmd.arg, {
-          providerId: session.provider.id,
-          providerName: session.provider.name,
-          model: session.model,
-          savedAt: new Date().toISOString(),
-          messages: session.history,
-        });
-        console.log(chalk.gray(`Saved conversation as "${cmd.arg}".`));
-      } catch (err) {
-        console.log(errorColor(`✖ ${(err as Error).message}`));
-      }
-      continue;
-    }
-
-    if (cmd.type === 'load') {
-      if (!cmd.arg) {
-        const names = await conversationStore.list();
-        console.log(
-          names.length
-            ? mutedColor(names.join(', '))
-            : mutedColor('No saved conversations yet. Usage: /load <name>')
-        );
-        continue;
-      }
-      try {
-        const saved = await conversationStore.load(cmd.arg);
-        session.history = saved.messages;
-        session.chatLog.startNewSession();
-        console.log(
-          chalk.gray(`Loaded conversation "${cmd.arg}" (saved on ${saved.providerName} · ${saved.model}).`)
-        );
-      } catch (err) {
-        console.log(errorColor(`✖ Could not load "${cmd.arg}": ${(err as Error).message}`));
       }
       continue;
     }
