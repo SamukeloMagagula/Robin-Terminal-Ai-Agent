@@ -27,6 +27,11 @@ export interface Provider {
   isAuthenticated(): Promise<boolean>;
   login(): Promise<void>;
   listModels(): Promise<string[]>;
-  chat(model: string, messages: Message[], tools?: ToolDefinition[]): AsyncIterable<ChatEvent>;
+  chat(
+    model: string,
+    messages: Message[],
+    tools?: ToolDefinition[],
+    signal?: AbortSignal
+  ): AsyncIterable<ChatEvent>;
   logout(): Promise<void>;
 }

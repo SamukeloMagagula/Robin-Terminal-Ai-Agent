@@ -1,7 +1,6 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 import type { ToolCall } from '../providers/types.js';
 import { checkPath, defaultSensitiveDirs } from './sensitive-paths.js';
 import { isReadOnlyCommand } from './command-safety.js';
@@ -15,7 +14,6 @@ export {
   isSensitiveBasename,
 } from './sensitive-paths.js';
 
-const execAsync = promisify(exec);
 const MAX_OUTPUT_LENGTH = 4000;
 const MAX_PREVIEW_LENGTH = 500;
 const COMMAND_TIMEOUT_MS = 120_000;
@@ -78,6 +76,8 @@ export interface ExecuteOptions {
   commandTimeoutMs?: number;
   /** Called instead of confirming, when a command is recognised as read-only. */
   onAutoApproved?: (command: string) => void;
+  /** Receives stdout/stderr chunks as they arrive, for live display. */
+  onOutput?: (chunk: string) => void;
 }
 
 export async function executeTool(
@@ -111,7 +111,8 @@ export async function executeTool(
           requireString(args.command, 'command'),
           confirm,
           options.commandTimeoutMs ?? COMMAND_TIMEOUT_MS,
-          options.onAutoApproved
+          options.onAutoApproved,
+          options.onOutput
         );
       default:
         return `Error: unknown tool "${toolCall.name}".`;
@@ -194,7 +195,8 @@ async function runCommandTool(
   command: string,
   confirm: ConfirmFn,
   timeoutMs: number,
-  onAutoApproved?: (command: string) => void
+  onAutoApproved?: (command: string) => void,
+  onOutput?: (chunk: string) => void
 ): Promise<string> {
   // Listing and inspecting cost the user nothing to allow, and asking about
   // every `ls` trains them to approve without reading. Anything the allowlist
@@ -210,29 +212,52 @@ async function runCommandTool(
       return `Command "${command}" was declined by the user.`;
     }
   }
-  try {
+  // spawn rather than exec, so output can be shown as it arrives. A long build
+  // or test run used to sit behind a dead terminal until it finished. What the
+  // *model* receives is unchanged: same combined stdout+stderr, same
+  // truncation, same Exit code prefix, same untrusted wrapper.
+  return await new Promise<string>((resolve) => {
+    const child = spawn(command, { shell: true });
+    let output = '';
+    let settled = false;
+
+    const finish = (result: string): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+
     // Without a timeout a command that waits on stdin (which it never gets —
     // the REPL owns it) hangs the whole session with no way back to the prompt.
-    const { stdout, stderr } = await execAsync(command, {
-      maxBuffer: 1024 * 1024,
-      timeout: timeoutMs,
-    });
-    const output = `${stdout}${stderr}`.slice(0, MAX_OUTPUT_LENGTH);
-    return `Exit code: 0\n${wrapUntrusted(`output of "${command}"`, output)}`;
-  } catch (err) {
-    const execErr = err as {
-      code?: number;
-      killed?: boolean;
-      signal?: string;
-      stdout?: string;
-      stderr?: string;
-      message: string;
+    //
+    // The timeout resolves immediately rather than waiting for 'close'. With
+    // shell:true the child is the shell, and killing it does not necessarily
+    // reap a grandchild still holding stdio open — waiting for 'close' meant a
+    // 500ms timeout took 15 seconds to report. The kill is still attempted;
+    // the promise simply does not depend on it succeeding.
+    const timer = setTimeout(() => {
+      child.kill();
+      finish(`Error: command timed out after ${timeoutMs / 1000}s and was terminated.`);
+    }, timeoutMs);
+
+    const collect = (chunk: Buffer): void => {
+      const text = chunk.toString();
+      // Cap what is retained for the model, but keep streaming to the display —
+      // someone watching a long build still wants to see it finish.
+      if (output.length < MAX_OUTPUT_LENGTH) output += text;
+      onOutput?.(text);
     };
-    if (execErr.killed) {
-      return `Error: command timed out after ${timeoutMs / 1000}s and was terminated.`;
-    }
-    const output =
-      `${execErr.stdout ?? ''}${execErr.stderr ?? ''}`.slice(0, MAX_OUTPUT_LENGTH) || execErr.message;
-    return `Exit code: ${execErr.code ?? 1}\n${wrapUntrusted(`output of "${command}"`, output)}`;
-  }
+    child.stdout.on('data', collect);
+    child.stderr.on('data', collect);
+
+    child.on('error', (err) => {
+      finish(`Error: ${err.message}`);
+    });
+
+    child.on('close', (code) => {
+      const truncated = output.slice(0, MAX_OUTPUT_LENGTH);
+      finish(`Exit code: ${code ?? 1}\n${wrapUntrusted(`output of "${command}"`, truncated)}`);
+    });
+  });
 }

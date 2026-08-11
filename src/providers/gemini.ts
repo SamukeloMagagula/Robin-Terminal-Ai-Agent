@@ -133,7 +133,12 @@ export class GeminiProvider implements Provider {
       .map((m) => m.name.replace(/^models\//, ''));
   }
 
-  async *chat(model: string, messages: Message[], tools?: ToolDefinition[]): AsyncIterable<ChatEvent> {
+  async *chat(
+    model: string,
+    messages: Message[],
+    tools?: ToolDefinition[],
+    signal?: AbortSignal
+  ): AsyncIterable<ChatEvent> {
     const apiKey = await this.getApiKey();
     const { systemInstruction, contents } = toGeminiRequest(messages);
     const body: Record<string, unknown> = { contents };
@@ -153,6 +158,7 @@ export class GeminiProvider implements Provider {
     const url = `${BASE_URL}/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`;
     const res = await fetch(url, {
       method: 'POST',
+      signal,
       headers: { 'content-type': 'application/json', ...apiKeyHeader(apiKey) },
       body: JSON.stringify(body),
     });

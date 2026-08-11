@@ -134,11 +134,44 @@ In a chat session, typing `/` shows a live-filtered popup of matching commands a
 - `/skill save <name>` — save the current system prompt as a reusable named preset under `~/.robin/skills/<name>.json`
 - `/skill use <name>` — load a saved preset as the current system prompt
 - `/skill [list]` — list saved presets
+- `/personality [reload|off]` — show the active `PERSONALITY.md`, re-read it after an edit, or drop it for the session
 - `/random` — re-roll onto a randomly chosen provider and model
 - `/usage` — OpenRouter spend for this key (UTC day/week/month, all time) and the account balance
 - `/recall <query>` — search past conversations under `~/.robin/chats/`
+- `/history` — show where input history is stored; `/history clear` wipes it
 - `/clear` — reset the conversation
 - `/exit` — quit
+
+## Personality
+
+Robin reads a `PERSONALITY.md` on startup and prepends it to the system prompt, so a project can carry its own house style without you retyping `/system` every session. Two locations, both optional, both sent when present:
+
+- `~/.robin/PERSONALITY.md` — your global default, applied everywhere
+- `./PERSONALITY.md` — the working directory only (Robin does **not** search parent directories)
+
+The order sent to the model is: the environment preamble, then personality, then whatever `/system` is set to — so a task-specific `/system` can override the standing tone.
+
+**Project files are gated.** `PERSONALITY.md` becomes the system prompt for a tool that can run commands and read files, and repositories get cloned. The first time Robin sees a project file it hasn't approved, it prints the file and asks:
+
+- **`y`** — use this exact text. Editing the file asks again.
+- **`n`** — skip it.
+- **`a`** — trust this location from now on, whatever it comes to contain. Use this for a repo you own and edit constantly; withhold it from one you cloned.
+
+Approvals are recorded in `~/.robin/personality-trust.json`. Your own global file is never prompted for. A corrupt trust file is treated as empty, so everything re-prompts rather than silently loading. Files over 32 KB are skipped.
+
+`/personality` shows what's active and where it came from, `/personality reload` re-reads after an edit, and `/personality off` drops it for the session.
+
+## Editing and Interrupting
+
+| Key | Does |
+|---|---|
+| `Enter` | Send the message |
+| `Alt+Enter` | Start a new line without sending. A trailing `\` does the same, for terminals that swallow Alt+Enter |
+| `↑` / `↓` | Move between lines of a multi-line message; from the first or last line, walk back and forward through what you've typed before |
+| `Esc` | While a reply is streaming, stop it. The partial reply is kept, so your next message reads as a redirect. While typing, closes the command popup |
+| `Ctrl+C` | Quit |
+
+Long-running commands stream their output as it arrives, dimmed, rather than appearing all at once when they finish.
 
 ## Chat History
 
@@ -147,6 +180,8 @@ Every conversation is automatically written to a readable markdown transcript in
 This is separate from `/save`/`/load`, which store an exact, reloadable snapshot as JSON under `~/.robin/conversations/` — use `/save` when you want to resume a specific conversation later inside `robin`; the markdown transcript is for your own reading/reference outside the app.
 
 Use `/recall <query>` to search across all past markdown transcripts from inside a chat session — it's a plain case-insensitive text search (newest conversations first, capped at 10 matches), not semantic search, but it's enough to find "did I already ask about X" without leaving the terminal.
+
+The lines you type at the prompt are kept too, so the up arrow still reaches yesterday's commands. They live in `~/.robin/input-history` — the newest 200, one per line, in the same private tree as the transcripts and with the same owner-only permissions. `/history` shows the path, `/history clear` wipes it, and `ROBIN_NO_HISTORY_FILE=1` keeps history in memory for the session only.
 
 ## Tool-Calling
 

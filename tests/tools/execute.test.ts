@@ -199,3 +199,51 @@ describe('executeTool', () => {
     expect(result).toMatch(/^Error:/);
   });
 });
+
+describe('run_command streaming', () => {
+  it('reports output through onOutput as well as returning it', async () => {
+    const chunks: string[] = [];
+    const result = await executeTool(
+      {
+        id: '1',
+        name: 'run_command',
+        arguments: JSON.stringify({ command: 'echo streamed-line' }),
+      },
+      async () => true,
+      { onOutput: (c) => chunks.push(c) }
+    );
+
+    expect(chunks.join('')).toContain('streamed-line');
+    expect(result).toContain('streamed-line');
+    expect(result).toContain('Exit code: 0');
+  });
+
+  it('still returns the full output when no onOutput is given', async () => {
+    const result = await executeTool(
+      {
+        id: '1',
+        name: 'run_command',
+        arguments: JSON.stringify({ command: 'echo quiet' }),
+      },
+      async () => true,
+      {}
+    );
+
+    expect(result).toContain('quiet');
+    expect(result).toContain('Exit code: 0');
+  });
+
+  it('reports a non-zero exit code', async () => {
+    const result = await executeTool(
+      {
+        id: '1',
+        name: 'run_command',
+        arguments: JSON.stringify({ command: 'exit 3' }),
+      },
+      async () => true,
+      {}
+    );
+
+    expect(result).toContain('Exit code: 3');
+  });
+});

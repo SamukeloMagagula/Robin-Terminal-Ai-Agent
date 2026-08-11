@@ -222,3 +222,66 @@ describe('filterSlashCommands', () => {
     expect(filterSlashCommands('/bogus')).toEqual([]);
   });
 });
+
+describe('multiline input', () => {
+  it('submits on Enter as before', async () => {
+    const term = fakeTerminal();
+    const answer = promptWithSlashMenu({}, { input: term.input, output: term.output });
+    await term.settle();
+    await term.type('one line\r');
+    expect(await answer).toBe('one line');
+  });
+
+  it('inserts a newline on Alt+Enter instead of submitting', async () => {
+    const term = fakeTerminal();
+    const answer = promptWithSlashMenu({}, { input: term.input, output: term.output });
+    await term.settle();
+    await term.type('first');
+    term.input.write('\x1b\r'); // Alt+Enter
+    await term.settle();
+    await term.type('second\r');
+    expect(await answer).toBe('first\nsecond');
+  });
+
+  it('continues onto the next line after a trailing backslash', async () => {
+    const term = fakeTerminal();
+    const answer = promptWithSlashMenu({}, { input: term.input, output: term.output });
+    await term.settle();
+    await term.type('first\\\r');
+    await term.type('second\r');
+    expect(await answer).toBe('first\nsecond');
+  });
+
+  it('up moves between lines before reaching input history', async () => {
+    const term = fakeTerminal();
+    const answer = promptWithSlashMenu(
+      { history: ['an older command'] },
+      { input: term.input, output: term.output }
+    );
+    await term.settle();
+    await term.type('first');
+    term.input.write('\x1b\r');
+    await term.settle();
+    await term.type('second');
+
+    term.input.write('\x1b[A'); // up: to line one, NOT history
+    await term.settle();
+    term.input.write('\r');
+
+    expect(await answer).toBe('first\nsecond');
+  });
+
+  it('reaches input history from the first line', async () => {
+    const term = fakeTerminal();
+    const answer = promptWithSlashMenu(
+      { history: ['an older command'] },
+      { input: term.input, output: term.output }
+    );
+    await term.settle();
+    term.input.write('\x1b[A');
+    await term.settle();
+    term.input.write('\r');
+
+    expect(await answer).toBe('an older command');
+  });
+});
