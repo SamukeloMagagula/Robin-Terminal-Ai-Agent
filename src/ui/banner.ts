@@ -12,6 +12,7 @@ export interface BannerInfo {
   model: string;
   cwd: string;
   sessionId: string;
+  /** When false the TOOLS meter reads zero — nothing is armed for this turn. */
   toolsEnabled: boolean;
   /** Pre-rendered usage line, omitted when there is no OpenRouter key or the fetch failed. */
   usageLine?: string;
@@ -56,7 +57,11 @@ export function buildBanner(info: BannerInfo): string[] {
       cwd: info.cwd,
       sessionId: info.sessionId,
       version: readVersion(),
-      stats: info.stats ?? emptyStats(),
+      // A disabled tool set must not read as armed; the HUD would otherwise
+      // claim capability the model does not have.
+      stats: info.toolsEnabled
+        ? (info.stats ?? emptyStats())
+        : { ...(info.stats ?? emptyStats()), toolCount: 0 },
       usageLine: info.usageLine,
       commands: SLASH_COMMANDS.map((command) => command.name),
     },

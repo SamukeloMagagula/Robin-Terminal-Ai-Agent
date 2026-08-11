@@ -113,4 +113,12 @@ describe('buildBanner', () => {
     expect(out).toContain('GitHub Copilot');
     expect(out).not.toContain('PROVIDERS');
   });
+
+  it('reads zero tools when tool-calling is disabled', () => {
+    // The HUD ignored toolsEnabled entirely, so it claimed capability the
+    // model did not have for that turn.
+    atWidth(100);
+    const out = banner({ toolsEnabled: false });
+    expect(out).toMatch(/TOOLS\s+▱▱▱▱▱\s+0/);
+  });
 });

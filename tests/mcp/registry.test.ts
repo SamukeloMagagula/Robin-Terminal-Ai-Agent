@@ -148,4 +148,38 @@ describe('McpRegistry', () => {
     expect(registry.toolDefinitions()).toEqual([]);
     expect(createConnection).not.toHaveBeenCalled();
   });
+
+  it('counts servers, not tools', async () => {
+    // The HUD meter read 1 whenever any tool existed, so three servers showed
+    // as one. Counting connections is the fix; this pins it.
+    const registry = new McpRegistry({
+      createConnection: () => stubConnection([tool('a'), tool('b')]),
+    });
+
+    await registry.load([server('one'), server('two'), server('three')]);
+
+    expect(registry.toolDefinitions()).toHaveLength(6);
+    expect(registry.serverCount()).toBe(3);
+  });
+
+  it('counts a connected server that exposes no tools', async () => {
+    const registry = new McpRegistry({ createConnection: () => stubConnection([]) });
+
+    await registry.load([server('quiet')]);
+
+    // It is running; the meter must not report it as absent.
+    expect(registry.serverCount()).toBe(1);
+  });
+
+  it('does not count a server that failed to connect', async () => {
+    const registry = new McpRegistry({
+      createConnection: () =>
+        stubConnection([], { connect: vi.fn().mockRejectedValue(new Error('boom')) }),
+      onError: () => {},
+    });
+
+    await registry.load([server('broken')]);
+
+    expect(registry.serverCount()).toBe(0);
+  });
 });

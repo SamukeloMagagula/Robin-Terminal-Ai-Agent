@@ -5,6 +5,8 @@ import { type ConfirmRequest } from '../tools/execute.js';
 import { printBanner, printConnectionLine } from '../ui/banner.js';
 import { gatherTelemetry } from '../ui/hud/telemetry.js';
 import { TOOL_DEFINITIONS } from '../tools/definitions.js';
+import { MEMORY_TOOL_DEFINITIONS } from '../memory/tools.js';
+import { SKILL_TOOL_DEFINITIONS } from '../skills/tools.js';
 import { newSessionId } from '../session-id.js';
 import { ConversationStore } from '../conversation-store.js';
 import { SkillStore } from '../skills/store.js';
@@ -222,8 +224,14 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   const hudStats = await gatherTelemetry({
     memory: memoryStore,
     skills: skillStore,
-    toolCount: TOOL_DEFINITIONS.length + mcpRegistry.toolDefinitions().length + 4,
-    mcpServerCount: mcpRegistry.toolDefinitions().length > 0 ? 1 : 0,
+    // Counted from the same arrays runTurn assembles, so the meter cannot
+    // drift from what the model is actually offered.
+    toolCount:
+      TOOL_DEFINITIONS.length +
+      MEMORY_TOOL_DEFINITIONS.length +
+      SKILL_TOOL_DEFINITIONS.length +
+      mcpRegistry.toolDefinitions().length,
+    mcpServerCount: mcpRegistry.serverCount(),
   });
 
   printBanner({

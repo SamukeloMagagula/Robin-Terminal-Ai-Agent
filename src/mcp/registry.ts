@@ -41,6 +41,13 @@ interface LoadedServer {
   name: string;
   connection: McpConnectionLike;
   tools: McpToolInfo[];
+  /**
+   * Whether the handshake succeeded. Tracked rather than inferred from
+   * `tools.length`, because a server that connects and exposes nothing is
+   * running — and a server that failed is kept in the list so closeAll can
+   * still tear down a process that started before it broke.
+   */
+  connected: boolean;
 }
 
 export interface McpRegistryDeps {
@@ -78,11 +85,11 @@ export class McpRegistry {
       try {
         await connection.connect();
         const tools = await connection.listTools();
-        this.servers.push({ name: config.name, connection, tools });
+        this.servers.push({ name: config.name, connection, tools, connected: true });
       } catch (err) {
         // Kept in the list with no tools so closeAll() can still tear down a
         // process that started but failed afterwards.
-        this.servers.push({ name: config.name, connection, tools: [] });
+        this.servers.push({ name: config.name, connection, tools: [], connected: false });
         this.onError(config.name, (err as Error).message);
       }
     }
@@ -98,6 +105,18 @@ export class McpRegistry {
         parameters: tool.inputSchema,
       }))
     );
+  }
+
+  /**
+   * Servers that connected, whether or not they contributed tools.
+   *
+   * Not inferred from the tool list: three servers with one tool each are
+   * three, and a connected server exposing none is still running. A server
+   * that failed to start is not counted, though it stays in the list so
+   * closeAll can reap its process.
+   */
+  serverCount(): number {
+    return this.servers.filter((server) => server.connected).length;
   }
 
   /** True only for a namespaced name this registry actually serves. */
