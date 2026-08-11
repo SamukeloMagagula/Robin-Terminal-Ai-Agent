@@ -12,7 +12,7 @@ import { environmentPrompt } from '../environment-prompt.js';
 import { ConversationStore } from '../conversation-store.js';
 import { SkillStore } from '../skill-store.js';
 import { copyToClipboard } from '../clipboard.js';
-import { ChatLog } from '../chat-log.js';
+import { createSession, buildSystemPrompt } from './session.js';
 import { searchChatLogs } from '../recall.js';
 import { buildFallbackCandidates, type FallbackCandidate } from './fallback.js';
 import { readSlashAwareLine } from './slash-prompt.js';
@@ -97,17 +97,14 @@ function printHelp(): void {
 }
 
 export async function runRepl(deps: ReplDeps): Promise<void> {
-  let provider = deps.provider;
-  let model = deps.model;
-  let history: Message[] = [];
+  // Never reassigned — commands mutate its fields. Task 4's handlers depend on
+  // that, since they hold a reference to this object rather than re-reading it.
+  const session = createSession(deps.provider, deps.model);
   // Prompt lines, for up/down recall. Session-only; deliberately never
   // persisted, since prompts carry the same sensitive material as transcripts.
   let inputHistory: string[] = [];
-  let systemPrompt: string | undefined;
-  let toolsEnabled = true;
   const conversationStore = new ConversationStore();
   const skillStore = new SkillStore();
-  const chatLog = new ChatLog();
   const askForApproval = createApprovalGate();
   const usageCache = new UsageCache();
   const unsupportedStore = new UnsupportedModelStore();
@@ -116,11 +113,11 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   // frame; null (no key, no network) simply omits the line.
   const startupUsage = await usageCache.get();
   printBanner({
-    providerName: provider.name,
-    model,
+    providerName: session.provider.name,
+    model: session.model,
     cwd: process.cwd(),
     sessionId: newSessionId(),
-    toolsEnabled,
+    toolsEnabled: session.toolsEnabled,
     usageLine: startupUsage ? renderUsageLine(startupUsage) : undefined,
   });
   console.log(chalk.gray('Type your message, or / for commands.'));
@@ -155,27 +152,27 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     }
 
     if (cmd.type === 'clear') {
-      history = [];
-      chatLog.startNewSession();
+      session.history = [];
+      session.chatLog.startNewSession();
       console.log(chalk.gray('Conversation cleared.'));
       continue;
     }
 
     if (cmd.type === 'model') {
-      model = await deps.pickModel(provider);
-      history = [];
-      chatLog.startNewSession();
-      printConnectionLine(provider.name, model);
+      session.model = await deps.pickModel(session.provider);
+      session.history = [];
+      session.chatLog.startNewSession();
+      printConnectionLine(session.provider.name, session.model);
       continue;
     }
 
     if (cmd.type === 'provider') {
       const picked = await deps.pickProviderAndModel();
-      provider = picked.provider;
-      model = picked.model;
-      history = [];
-      chatLog.startNewSession();
-      printConnectionLine(provider.name, model);
+      session.provider = picked.provider;
+      session.model = picked.model;
+      session.history = [];
+      session.chatLog.startNewSession();
+      printConnectionLine(session.provider.name, session.model);
       continue;
     }
 
@@ -196,11 +193,11 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       // transcript exactly like /model and /provider do.
       try {
         const rolled = await deps.rollRandom();
-        provider = rolled.provider;
-        model = rolled.model;
-        history = [];
-        chatLog.startNewSession();
-        printConnectionLine(provider.name, model);
+        session.provider = rolled.provider;
+        session.model = rolled.model;
+        session.history = [];
+        session.chatLog.startNewSession();
+        printConnectionLine(session.provider.name, session.model);
       } catch (err) {
         console.log(errorColor(`✖ ${(err as Error).message}`));
       }
@@ -210,16 +207,16 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     if (cmd.type === 'system') {
       if (!cmd.arg) {
         console.log(
-          systemPrompt
-            ? mutedColor(systemPrompt)
+          session.systemPrompt
+            ? mutedColor(session.systemPrompt)
             : mutedColor('No system prompt set. Usage: /system <text>  or  /system clear')
         );
         console.log(mutedColor(`\nAlways sent:\n${environmentPrompt()}`));
       } else if (cmd.arg === 'clear') {
-        systemPrompt = undefined;
+        session.systemPrompt = undefined;
         console.log(chalk.gray('System prompt cleared.'));
       } else {
-        systemPrompt = cmd.arg;
+        session.systemPrompt = cmd.arg;
         console.log(chalk.gray('System prompt set.'));
       }
       continue;
@@ -231,14 +228,16 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
           console.log(`  ${assistantColor(tool.name.padEnd(14))}${mutedColor(tool.description)}`);
         }
       } else {
-        toolsEnabled = !toolsEnabled;
-        console.log(chalk.gray(`Tools ${toolsEnabled ? 'enabled' : 'disabled'}.`));
+        session.toolsEnabled = !session.toolsEnabled;
+        console.log(chalk.gray(`Tools ${session.toolsEnabled ? 'enabled' : 'disabled'}.`));
       }
       continue;
     }
 
     if (cmd.type === 'copy') {
-      const lastReply = [...history].reverse().find((m) => m.role === 'assistant' && m.content);
+      const lastReply = [...session.history]
+        .reverse()
+        .find((m) => m.role === 'assistant' && m.content);
       if (!lastReply) {
         console.log(chalk.gray('Nothing to copy yet.'));
       } else {
@@ -266,11 +265,14 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       } else if (sub === 'save') {
         if (!name) {
           console.log(errorColor('✖ Usage: /skill save <name>'));
-        } else if (!systemPrompt) {
+        } else if (!session.systemPrompt) {
           console.log(errorColor('✖ No system prompt set. Set one with /system <text> first.'));
         } else {
           try {
-            await skillStore.save(name, { prompt: systemPrompt, savedAt: new Date().toISOString() });
+            await skillStore.save(name, {
+              prompt: session.systemPrompt,
+              savedAt: new Date().toISOString(),
+            });
             console.log(chalk.gray(`Saved skill "${name}".`));
           } catch (err) {
             console.log(errorColor(`✖ ${(err as Error).message}`));
@@ -282,7 +284,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
         } else {
           try {
             const skill = await skillStore.load(name);
-            systemPrompt = skill.prompt;
+            session.systemPrompt = skill.prompt;
             console.log(chalk.gray(`Using skill "${name}".`));
           } catch (err) {
             console.log(errorColor(`✖ Could not load "${name}": ${(err as Error).message}`));
@@ -317,7 +319,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
         // output that were wrapped as untrusted the first time round. Replaying
         // them as a plain user message would launder that text back into the
         // context as if the user had typed it, so re-wrap it.
-        history.push({
+        session.history.push({
           role: 'user',
           content: wrapUntrusted(
             `recalled excerpts from past conversations matching "${cmd.arg}"`,
@@ -341,11 +343,11 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       }
       try {
         await conversationStore.save(cmd.arg, {
-          providerId: provider.id,
-          providerName: provider.name,
-          model,
+          providerId: session.provider.id,
+          providerName: session.provider.name,
+          model: session.model,
           savedAt: new Date().toISOString(),
-          messages: history,
+          messages: session.history,
         });
         console.log(chalk.gray(`Saved conversation as "${cmd.arg}".`));
       } catch (err) {
@@ -366,8 +368,8 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       }
       try {
         const saved = await conversationStore.load(cmd.arg);
-        history = saved.messages;
-        chatLog.startNewSession();
+        session.history = saved.messages;
+        session.chatLog.startNewSession();
         console.log(
           chalk.gray(`Loaded conversation "${cmd.arg}" (saved on ${saved.providerName} · ${saved.model}).`)
         );
@@ -379,12 +381,12 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
 
     if (!cmd.arg) continue;
 
-    const historyLengthBeforeTurn = history.length;
-    history.push({ role: 'user', content: cmd.arg });
+    const historyLengthBeforeTurn = session.history.length;
+    session.history.push({ role: 'user', content: cmd.arg });
     process.stdout.write(assistantColor('» '));
 
-    let activeProvider = provider;
-    let activeModel = model;
+    let activeProvider = session.provider;
+    let activeModel = session.model;
     let fallbackCandidates: FallbackCandidate[] | undefined;
     let fallbackIndex = 0;
     let lastError: Error | undefined;
@@ -395,21 +397,15 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
 
     while (true) {
       try {
-        // The environment preamble is always sent, and always first: /system
-        // controls the user's own instructions, not what Robin knows about
-        // the machine it is running on.
-        const systemContent = systemPrompt
-          ? `${environmentPrompt()}\n\n${systemPrompt}`
-          : environmentPrompt();
         const messagesForTurn: Message[] = [
-          { role: 'system', content: systemContent },
-          ...history,
+          { role: 'system', content: buildSystemPrompt(session) },
+          ...session.history,
         ];
         const newMessages = await runAgentTurn(
           activeProvider,
           activeModel,
           messagesForTurn,
-          toolsEnabled ? TOOL_DEFINITIONS : [],
+          session.toolsEnabled ? TOOL_DEFINITIONS : [],
           {
             onText: (text) => process.stdout.write(text),
             executeTool: (toolCall, confirm) =>
@@ -421,7 +417,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
             confirm: askForApproval,
           }
         );
-        history.push(...newMessages);
+        session.history.push(...newMessages);
         process.stdout.write('\n');
         succeeded = true;
         break;
@@ -459,12 +455,12 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     }
 
     if (succeeded) {
-      if (activeProvider.id !== provider.id || activeModel !== model) {
-        provider = activeProvider;
-        model = activeModel;
-        printConnectionLine(provider.name, model);
+      if (activeProvider.id !== session.provider.id || activeModel !== session.model) {
+        session.provider = activeProvider;
+        session.model = activeModel;
+        printConnectionLine(session.provider.name, session.model);
       }
-      await chatLog.write(provider.name, model, history);
+      await session.chatLog.write(session.provider.name, session.model, session.history);
       // Refresh in the background so the next divider has a fresh figure
       // without the user ever waiting on it. Failures are already swallowed
       // inside the cache; the catch is belt-and-braces against an unhandled
@@ -473,7 +469,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     } else {
       // Drop the user message so a failed turn doesn't leave two consecutive
       // user messages in the history sent to the API next time.
-      history.length = historyLengthBeforeTurn;
+      session.history.length = historyLengthBeforeTurn;
       console.log(errorColor(`\n✖ ${lastError?.message}`));
     }
   }
