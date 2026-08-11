@@ -161,6 +161,18 @@ Approvals are recorded in `~/.robin/personality-trust.json`. Your own global fil
 
 `/personality` shows what's active and where it came from, `/personality reload` re-reads after an edit, and `/personality off` drops it for the session.
 
+## Editing and Interrupting
+
+| Key | Does |
+|---|---|
+| `Enter` | Send the message |
+| `Alt+Enter` | Start a new line without sending. A trailing `\` does the same, for terminals that swallow Alt+Enter |
+| `↑` / `↓` | Move between lines of a multi-line message; from the first or last line, walk back and forward through what you've typed before |
+| `Esc` | While a reply is streaming, stop it. The partial reply is kept, so your next message reads as a redirect. While typing, closes the command popup |
+| `Ctrl+C` | Quit |
+
+Long-running commands stream their output as it arrives, dimmed, rather than appearing all at once when they finish.
+
 ## Chat History
 
 Every conversation is automatically written to a readable markdown transcript in `~/.robin/chats/robin-chat-<timestamp>.md`, updated after every reply — nothing to remember to do. A new file starts whenever the conversation resets (`/clear`, `/model`, `/provider`, `/load`), so each distinct conversation gets its own file you can browse, search, or share later.
