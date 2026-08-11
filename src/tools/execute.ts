@@ -57,7 +57,7 @@ export function wrapUntrusted(source: string, content: string): string {
  * kind to offer "don't ask again for this kind of action this session".
  */
 export interface ConfirmRequest {
-  kind: 'run_command' | 'write_file' | 'read_file';
+  kind: 'run_command' | 'write_file' | 'read_file' | 'mcp_tool';
   message: string;
 }
 
@@ -78,6 +78,14 @@ export interface ExecuteOptions {
   onAutoApproved?: (command: string) => void;
   /** Receives stdout/stderr chunks as they arrive, for live display. */
   onOutput?: (chunk: string) => void;
+  /**
+   * Tools contributed by MCP servers. Checked before the built-in switch, and
+   * matched only on namespaced names, so a server can never claim a built-in.
+   */
+  mcp?: {
+    has(name: string): boolean;
+    call(name: string, args: Record<string, unknown>): Promise<string>;
+  };
 }
 
 export async function executeTool(
@@ -94,6 +102,12 @@ export async function executeTool(
     args = parsed as Record<string, unknown>;
   } catch (err) {
     return `Error: invalid tool arguments — ${(err as Error).message}`;
+  }
+
+  // MCP is checked first, but matches only namespaced names — the registry's
+  // has() never returns true for a bare built-in, so this cannot shadow one.
+  if (options.mcp?.has(toolCall.name)) {
+    return await runMcpTool(toolCall.name, args, confirm, options.mcp);
   }
 
   try {
@@ -189,6 +203,45 @@ async function writeFileTool(
   } catch (err) {
     return `Error: ${(err as Error).message}`;
   }
+}
+
+/**
+ * Runs a tool contributed by an MCP server.
+ *
+ * **No MCP tool ever auto-approves.** `isReadOnlyCommand` can classify Robin's
+ * own shell commands because it inspects the command itself; there is no
+ * equivalent for an opaque third-party tool, and inferring safety from a name
+ * the server chose would be trusting exactly the thing being gated. A tool
+ * called `list_files` may do anything at all.
+ *
+ * The result is wrapped as untrusted for the same reason file reads and
+ * command output are: it is attacker-controlled text entering the model's
+ * context.
+ */
+async function runMcpTool(
+  name: string,
+  args: Record<string, unknown>,
+  confirm: ConfirmFn,
+  mcp: NonNullable<ExecuteOptions['mcp']>
+): Promise<string> {
+  const preview = JSON.stringify(args);
+  const approved = await confirm({
+    kind: 'mcp_tool',
+    message:
+      `Run MCP tool "${name}"?\n` +
+      `with ${preview.length > MAX_PREVIEW_LENGTH ? `${preview.slice(0, MAX_PREVIEW_LENGTH)}...` : preview}\n` +
+      '(provided by an external server — Robin cannot tell what it does)',
+  });
+  if (!approved) {
+    return `Running MCP tool "${name}" was declined by the user.`;
+  }
+
+  const result = await mcp.call(name, args);
+  const truncated =
+    result.length > MAX_OUTPUT_LENGTH
+      ? `${result.slice(0, MAX_OUTPUT_LENGTH)}\n...[truncated ${result.length - MAX_OUTPUT_LENGTH} characters]`
+      : result;
+  return wrapUntrusted(`output of MCP tool "${name}"`, truncated);
 }
 
 async function runCommandTool(

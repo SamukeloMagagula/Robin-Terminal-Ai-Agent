@@ -13,6 +13,10 @@ import { readSlashAwareLine } from './slash-prompt.js';
 import { addToInputHistory, InputHistoryStore } from './input-history.js';
 import { UnsupportedModelStore } from '../providers/unsupported-models.js';
 import { PersonalityTrustStore } from '../personality-trust.js';
+import { TrustStore } from '../trust-store.js';
+import { loadMcpConfig } from '../mcp/config.js';
+import { McpRegistry } from '../mcp/registry.js';
+import { filterTrustedServers } from '../mcp/trust.js';
 import { UsageCache } from '../usage/openrouter-usage.js';
 import { renderUsageLine } from '../usage/render-usage.js';
 import { assistantColor, errorColor, mutedColor, divider, box } from '../ui/theme.js';
@@ -67,7 +71,54 @@ const APPROVAL_WORDING: Record<ConfirmRequest['kind'], { question: string; scope
   run_command: { question: 'Run it?', scope: 'commands' },
   write_file: { question: 'Write it?', scope: 'file writes' },
   read_file: { question: 'Read it?', scope: 'reads outside this directory' },
+  mcp_tool: { question: 'Run it?', scope: 'MCP tools' },
 };
+
+/**
+ * Loads mcp.json, asks about anything not already trusted, and connects what
+ * survives. Returns an empty registry when there is nothing configured, so the
+ * caller has one code path.
+ *
+ * An mcp.json entry says "run this command". Config files travel with
+ * repositories and get pasted from the internet, so the user is shown the
+ * exact command before anything is launched — the same gate PERSONALITY.md
+ * gets, and the same two grants.
+ */
+async function startMcpServers(): Promise<McpRegistry> {
+  const registry = new McpRegistry({
+    onError: (server, message) =>
+      console.log(mutedColor(`✖ MCP server "${server}" unavailable — ${message}`)),
+  });
+
+  const configured = await loadMcpConfig();
+  if (configured.length === 0) return registry;
+
+  const trusted = await filterTrustedServers(configured, new TrustStore(), async (config) => {
+    const command = [config.command, ...(config.args ?? [])].join(' ');
+    console.log(`\n${mutedColor(`MCP server "${config.name}" wants to run:`)}`);
+    console.log(box([command]));
+    console.log(
+      mutedColor('Its tools become available to the model, each still asking before it runs.')
+    );
+
+    return expand<'yes' | 'no' | 'always'>({
+      message: `Start "${config.name}"?`,
+      default: 'n',
+      choices: [
+        { key: 'y', name: 'yes, this exact command', value: 'yes' },
+        { key: 'n', name: 'no', value: 'no' },
+        { key: 'a', name: 'yes, and trust this server even if its command changes', value: 'always' },
+      ],
+    });
+  });
+
+  await registry.load(trusted);
+  const toolCount = registry.toolDefinitions().length;
+  if (toolCount > 0) {
+    console.log(mutedColor(`${toolCount} MCP tool(s) available from ${trusted.length} server(s).`));
+  }
+  return registry;
+}
 
 /**
  * Approval gate for one session. Remembering a decision per *kind* is what
@@ -124,6 +175,10 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   const { text: personality } = await loadPersonality(personalityTrust);
   session.personality = personality;
 
+  // Same reasoning, same placement: an mcp.json entry is a command Robin will
+  // execute, so the user sees it before anything is launched.
+  const mcpRegistry = await startMcpServers();
+
   // Built once. `session` is never reassigned — commands mutate its fields —
   // so this reference stays correct for the life of the loop.
   const ctx: ReplContext = {
@@ -177,7 +232,12 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     void inputHistoryStore.append(line);
     const cmd = parseCommand(line);
 
-    if (cmd.type === 'exit') break;
+    if (cmd.type === 'exit') {
+      // Each server is a child process Robin started; leaving them running
+      // would outlive the session that spawned them.
+      await mcpRegistry.closeAll();
+      break;
+    }
 
     if (cmd.type === 'unknown') {
       console.log(errorColor(`✖ Unknown command: ${cmd.arg}. Type /help for commands.`));
@@ -204,6 +264,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       onAutoApproved: (command) => console.log(mutedColor(`\n  $ ${command}`)),
       onOutput: (chunk) => process.stdout.write(mutedColor(chunk)),
       onThinking: (text) => process.stdout.write(mutedColor(text)),
+      mcp: mcpRegistry,
       onFallback: ({ error, next }) => {
         console.log(
           mutedColor(`\n  ${error.message} — trying ${next.provider.name} · ${next.model}...`)

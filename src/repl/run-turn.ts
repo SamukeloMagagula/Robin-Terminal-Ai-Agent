@@ -1,4 +1,4 @@
-import type { Provider, Message } from '../providers/types.js';
+import type { Provider, Message, ToolDefinition } from '../providers/types.js';
 import type { ConfirmFn } from '../tools/execute.js';
 import type { Session } from './session.js';
 import { buildSystemPrompt } from './session.js';
@@ -20,6 +20,12 @@ export interface TurnOptions {
   onOutput?: (chunk: string) => void;
   /** Reasoning summaries, where the provider streams them. Display only. */
   onThinking?: (text: string) => void;
+  /** MCP tools for this turn, offered to the model alongside the built-ins. */
+  mcp?: {
+    toolDefinitions(): ToolDefinition[];
+    has(name: string): boolean;
+    call(name: string, args: Record<string, unknown>): Promise<string>;
+  };
   /** Called before each retry on a different model. */
   onFallback?: (info: { error: Error; next: FallbackCandidate }) => void;
   /**
@@ -84,7 +90,7 @@ export async function runTurn(
         activeProvider,
         activeModel,
         messagesForTurn,
-        useTools ? TOOL_DEFINITIONS : [],
+        useTools ? [...TOOL_DEFINITIONS, ...(options.mcp?.toolDefinitions() ?? [])] : [],
         {
           onText: options.onText,
           onThinking: options.onThinking,
@@ -92,6 +98,7 @@ export async function runTurn(
             executeTool(toolCall, confirm, {
               onAutoApproved: options.onAutoApproved,
               onOutput: options.onOutput,
+              mcp: options.mcp,
             }),
           confirm: options.confirm,
           signal: options.signal,

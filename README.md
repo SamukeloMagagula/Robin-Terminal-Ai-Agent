@@ -235,6 +235,35 @@ Approvals are recorded in `~/.robin/personality-trust.json`. Your own global fil
 
 Long-running commands stream their output as it arrives, dimmed, rather than appearing all at once when they finish.
 
+## MCP servers
+
+Robin can connect to [Model Context Protocol](https://modelcontextprotocol.io) servers over stdio, adding their tools alongside its own three. Declare them in `~/.robin/mcp.json` — the same shape other MCP hosts use, so you can paste server blocks straight from their docs:
+
+```jsonc
+{
+  "servers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/me/code"]
+    },
+    "github": { "command": "gh-mcp", "env": { "GITHUB_TOKEN": "..." } }
+  }
+}
+```
+
+**Tools are namespaced `server__tool`** — `filesystem__read_file` is distinct from Robin's own `read_file`. That prefix is a security boundary, not decoration: without it a server could declare a tool named `read_file` and quietly intercept every call meant for the built-in.
+
+**Two gates, and neither can be turned off:**
+
+- **Starting a server is approved once.** An `mcp.json` entry says "run this command", and config files get pasted from the internet. On first sight Robin prints the exact command and asks — `y` approves that exact command, `a` trusts the server whatever its command becomes, `n` skips it. Changing an approved command asks again. Approvals live in `~/.robin/personality-trust.json` alongside the `PERSONALITY.md` ones.
+- **Every MCP tool call is approved individually.** Robin auto-approves its own read-only shell commands because it can inspect the command; there is no equivalent for an opaque third-party tool, and trusting a name the server chose would be trusting the thing being gated. A tool called `list_files` may do anything. Use the gate's "stop asking about MCP tools this session" option if that gets tiring.
+
+Results are wrapped as untrusted content before the model sees them, exactly like file reads and command output.
+
+A server that fails to start, or dies, is disabled with one muted line — the turn continues on the remaining tools. One bad entry never costs you the rest.
+
+**Not supported yet:** the Streamable-HTTP transport (stdio only), and MCP resources and prompts (tools only).
+
 ## Chat History
 
 Every conversation is automatically written to a readable markdown transcript in `~/.robin/chats/robin-chat-<timestamp>.md`, updated after every reply — nothing to remember to do. A new file starts whenever the conversation resets (`/clear`, `/model`, `/provider`, `/load`), so each distinct conversation gets its own file you can browse, search, or share later.
