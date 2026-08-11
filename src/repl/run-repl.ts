@@ -1,10 +1,8 @@
 import chalk from 'chalk';
 import { expand } from '@inquirer/prompts';
-import type { Provider, Message } from '../providers/types.js';
-import { listProviders } from '../providers/index.js';
+import type { Provider } from '../providers/types.js';
 import { parseCommand } from './parse-command.js';
-import { runAgentTurn } from '../agent-loop.js';
-import { executeTool, wrapUntrusted, type ConfirmRequest } from '../tools/execute.js';
+import { wrapUntrusted, type ConfirmRequest } from '../tools/execute.js';
 import { TOOL_DEFINITIONS } from '../tools/definitions.js';
 import { printBanner, printConnectionLine } from '../ui/banner.js';
 import { newSessionId } from '../session-id.js';
@@ -12,12 +10,11 @@ import { environmentPrompt } from '../environment-prompt.js';
 import { ConversationStore } from '../conversation-store.js';
 import { SkillStore } from '../skill-store.js';
 import { copyToClipboard } from '../clipboard.js';
-import { createSession, buildSystemPrompt } from './session.js';
+import { createSession } from './session.js';
+import { runTurn } from './run-turn.js';
 import { searchChatLogs } from '../recall.js';
-import { buildFallbackCandidates, type FallbackCandidate } from './fallback.js';
 import { readSlashAwareLine } from './slash-prompt.js';
 import { addToInputHistory } from './input-history.js';
-import { isModelUnsupported, isProviderQuotaExhausted } from '../providers/chat-error.js';
 import { UnsupportedModelStore } from '../providers/unsupported-models.js';
 import { UsageCache } from '../usage/openrouter-usage.js';
 import { renderUsageLine, renderUsageReport } from '../usage/render-usage.js';
@@ -381,83 +378,27 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
 
     if (!cmd.arg) continue;
 
-    const historyLengthBeforeTurn = session.history.length;
-    session.history.push({ role: 'user', content: cmd.arg });
     process.stdout.write(assistantColor('» '));
-
-    let activeProvider = session.provider;
-    let activeModel = session.model;
-    let fallbackCandidates: FallbackCandidate[] | undefined;
-    let fallbackIndex = 0;
-    let lastError: Error | undefined;
-    // Providers that refused this turn on quota. Reset per turn, because a
-    // rate-limit window can reopen between messages.
-    const quotaBlocked = new Set<string>();
-    let succeeded = false;
-
-    while (true) {
-      try {
-        const messagesForTurn: Message[] = [
-          { role: 'system', content: buildSystemPrompt(session) },
-          ...session.history,
-        ];
-        const newMessages = await runAgentTurn(
-          activeProvider,
-          activeModel,
-          messagesForTurn,
-          session.toolsEnabled ? TOOL_DEFINITIONS : [],
-          {
-            onText: (text) => process.stdout.write(text),
-            executeTool: (toolCall, confirm) =>
-              executeTool(toolCall, confirm, {
-                // Read-only commands run unannounced otherwise; showing them
-                // keeps the user aware of what Robin actually did.
-                onAutoApproved: (command) => console.log(mutedColor(`\n  $ ${command}`)),
-              }),
-            confirm: askForApproval,
-          }
+    const result = await runTurn(session, cmd.arg, {
+      onText: (text) => process.stdout.write(text),
+      confirm: askForApproval,
+      unsupportedStore,
+      // Read-only commands run unannounced otherwise; showing them keeps the
+      // user aware of what Robin actually did.
+      onAutoApproved: (command) => console.log(mutedColor(`\n  $ ${command}`)),
+      onFallback: ({ error, next }) => {
+        console.log(
+          mutedColor(`\n  ${error.message} — trying ${next.provider.name} · ${next.model}...`)
         );
-        session.history.push(...newMessages);
-        process.stdout.write('\n');
-        succeeded = true;
-        break;
-      } catch (err) {
-        lastError = err as Error;
-        // A model the provider says it does not support will never work, so
-        // remember it and drop every other candidate on that provider that is
-        // already known-bad, instead of retrying into the same wall.
-        if (isModelUnsupported(err)) {
-          await unsupportedStore.record(activeProvider.id, activeModel);
-        }
-        // A quota refusal is about the account, not the model, so every sibling
-        // model on that provider will refuse identically. Skip the rest of them
-        // rather than printing the same rate-limit message five times.
-        if (isProviderQuotaExhausted(err)) {
-          quotaBlocked.add(activeProvider.id);
-        }
-        if (!fallbackCandidates) {
-          fallbackCandidates = await buildFallbackCandidates(activeProvider, activeModel, listProviders());
-        }
-        while (
-          fallbackIndex < fallbackCandidates.length &&
-          quotaBlocked.has(fallbackCandidates[fallbackIndex].provider.id)
-        ) {
-          fallbackIndex++;
-        }
-        if (fallbackIndex >= fallbackCandidates.length) break;
-        const next = fallbackCandidates[fallbackIndex];
-        fallbackIndex++;
-        console.log(mutedColor(`\n  ${lastError.message} — trying ${next.provider.name} · ${next.model}...`));
-        activeProvider = next.provider;
-        activeModel = next.model;
         process.stdout.write(assistantColor('» '));
-      }
-    }
+      },
+    });
 
-    if (succeeded) {
-      if (activeProvider.id !== session.provider.id || activeModel !== session.model) {
-        session.provider = activeProvider;
-        session.model = activeModel;
+    if (result.ok) {
+      process.stdout.write('\n');
+      if (result.provider.id !== session.provider.id || result.model !== session.model) {
+        session.provider = result.provider;
+        session.model = result.model;
         printConnectionLine(session.provider.name, session.model);
       }
       await session.chatLog.write(session.provider.name, session.model, session.history);
@@ -467,10 +408,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       // rejection taking down the process.
       void usageCache.get().catch(() => {});
     } else {
-      // Drop the user message so a failed turn doesn't leave two consecutive
-      // user messages in the history sent to the API next time.
-      session.history.length = historyLengthBeforeTurn;
-      console.log(errorColor(`\n✖ ${lastError?.message}`));
+      console.log(errorColor(`\n✖ ${result.error?.message}`));
     }
   }
 }
