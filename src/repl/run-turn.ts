@@ -29,6 +29,8 @@ export interface TurnOptions {
   tools?: boolean;
   /** Injectable for tests; defaults to the real registry. */
   providers?: Provider[];
+  /** Aborts the in-flight request. An abort is reported, never retried. */
+  signal?: AbortSignal;
 }
 
 export interface TurnResult {
@@ -37,6 +39,8 @@ export interface TurnResult {
   provider: Provider;
   model: string;
   error?: Error;
+  /** True when the user interrupted. The partial reply is kept in history. */
+  aborted?: boolean;
 }
 
 /**
@@ -82,10 +86,18 @@ export async function runTurn(
           executeTool: (toolCall, confirm) =>
             executeTool(toolCall, confirm, { onAutoApproved: options.onAutoApproved }),
           confirm: options.confirm,
+          signal: options.signal,
         }
       );
       session.history.push(...newMessages);
-      return { ok: true, provider: activeProvider, model: activeModel };
+      // An abort returns normally from runAgentTurn, so the catch below — and
+      // with it the fallback chain — is unreachable for it by construction.
+      return {
+        ok: true,
+        provider: activeProvider,
+        model: activeModel,
+        aborted: options.signal?.aborted ?? false,
+      };
     } catch (err) {
       lastError = err as Error;
       // A model the provider says it does not support will never work, so

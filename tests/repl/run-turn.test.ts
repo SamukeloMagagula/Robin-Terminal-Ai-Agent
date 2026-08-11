@@ -118,12 +118,51 @@ describe('runTurn', () => {
     expect(result.error?.message).toBe('boom');
   });
 
+  it('reports an aborted turn without falling back to another model', async () => {
+    const controller = new AbortController();
+    const failing = {
+      id: 'copilot',
+      name: 'GitHub Copilot',
+      isAuthenticated: vi.fn().mockResolvedValue(true),
+      login: vi.fn(),
+      logout: vi.fn(),
+      listModels: vi.fn().mockResolvedValue([]),
+      chat: vi.fn().mockImplementation(async function* () {
+        yield { type: 'text', text: 'half an ans' };
+        controller.abort();
+        const err = new Error('aborted');
+        err.name = 'AbortError';
+        throw err;
+      }),
+    } as unknown as Provider;
+    const rescue = fakeProvider('ollama', 'Ollama (local)', {
+      text: 'should never run',
+      models: ['llama3.1:latest'],
+    });
+    const session = createSession(failing, 'gpt-4o');
+
+    const result = await runTurn(
+      session,
+      'hi',
+      options({ providers: [failing, rescue], signal: controller.signal })
+    );
+
+    expect(result.aborted).toBe(true);
+    expect(rescue.chat).not.toHaveBeenCalled();
+    expect(session.history[1].content).toContain('half an ans');
+  });
+
   it('sends no tools when tools are disabled for the turn', async () => {
     const provider = fakeProvider('copilot', 'GitHub Copilot', { text: 'ok' });
     const session = createSession(provider, 'gpt-4o');
 
     await runTurn(session, 'hi', options({ tools: false }));
 
-    expect(provider.chat).toHaveBeenCalledWith('gpt-4o', expect.anything(), []);
+    // Assert on the tools argument by position rather than matching the whole
+    // call, so adding a parameter to chat() does not break an assertion that
+    // is really only about tools.
+    const call = (provider.chat as unknown as { mock: { calls: unknown[][] } }).mock.calls[0];
+    expect(call[0]).toBe('gpt-4o');
+    expect(call[2]).toEqual([]);
   });
 });

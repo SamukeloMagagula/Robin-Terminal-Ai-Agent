@@ -66,3 +66,47 @@ describe('runAgentTurn', () => {
     expect(last.content).toMatch(/maximum number of tool-call rounds/);
   });
 });
+
+describe('runAgentTurn when aborted mid-stream', () => {
+  it('keeps the text streamed so far and marks it interrupted', async () => {
+    const controller = new AbortController();
+    const provider = {
+      chat: async function* () {
+        yield { type: 'text', text: 'partial ' };
+        controller.abort();
+        const err = new Error('aborted');
+        err.name = 'AbortError';
+        throw err;
+      },
+    } as unknown as Provider;
+
+    const messages = await runAgentTurn(provider, 'm', [], [], {
+      onText: () => {},
+      executeTool: async () => '',
+      confirm: async () => false,
+      signal: controller.signal,
+    });
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].role).toBe('assistant');
+    expect(messages[0].content).toContain('partial ');
+    expect(messages[0].content).toContain('[interrupted]');
+  });
+
+  it('still throws a genuine failure rather than swallowing it', async () => {
+    const provider = {
+      chat: async function* () {
+        yield { type: 'text', text: 'x' };
+        throw new Error('503 Service Unavailable');
+      },
+    } as unknown as Provider;
+
+    await expect(
+      runAgentTurn(provider, 'm', [], [], {
+        onText: () => {},
+        executeTool: async () => '',
+        confirm: async () => false,
+      })
+    ).rejects.toThrow('503');
+  });
+});
