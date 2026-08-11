@@ -207,7 +207,15 @@ describe('filterSlashCommands', () => {
 
   it('filters to commands starting with the typed prefix', () => {
     const matches = filterSlashCommands('/s');
-    expect(matches.map((m) => m.name)).toEqual(['/system', '/save', '/skill']);
+    // Asserted as a set rather than an exact list: the point is that every
+    // /s command is offered and nothing else is, not the order they happen to
+    // sit in SLASH_COMMANDS — which changes whenever a command is added.
+    const names = matches.map((m) => m.name);
+    expect(names).toContain('/system');
+    expect(names).toContain('/save');
+    expect(names).toContain('/skill');
+    expect(names).toContain('/session');
+    expect(names.every((n) => n.startsWith('/s'))).toBe(true);
   });
 
   it('narrows to a single match as more is typed', () => {

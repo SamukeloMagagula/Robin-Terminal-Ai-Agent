@@ -8,6 +8,8 @@ export interface AgentDeps {
   confirm: ConfirmFn;
   executeTool: (toolCall: ToolCall, confirm: ConfirmFn) => Promise<string>;
   onText: (text: string) => void;
+  /** Reasoning summaries, where the provider streams them. Display only. */
+  onThinking?: (text: string) => void;
   /** Cancels the in-flight request. An abort ends the turn, keeping what streamed. */
   signal?: AbortSignal;
 }
@@ -33,6 +35,11 @@ export async function runAgentTurn(
         if (event.type === 'text') {
           text += event.text;
           deps.onText(event.text);
+        } else if (event.type === 'thinking') {
+          // Deliberately not accumulated into `text`: reasoning is shown to
+          // the user but must not become part of the assistant's message, or
+          // it would be replayed as content on every later turn.
+          deps.onThinking?.(event.text);
         } else {
           toolCalls.push(event.toolCall);
         }

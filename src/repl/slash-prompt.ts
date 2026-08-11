@@ -16,8 +16,11 @@ export const SLASH_COMMANDS: SlashCommandEntry[] = [
   { name: '/save', description: 'save the conversation' },
   { name: '/load', description: 'load a saved conversation' },
   { name: '/copy', description: "copy the assistant's last reply" },
-  { name: '/skill', description: 'save/use/list system-prompt presets' },
+  { name: '/skill', description: 'save, use, list or migrate skills' },
   { name: '/personality', description: 'show, reload, or drop the active personality' },
+  { name: '/memory', description: 'list, show, or forget stored memories' },
+  { name: '/session', description: 'open, switch between, or close sessions' },
+  { name: '/workflow', description: 'run a plan/build/test/validate pipeline' },
   { name: '/random', description: 'switch to a random provider and model' },
   { name: '/usage', description: 'show OpenRouter spend' },
   { name: '/recall', description: 'search past conversations' },
@@ -38,6 +41,12 @@ const NAME_WIDTH = 12;
 export interface SlashPromptConfig {
   /** Lines submitted earlier this session, oldest first. Walked with up/down. */
   history?: string[];
+  /**
+   * Shown before the caret, e.g. `2` for session two. Omitted entirely when
+   * only one session is open, so a user who never touches /session sees no
+   * change to the prompt they already know.
+   */
+  promptPrefix?: string;
 }
 
 /**
@@ -196,8 +205,12 @@ export const promptWithSlashMenu = createPrompt<string, SlashPromptConfig>((conf
   });
 
   // Continuation lines indent by two, so they align under the "> " prefix.
+  // Continuation lines indent to match the caret, so a multiline message stays
+  // aligned whether or not a session number is shown.
+  const caret = config.promptPrefix ? `${config.promptPrefix}> ` : '> ';
+  const indent = ' '.repeat(caret.length);
   const rendered = buffer.lines
-    .map((line, i) => (i === 0 ? `${USER_INPUT_COLOR}> ${line}` : `  ${line}`))
+    .map((line, i) => (i === 0 ? `${USER_INPUT_COLOR}${caret}${line}` : `${indent}${line}`))
     .join('\n');
   const top = `${rendered}${RESET_COLOR}`;
   const bottom =
@@ -214,6 +227,6 @@ export const promptWithSlashMenu = createPrompt<string, SlashPromptConfig>((conf
 });
 
 /** Same contract as readline's rl.question(): resolves with the submitted line. Shows a live-filtered slash-command popup while the buffer starts with "/", and walks `history` with the up/down arrows. */
-export function readSlashAwareLine(history: string[] = []): Promise<string> {
-  return promptWithSlashMenu({ history });
+export function readSlashAwareLine(history: string[] = [], promptPrefix?: string): Promise<string> {
+  return promptWithSlashMenu({ history, promptPrefix });
 }

@@ -1,32 +1,93 @@
 # robin
 
-Robin is a terminal agent that lets you run your AI. Supports GitHub Copilot, Google Gemini, OpenRouter (via API key), and local Ollama models, with tool-calling (read files, write files, run shell commands) built in.
+Robin is a terminal agent that lets you run your AI. Supports Anthropic (Claude), GitHub Copilot, Google Gemini, OpenRouter (via API key), and local Ollama models, with tool-calling (read files, write files, run shell commands) built in.
 
 Built by Samukelo "Batman" Magagula.
 
 ## Requirements
 
 - Node.js >= 18
+- For Anthropic: a Claude API key from [platform.claude.com](https://platform.claude.com/settings/keys)
 - For Copilot: a GitHub account with Copilot access
 - For Gemini: a Google AI Studio API key
 - For OpenRouter: an OpenRouter API key (gives access to a large, constantly growing catalog of models from many providers — OpenAI, Anthropic, Google, Meta, Mistral, and more — under one key)
 - For Ollama: [Ollama](https://ollama.com) installed and running locally
 
-## Setup
+## Install
+
+**macOS / Linux:**
 
 ```bash
-npm ci            # installs exactly what package-lock.json pins
-npm run build
-npm link          # makes the `robin` command available globally
+git clone https://github.com/SamukeloMagagula/Robin-Terminal-Ai-Agent.git
+cd Robin-Terminal-Ai-Agent
+npm ci && npm run build && npm link
 ```
+
+**Windows (PowerShell):**
+
+```powershell
+git clone https://github.com/SamukeloMagagula/Robin-Terminal-Ai-Agent.git
+cd Robin-Terminal-Ai-Agent
+npm ci; npm run build; npm link
+```
+
+Then start it:
+
+```bash
+robin chat ollama      # local, no API key needed
+robin chat             # pick a provider from a menu
+robin chat random      # roll a random provider and model
+```
+
+`robin chat ollama` is the fastest way to see it working, because Ollama needs
+no account — [install Ollama](https://ollama.com), run `ollama pull llama3.1`,
+and you are chatting in under a minute. Every other provider needs a login
+first; see [Setting up a provider](#setting-up-a-provider) below.
+
+**Check it worked:**
+
+```bash
+robin status           # shows which providers are logged in and reachable
+```
+
+### Notes on the install
 
 Use `npm ci`, not `npm install`. Dependencies are exact-pinned with no version
 ranges, so a compromised patch release can't reach you without an intentional
 bump here — `npm ci` enforces that; `npm install` can drift.
 
-`npm link` only needs to be run once (or again after pulling changes that touch `package.json`). After that, `robin` works from any directory.
+`npm link` only needs to be run once (or again after pulling changes that touch
+`package.json`). After that, `robin` works from any directory. If you would
+rather not link globally, `node dist/cli.js chat` from the repo works the same.
+
+**Updating:**
+
+```bash
+git pull && npm ci && npm run build
+```
+
+**Uninstalling:** `npm unlink -g robin`, then delete the clone. Robin's data
+lives in `~/.robin/` — conversations, transcripts, credentials, input history —
+so remove that directory too if you want it gone.
 
 ### Setting up a provider
+
+**Anthropic (Claude):**
+
+```bash
+robin login anthropic
+```
+
+Opens the Claude Console's API keys page; create or copy a key and paste it back. Stored in `~/.robin/auth.json` like every other provider.
+
+Robin talks to Anthropic through the official `@anthropic-ai/sdk` rather than raw HTTP, because the Messages API differs from the OpenAI shape the other providers share — the system prompt is a top-level field, tool results are blocks inside a user message, and tool arguments arrive parsed rather than as a JSON string.
+
+Two behaviours are specific to this provider:
+
+- **Reasoning is shown.** Current Claude models think by default; Robin asks for summarised reasoning and prints it dimmed as it streams, so a thinking pause looks like progress rather than a hang. It is never added to the conversation history.
+- **No temperature knob.** Current models reject `temperature`, `top_p` and `top_k` outright, so Robin doesn't send them. Steer with `/system` or a `PERSONALITY.md` instead.
+
+`/model` lists what your key can reach, defaulting to `claude-opus-5`.
 
 **GitHub Copilot:**
 
@@ -109,6 +170,7 @@ The figure is cached for 60 seconds and refreshed in the background after each r
 robin                    # interactive provider + model picker
 robin chat copilot       # jump straight into Copilot
 robin chat gemini        # jump straight into Gemini
+robin chat anthropic     # jump straight into Claude
 robin chat openrouter    # jump straight into OpenRouter
 robin chat ollama        # jump straight into Ollama
 robin chat random        # let Robin roll a provider and model for you
@@ -131,9 +193,11 @@ In a chat session, typing `/` shows a live-filtered popup of matching commands a
 - `/save [name]` — save the current conversation under `~/.robin/conversations/<name>.json`; `/save` with no name lists what's saved
 - `/load [name]` — load a previously saved conversation back into the session; `/load` with no name lists what's saved
 - `/copy` — copy the assistant's last reply to your system clipboard
-- `/skill save <name>` — save the current system prompt as a reusable named preset under `~/.robin/skills/<name>.json`
-- `/skill use <name>` — load a saved preset as the current system prompt
-- `/skill [list]` — list saved presets
+- `/skill save <name>` — save the current system prompt as a reusable skill under `~/.robin/skills/<name>/SKILL.md`
+- `/skill use <name>` — apply a saved skill as the current system prompt
+- `/skill [list]` — list saved skills with their descriptions
+- `/skill forget <name>` — delete a skill
+- `/skill migrate` — convert pre-markdown `.json` presets to the new layout
 - `/personality [reload|off]` — show the active `PERSONALITY.md`, re-read it after an edit, or drop it for the session
 - `/random` — re-roll onto a randomly chosen provider and model
 - `/usage` — OpenRouter spend for this key (UTC day/week/month, all time) and the account balance
@@ -173,13 +237,106 @@ Approvals are recorded in `~/.robin/personality-trust.json`. Your own global fil
 
 Long-running commands stream their output as it arrives, dimmed, rather than appearing all at once when they finish.
 
+## Workflows
+
+`/workflow` runs a piece of work through four roles, each on a model you choose: **planner** decides what to do, **builder** makes the change, **tester** runs the checks, **validator** judges whether it met the goal.
+
+```bash
+/workflow new            # name it, then pick a provider and model per role
+/workflow run <goal>     # start
+/workflow show <name>    # see which model has which role
+```
+
+**It stops after every stage** and asks: approve, retry with a note, skip, or quit. Nothing runs unattended.
+
+Each stage is a **fresh conversation** given only the artifacts it needs — the validator sees the plan, what was built and the test results, but never a transcript of the builder explaining why its own work is correct. That bias is the reason the role is separate.
+
+The validator ends with `VERDICT: PASS` or `VERDICT: FAIL`. A failure goes back to the builder with the reasons attached, capped at **three build attempts** — past that the loop isn't converging and Robin reports rather than burning tokens. If the verdict line is missing or unreadable, Robin says so and asks you; it will not guess a pass.
+
+The planner runs with **tools off** — a stage whose job is deciding what to do shouldn't be editing files while it decides. The other three have tools, and **every tool call still asks for approval**. A workflow automates the prompting, not the consent.
+
+## Sessions
+
+Robin holds up to nine conversations at once. `/session new` opens one (picking its own provider and model), `/session 2` switches, `/session` lists what's open, `/session name <label>` labels the current one, and `/session close [n]` closes one.
+
+Each session is genuinely independent: its own history, system prompt, tool setting and markdown transcript. Two sessions on the same model are two conversations, not two views of one. Switching is instant — no network, no re-auth.
+
+Nine is the cap so that `/session 3` stays a single unambiguous keystroke; ids are reused as sessions close.
+
+**If you never use it, nothing changes.** The prompt only grows a session number once a second session exists — `2>` instead of `>`.
+
+## Skills
+
+A skill is a reusable instruction set. Each lives in its own directory as `~/.robin/skills/<name>/SKILL.md`, with `name` and `description` frontmatter — the [agentskills.io](https://agentskills.io) layout, so a skill written here can be shared with other tools and one written elsewhere can be dropped in.
+
+Save the current system prompt as a skill with `/skill save <name>`, apply one with `/skill use <name>`, and `/skill` lists them with their descriptions.
+
+**Robin can also write its own.** After working something out, it may call `create_skill` to keep the procedure — but unlike memories, this **asks first**. A memory is a private note; a skill is a standing instruction set that will shape every later session, and one written from a misunderstanding would quietly steer future work. Cheap to approve now, expensive to find months later.
+
+Only the descriptions go into the system prompt. The bodies are whole instruction sets, so the model pulls one with `use_skill` when a line matches the task — the same index/body split memory uses.
+
+**Migrating from the old format.** Robin used to store skills as flat `<name>.json` files holding a bare system prompt. Those still load, so nothing you saved has stopped working. `/skill migrate` converts them to the new layout and **leaves the originals in place** — a conversion you didn't ask for shouldn't be able to lose the only copy of something you wrote. Delete the `.json` files yourself once you're happy.
+
+## Memory
+
+Robin keeps notes for itself across sessions in `~/.robin/memory/` — one markdown file per memory, plus `profile.md`, the accumulating picture of how you work. Plain files: readable, greppable, and deletable with `rm`.
+
+**Robin decides what to keep.** It calls a `remember` tool when something looks worth persisting — a stable preference, a project constraint, a correction you made — and every tenth turn of a session it's reminded to consider whether anything qualifies. Without that nudge the tool exists but rarely gets used.
+
+**Only the index is sent each turn.** `profile.md` and one line per memory go into the system prompt; the bodies stay on disk until the model pulls one with `recall_memory`. That keeps the per-turn cost flat as memory grows, rather than making a long-time user pay for their whole history on every request.
+
+The index is capped at 8 KB and the profile at 4 KB. Past that, the oldest entries stop being *sent* but stay on disk — `/memory` marks which ones those are.
+
+| Command | Does |
+|---|---|
+| `/memory` | List what Robin has remembered, marking anything no longer sent |
+| `/memory show <name>` | Print one in full |
+| `/memory forget <name>` | Delete it |
+
+**Worth being clear about the trade.** Robin writes these without asking first — that is what makes the feature work, and it means things about you land on disk as a side effect of conversation. The mitigations are all after the fact: it's plain text in a directory you own, `/memory` lists everything, `/memory forget` removes it, and you can edit or delete the files directly. If you'd rather approve each one, that's a small change to a single function — open an issue.
+
+Never stored: credentials, tokens or key material. The tool description forbids it.
+
+## MCP servers
+
+Robin can connect to [Model Context Protocol](https://modelcontextprotocol.io) servers over stdio, adding their tools alongside its own three. Declare them in `~/.robin/mcp.json` — the same shape other MCP hosts use, so you can paste server blocks straight from their docs:
+
+```jsonc
+{
+  "servers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/me/code"]
+    },
+    "github": { "command": "gh-mcp", "env": { "GITHUB_TOKEN": "..." } }
+  }
+}
+```
+
+**Tools are namespaced `server__tool`** — `filesystem__read_file` is distinct from Robin's own `read_file`. That prefix is a security boundary, not decoration: without it a server could declare a tool named `read_file` and quietly intercept every call meant for the built-in.
+
+**Two gates, and neither can be turned off:**
+
+- **Starting a server is approved once.** An `mcp.json` entry says "run this command", and config files get pasted from the internet. On first sight Robin prints the exact command and asks — `y` approves that exact command, `a` trusts the server whatever its command becomes, `n` skips it. Changing an approved command asks again. Approvals live in `~/.robin/personality-trust.json` alongside the `PERSONALITY.md` ones.
+- **Every MCP tool call is approved individually.** Robin auto-approves its own read-only shell commands because it can inspect the command; there is no equivalent for an opaque third-party tool, and trusting a name the server chose would be trusting the thing being gated. A tool called `list_files` may do anything. Use the gate's "stop asking about MCP tools this session" option if that gets tiring.
+
+Results are wrapped as untrusted content before the model sees them, exactly like file reads and command output.
+
+A server that fails to start, or dies, is disabled with one muted line — the turn continues on the remaining tools. One bad entry never costs you the rest.
+
+**Not supported yet:** the Streamable-HTTP transport (stdio only), and MCP resources and prompts (tools only).
+
 ## Chat History
 
 Every conversation is automatically written to a readable markdown transcript in `~/.robin/chats/robin-chat-<timestamp>.md`, updated after every reply — nothing to remember to do. A new file starts whenever the conversation resets (`/clear`, `/model`, `/provider`, `/load`), so each distinct conversation gets its own file you can browse, search, or share later.
 
 This is separate from `/save`/`/load`, which store an exact, reloadable snapshot as JSON under `~/.robin/conversations/` — use `/save` when you want to resume a specific conversation later inside `robin`; the markdown transcript is for your own reading/reference outside the app.
 
-Use `/recall <query>` to search across all past markdown transcripts from inside a chat session — it's a plain case-insensitive text search (newest conversations first, capped at 10 matches), not semantic search, but it's enough to find "did I already ask about X" without leaving the terminal.
+Use `/recall <query>` to search across all past markdown transcripts from inside a chat session. It's keyword search, not semantic — but enough to find "did I already ask about X" without leaving the terminal.
+
+Searches run against a full-text index at `~/.robin/index.db` (SQLite FTS5), built on first use and updated incrementally as transcripts change — only files whose modification time moved are re-read. Results come back ranked by relevance rather than by file order, capped at 10.
+
+`better-sqlite3` is a native module. On a platform with no prebuilt binary it may fail to install, and Robin handles that rather than breaking: `/recall` falls back to the original linear scan and says so once per search. The results are the same, the search is just slower.
 
 The lines you type at the prompt are kept too, so the up arrow still reaches yesterday's commands. They live in `~/.robin/input-history` — the newest 200, one per line, in the same private tree as the transcripts and with the same owner-only permissions. `/history` shows the path, `/history clear` wipes it, and `ROBIN_NO_HISTORY_FILE=1` keeps history in memory for the session only.
 

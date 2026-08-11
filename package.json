@@ -16,15 +16,18 @@
   },
   "//dependencies": "Exact-pinned, no ranges. A caret range lets a compromised patch release of any dependency reach a fresh install with no review on our side. Exact pins mean the only way a new version arrives is an intentional bump here plus a regenerated package-lock.json. Install with `npm ci`, not `npm install`.",
   "dependencies": {
+    "@anthropic-ai/sdk": "0.116.0",
     "@inquirer/core": "9.2.1",
     "@inquirer/prompts": "5.5.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "better-sqlite3": "13.0.3",
     "chalk": "5.6.2",
     "commander": "12.1.0"
   },
   "devDependencies": {
+    "@types/node": "20.19.43",
     "typescript": "5.9.3",
-    "vitest": "2.1.9",
-    "@types/node": "20.19.43"
+    "vitest": "2.1.9"
   },
   "engines": {
     "node": ">=18"

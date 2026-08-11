@@ -44,10 +44,16 @@ approved for this batch, both exact-pinned:
 
 **`better-sqlite3` is a native module, and this repo runs npm with an
 allow-scripts policy** — `npm ci` already warns that `esbuild`'s postinstall is
-unapproved. Installing it will need an explicit `npm approve-scripts`
-entry, and the README's setup section must say so. This is the existing
-safeguard working as intended, not a defect, but "clone and `npm ci`" gains a
-step.
+unapproved.
+
+> **Corrected after implementation.** This section originally predicted that
+> installing `better-sqlite3` would require an explicit `npm approve-scripts`
+> entry, and that "clone and `npm ci`" would gain a step. It did not: version
+> 13.0.3 installed from a prebuilt binary on Windows/Node 20 without tripping
+> the script gate, and FTS5 was available immediately. The prediction may still
+> hold on a platform with no matching prebuild, which is precisely why the grep
+> fallback below is required rather than optional — but the README must not
+> tell users to run `approve-scripts` when they generally will not need to.
 
 **Everything degrades.** A missing index, an absent memory directory, a dead
 MCP server, or a native module that will not load disables *that feature* with

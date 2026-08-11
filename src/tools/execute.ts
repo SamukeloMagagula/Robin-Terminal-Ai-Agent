@@ -4,6 +4,8 @@ import { spawn } from 'node:child_process';
 import type { ToolCall } from '../providers/types.js';
 import { checkPath, defaultSensitiveDirs } from './sensitive-paths.js';
 import { isReadOnlyCommand } from './command-safety.js';
+import type { MemoryStore, MemoryType } from '../memory/store.js';
+import type { SkillStore } from '../skills/store.js';
 
 export { isReadOnlyCommand } from './command-safety.js';
 
@@ -57,7 +59,7 @@ export function wrapUntrusted(source: string, content: string): string {
  * kind to offer "don't ask again for this kind of action this session".
  */
 export interface ConfirmRequest {
-  kind: 'run_command' | 'write_file' | 'read_file';
+  kind: 'run_command' | 'write_file' | 'read_file' | 'mcp_tool';
   message: string;
 }
 
@@ -78,6 +80,18 @@ export interface ExecuteOptions {
   onAutoApproved?: (command: string) => void;
   /** Receives stdout/stderr chunks as they arrive, for live display. */
   onOutput?: (chunk: string) => void;
+  /**
+   * Tools contributed by MCP servers. Checked before the built-in switch, and
+   * matched only on namespaced names, so a server can never claim a built-in.
+   */
+  mcp?: {
+    has(name: string): boolean;
+    call(name: string, args: Record<string, unknown>): Promise<string>;
+  };
+  /** Enables the `remember` and `recall_memory` tools when present. */
+  memory?: MemoryStore;
+  /** Enables the `use_skill` and `create_skill` tools when present. */
+  skills?: SkillStore;
 }
 
 export async function executeTool(
@@ -96,6 +110,12 @@ export async function executeTool(
     return `Error: invalid tool arguments — ${(err as Error).message}`;
   }
 
+  // MCP is checked first, but matches only namespaced names — the registry's
+  // has() never returns true for a bare built-in, so this cannot shadow one.
+  if (options.mcp?.has(toolCall.name)) {
+    return await runMcpTool(toolCall.name, args, confirm, options.mcp);
+  }
+
   try {
     switch (toolCall.name) {
       case 'read_file':
@@ -106,6 +126,18 @@ export async function executeTool(
           requireString(args.content, 'content'),
           confirm
         );
+      case 'remember':
+        if (!options.memory) return 'Error: memory is not available in this session.';
+        return await rememberTool(args, options.memory);
+      case 'recall_memory':
+        if (!options.memory) return 'Error: memory is not available in this session.';
+        return await recallMemoryTool(args, options.memory);
+      case 'use_skill':
+        if (!options.skills) return 'Error: skills are not available in this session.';
+        return await useSkillTool(args, options.skills);
+      case 'create_skill':
+        if (!options.skills) return 'Error: skills are not available in this session.';
+        return await createSkillTool(args, confirm, options.skills);
       case 'run_command':
         return await runCommandTool(
           requireString(args.command, 'command'),
@@ -189,6 +221,125 @@ async function writeFileTool(
   } catch (err) {
     return `Error: ${(err as Error).message}`;
   }
+}
+
+/**
+ * Writes a memory.
+ *
+ * Deliberately **not** behind the approval gate: memory is agent-curated by
+ * design, and asking before every write would make it a manual feature. The
+ * mitigations are after the fact and real — plain markdown, listed by
+ * /memory, removable with /memory forget. Routing this through `confirm`
+ * instead is the one-line change if that ever feels wrong.
+ */
+async function rememberTool(
+  args: Record<string, unknown>,
+  memory: MemoryStore
+): Promise<string> {
+  const name = requireString(args.name, 'name');
+  const rawType = typeof args.type === 'string' ? args.type : 'reference';
+  const type: MemoryType =
+    rawType === 'user' || rawType === 'project' ? rawType : 'reference';
+
+  const existing = await memory.read(name);
+  await memory.write({
+    name,
+    description: requireString(args.description, 'description'),
+    type,
+    body: requireString(args.body, 'body'),
+  });
+  return existing ? `Updated memory "${name}".` : `Saved memory "${name}".`;
+}
+
+async function recallMemoryTool(
+  args: Record<string, unknown>,
+  memory: MemoryStore
+): Promise<string> {
+  const name = requireString(args.name, 'name');
+  const found = await memory.read(name);
+  if (!found) return `No memory named "${name}".`;
+  // Not wrapped as untrusted: a memory is Robin's own note, written by this
+  // agent in an earlier turn, not third-party content arriving from outside.
+  return `# ${found.name} (${found.type})\n${found.description}\n\n${found.body}`;
+}
+
+/** Loads a skill's instructions. Reading Robin's own note needs no gate. */
+async function useSkillTool(
+  args: Record<string, unknown>,
+  skills: SkillStore
+): Promise<string> {
+  const name = requireString(args.name, 'name');
+  const skill = await skills.read(name);
+  if (!skill) return `No skill named "${name}".`;
+  return `# Skill: ${skill.name}\n${skill.description}\n\n${skill.body}`;
+}
+
+/**
+ * Writes a new skill.
+ *
+ * Unlike `remember`, this **is** gated. A memory is a private note; a skill is
+ * a standing instruction set that will shape later sessions, and one written
+ * from a misunderstanding would quietly steer every future task. Cheap to
+ * approve, expensive to discover months later.
+ */
+async function createSkillTool(
+  args: Record<string, unknown>,
+  confirm: ConfirmFn,
+  skills: SkillStore
+): Promise<string> {
+  const name = requireString(args.name, 'name');
+  const description = requireString(args.description, 'description');
+  const body = requireString(args.body, 'body');
+
+  const approved = await confirm({
+    kind: 'write_file',
+    message:
+      `Save a new skill "${name}"?\n${description}\n\n` +
+      `${body.length > MAX_PREVIEW_LENGTH ? `${body.slice(0, MAX_PREVIEW_LENGTH)}...` : body}`,
+  });
+  if (!approved) return `Saving skill "${name}" was declined by the user.`;
+
+  await skills.write({ name, description, body });
+  return `Saved skill "${name}". It will be offered in future sessions.`;
+}
+
+/**
+ * Runs a tool contributed by an MCP server.
+ *
+ * **No MCP tool ever auto-approves.** `isReadOnlyCommand` can classify Robin's
+ * own shell commands because it inspects the command itself; there is no
+ * equivalent for an opaque third-party tool, and inferring safety from a name
+ * the server chose would be trusting exactly the thing being gated. A tool
+ * called `list_files` may do anything at all.
+ *
+ * The result is wrapped as untrusted for the same reason file reads and
+ * command output are: it is attacker-controlled text entering the model's
+ * context.
+ */
+async function runMcpTool(
+  name: string,
+  args: Record<string, unknown>,
+  confirm: ConfirmFn,
+  mcp: NonNullable<ExecuteOptions['mcp']>
+): Promise<string> {
+  const preview = JSON.stringify(args);
+  const approved = await confirm({
+    kind: 'mcp_tool',
+    message:
+      `Run MCP tool "${name}"?\n` +
+      `with ${preview.length > MAX_PREVIEW_LENGTH ? `${preview.slice(0, MAX_PREVIEW_LENGTH)}...` : preview}\n` +
+      '(provided by an external server — Robin cannot tell what it does)',
+  });
+  if (!approved) {
+    return `Running MCP tool "${name}" was declined by the user.`;
+  }
+
+  const result = await mcp.call(name, args);
+  const truncated =
+    result.length > MAX_OUTPUT_LENGTH
+      ? `${result.slice(0, MAX_OUTPUT_LENGTH)}\n...[truncated ${result.length - MAX_OUTPUT_LENGTH} characters]`
+      : result;
+  return wrapUntrusted(`output of MCP tool "${name}"`, truncated);
 }
 
 async function runCommandTool(

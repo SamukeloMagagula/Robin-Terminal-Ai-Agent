@@ -1,7 +1,15 @@
-import type { Provider, Message } from '../providers/types.js';
+import type { Provider, Message, ToolDefinition } from '../providers/types.js';
 import type { ConfirmFn } from '../tools/execute.js';
 import type { Session } from './session.js';
 import { buildSystemPrompt } from './session.js';
+import type { MemoryStore } from '../memory/store.js';
+import type { SkillStore } from '../skills/store.js';
+import { SKILL_TOOL_DEFINITIONS, composeSkillContext } from '../skills/tools.js';
+import {
+  MEMORY_TOOL_DEFINITIONS,
+  NUDGE_EVERY,
+  composeMemoryContext,
+} from '../memory/tools.js';
 import { runAgentTurn } from '../agent-loop.js';
 import { executeTool } from '../tools/execute.js';
 import { TOOL_DEFINITIONS } from '../tools/definitions.js';
@@ -18,6 +26,18 @@ export interface TurnOptions {
   onAutoApproved?: (command: string) => void;
   /** Live command output, for display only — the model still gets the whole result. */
   onOutput?: (chunk: string) => void;
+  /** Reasoning summaries, where the provider streams them. Display only. */
+  onThinking?: (text: string) => void;
+  /** Enables the memory tools, the memory block, and the nudge. */
+  memory?: MemoryStore;
+  /** Enables the skill tools and the skills index. */
+  skills?: SkillStore;
+  /** MCP tools for this turn, offered to the model alongside the built-ins. */
+  mcp?: {
+    toolDefinitions(): ToolDefinition[];
+    has(name: string): boolean;
+    call(name: string, args: Record<string, unknown>): Promise<string>;
+  };
   /** Called before each retry on a different model. */
   onFallback?: (info: { error: Error; next: FallbackCandidate }) => void;
   /**
@@ -59,6 +79,20 @@ export async function runTurn(
   const historyLengthBeforeTurn = session.history.length;
   session.history.push({ role: 'user', content: userMessage });
 
+  // Refreshed per turn rather than at startup: the model may have written a
+  // memory during this session, and a stale index would hide it from itself.
+  if (options.memory) {
+    session.memory = composeMemoryContext(
+      await options.memory.profile(),
+      await options.memory.index()
+    );
+  }
+  if (options.skills) {
+    session.skills = composeSkillContext(await options.skills.index());
+  }
+  session.turnCount += 1;
+  const nudge = Boolean(options.memory) && session.turnCount % NUDGE_EVERY === 0;
+
   const useTools = options.tools ?? session.toolsEnabled;
   const allowFallback = options.fallback ?? true;
   const providers = options.providers ?? listProviders();
@@ -75,20 +109,31 @@ export async function runTurn(
   while (true) {
     try {
       const messagesForTurn: Message[] = [
-        { role: 'system', content: buildSystemPrompt(session) },
+        { role: 'system', content: buildSystemPrompt(session, { nudge }) },
         ...session.history,
       ];
       const newMessages = await runAgentTurn(
         activeProvider,
         activeModel,
         messagesForTurn,
-        useTools ? TOOL_DEFINITIONS : [],
+        useTools
+          ? [
+              ...TOOL_DEFINITIONS,
+              ...(options.memory ? MEMORY_TOOL_DEFINITIONS : []),
+              ...(options.skills ? SKILL_TOOL_DEFINITIONS : []),
+              ...(options.mcp?.toolDefinitions() ?? []),
+            ]
+          : [],
         {
           onText: options.onText,
+          onThinking: options.onThinking,
           executeTool: (toolCall, confirm) =>
             executeTool(toolCall, confirm, {
               onAutoApproved: options.onAutoApproved,
               onOutput: options.onOutput,
+              mcp: options.mcp,
+              memory: options.memory,
+              skills: options.skills,
             }),
           confirm: options.confirm,
           signal: options.signal,

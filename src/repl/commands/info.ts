@@ -13,10 +13,14 @@ export const HELP_ENTRIES: [string, string][] = [
   ['/save [name]', 'save the conversation, or list saved ones'],
   ['/load [name]', 'load a saved conversation, or list saved ones'],
   ['/copy', "copy the assistant's last reply to the clipboard"],
-  ['/skill save <name>', 'save the current system prompt as a reusable named preset'],
-  ['/skill use <name>', 'load a saved preset as the system prompt'],
-  ['/skill [list]', 'list saved presets'],
+  ['/skill save <name>', 'save the current system prompt as a reusable named skill'],
+  ['/skill use <name>', 'apply a saved skill as the system prompt'],
+  ['/skill [list]', 'list saved skills'],
+  ['/skill migrate', 'convert old JSON presets to markdown skills'],
   ['/personality [reload|off]', 'show the active PERSONALITY.md, reload it, or drop it'],
+  ['/memory [show|forget]', 'list what Robin has remembered, read one, or remove one'],
+  ['/session [new|<n>|close]', 'run several conversations at once and switch between them'],
+  ['/workflow run <goal>', 'plan, build, test and validate with a model per role'],
   ['/random', 'switch to a randomly chosen provider and model'],
   ['/usage', 'OpenRouter spend for this key, and the account balance'],
   ['/recall <query>', 'search past conversations under ~/.robin/chats/'],
@@ -47,10 +51,14 @@ export async function handleRecall(ctx: ReplContext, arg?: string): Promise<void
     console.log(errorColor('✖ Usage: /recall <query>'));
     return;
   }
-  const matches = await searchChatLogs(arg);
+  const { matches, source } = await ctx.stores.recall.search(arg);
   if (matches.length === 0) {
     console.log(mutedColor(`No matches for "${arg}" in ~/.robin/chats/.`));
     return;
+  }
+  if (source === 'grep') {
+    // Visible rather than silent: results are the same, the search is linear.
+    console.log(mutedColor('(searching without the index — SQLite is unavailable)'));
   }
 
   for (const match of matches) {

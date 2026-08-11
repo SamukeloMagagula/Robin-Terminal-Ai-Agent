@@ -1,11 +1,15 @@
 import type { Session } from './session.js';
+import type { SessionList } from './session-list.js';
 import type { Provider } from '../providers/types.js';
 import type { ConversationStore } from '../conversation-store.js';
-import type { SkillStore } from '../skill-store.js';
+import type { SkillStore } from '../skills/store.js';
 import type { UnsupportedModelStore } from '../providers/unsupported-models.js';
 import type { UsageCache } from '../usage/openrouter-usage.js';
 import type { InputHistoryStore } from './input-history.js';
 import type { PersonalityTrustStore } from '../personality-trust.js';
+import type { MemoryStore } from '../memory/store.js';
+import type { RecallSearch } from '../recall/search.js';
+import type { WorkflowStore } from '../workflow/store.js';
 import type { ConfirmFn } from '../tools/execute.js';
 
 /**
@@ -29,7 +33,9 @@ export interface ReplDeps {
  * means this process, and the stores are one-per-machine.
  */
 export interface ReplContext {
-  session: Session;
+  /** The active conversation. A getter over `sessions` — never reassign it. */
+  readonly session: Session;
+  sessions: SessionList;
   inputHistory: string[];
   stores: {
     conversation: ConversationStore;
@@ -38,6 +44,9 @@ export interface ReplContext {
     usage: UsageCache;
     inputHistory: InputHistoryStore;
     personalityTrust: PersonalityTrustStore;
+    memory: MemoryStore;
+    recall: RecallSearch;
+    workflow: WorkflowStore;
   };
   confirm: ConfirmFn;
   deps: ReplDeps;
