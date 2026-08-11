@@ -290,7 +290,11 @@ Every conversation is automatically written to a readable markdown transcript in
 
 This is separate from `/save`/`/load`, which store an exact, reloadable snapshot as JSON under `~/.robin/conversations/` — use `/save` when you want to resume a specific conversation later inside `robin`; the markdown transcript is for your own reading/reference outside the app.
 
-Use `/recall <query>` to search across all past markdown transcripts from inside a chat session — it's a plain case-insensitive text search (newest conversations first, capped at 10 matches), not semantic search, but it's enough to find "did I already ask about X" without leaving the terminal.
+Use `/recall <query>` to search across all past markdown transcripts from inside a chat session. It's keyword search, not semantic — but enough to find "did I already ask about X" without leaving the terminal.
+
+Searches run against a full-text index at `~/.robin/index.db` (SQLite FTS5), built on first use and updated incrementally as transcripts change — only files whose modification time moved are re-read. Results come back ranked by relevance rather than by file order, capped at 10.
+
+`better-sqlite3` is a native module. On a platform with no prebuilt binary it may fail to install, and Robin handles that rather than breaking: `/recall` falls back to the original linear scan and says so once per search. The results are the same, the search is just slower.
 
 The lines you type at the prompt are kept too, so the up arrow still reaches yesterday's commands. They live in `~/.robin/input-history` — the newest 200, one per line, in the same private tree as the transcripts and with the same owner-only permissions. `/history` shows the path, `/history clear` wipes it, and `ROBIN_NO_HISTORY_FILE=1` keeps history in memory for the session only.
 

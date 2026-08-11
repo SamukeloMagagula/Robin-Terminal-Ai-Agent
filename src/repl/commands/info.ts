@@ -48,10 +48,14 @@ export async function handleRecall(ctx: ReplContext, arg?: string): Promise<void
     console.log(errorColor('✖ Usage: /recall <query>'));
     return;
   }
-  const matches = await searchChatLogs(arg);
+  const { matches, source } = await ctx.stores.recall.search(arg);
   if (matches.length === 0) {
     console.log(mutedColor(`No matches for "${arg}" in ~/.robin/chats/.`));
     return;
+  }
+  if (source === 'grep') {
+    // Visible rather than silent: results are the same, the search is linear.
+    console.log(mutedColor('(searching without the index — SQLite is unavailable)'));
   }
 
   for (const match of matches) {

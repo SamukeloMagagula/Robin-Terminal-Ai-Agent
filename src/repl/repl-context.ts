@@ -7,6 +7,7 @@ import type { UsageCache } from '../usage/openrouter-usage.js';
 import type { InputHistoryStore } from './input-history.js';
 import type { PersonalityTrustStore } from '../personality-trust.js';
 import type { MemoryStore } from '../memory/store.js';
+import type { RecallSearch } from '../recall/search.js';
 import type { ConfirmFn } from '../tools/execute.js';
 
 /**
@@ -40,6 +41,7 @@ export interface ReplContext {
     inputHistory: InputHistoryStore;
     personalityTrust: PersonalityTrustStore;
     memory: MemoryStore;
+    recall: RecallSearch;
   };
   confirm: ConfirmFn;
   deps: ReplDeps;

@@ -18,6 +18,7 @@ import { loadMcpConfig } from '../mcp/config.js';
 import { McpRegistry } from '../mcp/registry.js';
 import { filterTrustedServers } from '../mcp/trust.js';
 import { MemoryStore } from '../memory/store.js';
+import { RecallSearch } from '../recall/search.js';
 import { UsageCache } from '../usage/openrouter-usage.js';
 import { renderUsageLine } from '../usage/render-usage.js';
 import { assistantColor, errorColor, mutedColor, divider, box } from '../ui/theme.js';
@@ -172,6 +173,9 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   const unsupportedStore = new UnsupportedModelStore();
   const personalityTrust = new PersonalityTrustStore();
   const memoryStore = new MemoryStore();
+  const recallSearch = new RecallSearch(undefined, (count) =>
+    console.log(mutedColor(`Indexing ${count} transcript(s) for search...`))
+  );
 
   // Before the banner, deliberately: the trust prompt asks the user to approve
   // text that becomes the system prompt, and burying it under the banner is
@@ -196,6 +200,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       inputHistory: inputHistoryStore,
       personalityTrust,
       memory: memoryStore,
+      recall: recallSearch,
     },
     confirm: askForApproval,
     deps,
@@ -241,6 +246,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       // Each server is a child process Robin started; leaving them running
       // would outlive the session that spawned them.
       await mcpRegistry.closeAll();
+      await recallSearch.close();
       break;
     }
 
