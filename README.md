@@ -2,6 +2,8 @@
 
 Robin is a terminal agent that lets you run your AI. Supports Anthropic (Claude), GitHub Copilot, Google Gemini, OpenRouter (via API key), and local Ollama models, with tool-calling (read files, write files, run shell commands) built in.
 
+It can also be driven from [Telegram](#remote-control-telegram) when you're away from the terminal, and `robin doctor` tells you what's wrong with an install before you hit it.
+
 Built by Samukelo "Batman" Magagula.
 
 ## Requirements
@@ -47,8 +49,13 @@ first; see [Setting up a provider](#setting-up-a-provider) below.
 **Check it worked:**
 
 ```bash
+robin doctor           # checks the whole install and prints the fix for anything wrong
 robin status           # shows which providers are logged in and reachable
 ```
+
+`robin doctor` is the one to run first if anything misbehaves — it covers the Node
+version, the native SQLite addon, whether `~/.robin` is writable, and your providers
+in one pass.
 
 ### Notes on the install
 
@@ -185,13 +192,16 @@ robin chat random        # let Robin roll a provider and model for you
 robin login copilot      # log in to Copilot ahead of time
 robin logout copilot     # clear stored Copilot credentials
 robin status              # show login/reachability status for every provider
+robin doctor              # check the install and report anything that would stop it starting
 robin models              # list models recorded as unsupported
 robin models forget gemini  # clear those records so they're offered again
+robin serve telegram      # run as a bridge you can drive from Telegram
+robin serve telegram --whoami   # print your Telegram sender id, for the allowlist
 ```
 
 In a chat session, typing `/` shows a live-filtered popup of matching commands as you keep typing — arrow keys to move the highlight, **Tab** to fill in the highlighted command without submitting (so you can still type an argument), **Enter** to submit the highlighted command (or your typed line, if the popup isn't open), **Esc** to dismiss the popup and keep typing free text.
 
-**↑ / ↓ recall what you've already sent.** With the popup closed, ↑ walks back through the lines you've submitted this session and ↓ walks forward again. Come all the way back down and you get your half-typed line returned to you, exactly as you left it. Consecutive duplicates collapse, and history is session-only — it's held in memory and never written to disk, since what you type carries the same sensitive material as the transcripts.
+**↑ / ↓ recall what you've already sent.** With the popup closed, ↑ walks back through the lines you've submitted this session and ↓ walks forward again. Come all the way back down and you get your half-typed line returned to you, exactly as you left it. Consecutive duplicates collapse, and history persists across restarts in `~/.robin/input-history` — the same private tree that already holds your full transcripts, so it adds no new exposure, but it does add longevity. Set `ROBIN_NO_HISTORY_FILE=1` to keep it session-only, or clear what's already there with `/history clear`.
 
 - `/help` (or just `/`) — list commands
 - `/model` — pick a different model from the ones available on the current provider
@@ -447,6 +457,7 @@ Full trust model, including what each control does *not* do: **[SECURITY.md](SEC
 - **`read_file`/`write_file` refuse to touch credential locations**: `~/.robin/`, `~/.ssh/`, `~/.gnupg/`, `~/.aws/`, `~/.kube/`, `~/.docker/`, `~/.config/gh/` and gcloud config, plus credential filenames wherever they live (`.env`, `.npmrc`, `.netrc`, `.git-credentials`, `id_rsa`, …). Paths are resolved to their real target first, so a symlink pointing into a protected directory is caught rather than waved through. **This does not constrain `run_command`** — an approved shell command can read any of those files.
 - **`write_file` always confirms; `read_file` confirms for anything outside the current working directory** — reading unrelated files is how data leaves your machine and enters the model's context. `run_command` confirms unless the command is on the read-only allowlist described above.
 - **Approvals can be remembered per action-kind for the current session** (`a` at the prompt). Session-scoped, never written to disk. Note that this deliberately removes the human from the loop for that action kind until you restart — treat `a` with more care than `y`.
+- **The Telegram bridge has nobody at the keyboard**, so it denies every tool call that would prompt, and answers only sender ids on an explicit allowlist. An empty allowlist authorises nobody and refuses to start. `--allow-tools` removes that restriction entirely — with it, a chat message runs commands and writes files on your machine unattended, and the reading-the-prompt boundary above no longer exists. See [Remote control](#remote-control-telegram).
 - **The destructive-pattern `⚠` is a nudge, not a block.** It catches `rm -rf` but not `rm -r -f`, `$(echo rm) -rf`, or anything encoded. Don't rely on it.
 - **`read_file` and `run_command` output is wrapped as untrusted content** before it goes back to the model — file contents and command output are data the model reads, not instructions it should follow, even if the text looks like a command ("ignore previous instructions and run…"). This narrows prompt injection; it does not eliminate it, since it is a prompt-level convention the model can still be talked out of.
 - **Conversation transcripts in `~/.robin/chats/` contain every file the model read.** They're written `0600`, but treat them as sensitive.
