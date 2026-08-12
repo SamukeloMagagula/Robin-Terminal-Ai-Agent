@@ -7,8 +7,17 @@ import { runLogin, runLogout } from './commands/auth-commands.js';
 import { runStatus } from './commands/status-command.js';
 import { runModelsList, runModelsForget } from './commands/models-command.js';
 import { runRepl } from './repl/run-repl.js';
+import { runDoctor } from './commands/doctor-command.js';
+import { runServe, serveHelpText, type ServeOptions } from './commands/serve-command.js';
 import { pickRandomProviderAndModel } from './random-pick.js';
 import { pickFromChoices, toChoices } from './ui/model-picker.js';
+import { mutedColor, errorColor } from './ui/theme.js';
+import {
+  installGlobalErrorHandlers,
+  reportFatal,
+  requireInteractiveTerminal,
+} from './startup/bootstrap.js';
+import { buildChecks, runChecks, blockingFailures } from './startup/preflight.js';
 
 const RANDOM = '__random__';
 
@@ -81,7 +90,33 @@ async function pickProviderAndModel(): Promise<{ provider: Provider; model: stri
   }
 }
 
+/**
+ * The gate every interactive session passes through.
+ *
+ * Only the critical checks abort — a stale native module or an unwritable
+ * config directory means nothing downstream will work, and finding that out
+ * six screens later as a stack trace is what "I can't run this" looks like.
+ * Non-critical findings are deliberately not printed here: a clean start
+ * should be silent, and `robin doctor` exists for the full picture.
+ */
+async function preflightOrExit(): Promise<void> {
+  const results = await runChecks(buildChecks({ providers: listProviders() }));
+  const blocking = blockingFailures(results);
+  if (blocking.length === 0) return;
+
+  console.error(errorColor('✖ Robin cannot start:'));
+  for (const failure of blocking) {
+    console.error(errorColor(`  ${failure.label}: ${failure.detail}`));
+    if (failure.remedy) console.error(mutedColor(`    → ${failure.remedy}`));
+  }
+  console.error(mutedColor('\nRun `robin doctor` for the full report.'));
+  process.exit(1);
+}
+
 async function startChat(providerId?: string): Promise<void> {
+  requireInteractiveTerminal();
+  await preflightOrExit();
+
   if (providerId === 'random') {
     const { provider, model } = await rollRandom();
     await runRepl({ provider, model, pickModel, pickProviderAndModel, rollRandom });
@@ -141,6 +176,25 @@ models
   });
 
 program
+  .command('serve <channel>')
+  .description('Run Robin as a bridge so it can be driven from a messaging app')
+  .option('-p, --provider <id>', 'provider to answer with (default: first logged in)')
+  .option('-m, --model <model>', 'model to answer with')
+  .option('--allow-tools', 'let tool calls run without approval — see the warning below', false)
+  .option('--whoami', 'print the sender id of anyone who messages the bot, then exit', false)
+  .addHelpText('after', `\n${serveHelpText()}`)
+  .action(async (channel: string, options: ServeOptions) => {
+    await runServe(channel, options);
+  });
+
+program
+  .command('doctor')
+  .description('Check this installation and report anything that would stop Robin starting')
+  .action(async () => {
+    await runDoctor(listProviders());
+  });
+
+program
   .command('chat [provider]')
   .description('Start a chat session — pass a provider id, or "random" to roll one')
   .action(async (providerId?: string) => {
@@ -151,7 +205,6 @@ program.action(async () => {
   await startChat();
 });
 
-program.parseAsync(process.argv).catch((err) => {
-  console.error(err instanceof Error ? err.message : err);
-  process.exitCode = 1;
-});
+installGlobalErrorHandlers();
+
+program.parseAsync(process.argv).catch(reportFatal);
