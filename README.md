@@ -132,6 +132,14 @@ Copilot's list comes from its own API rather than being hardcoded, filtered to m
 
 Anywhere `robin` needs you to visit a page (Copilot/Gemini/OpenRouter login), it tries to open Chrome directly. If it can't — most commonly because you're connected over SSH/PuTTY to a headless Linux box with no display server — it skips the attempt and just prints the link to open on any other device instead. Windows and macOS always attempt to open Chrome, since a desktop is assumed there.
 
+On Windows, Chrome is located by looking for `chrome.exe` under `%LOCALAPPDATA%` first (per-user installs, the usual case on a managed machine) and then Program Files. Only if Chrome genuinely isn't installed does Robin fall back to the OS default handler — which on a stock Windows image means Edge, where you're probably signed into nothing.
+
+Set `ROBIN_BROWSER` to an executable path to override the search entirely, on any platform:
+
+```bash
+ROBIN_BROWSER="D:\\Browsers\\chrome.exe" robin login copilot
+```
+
 ### Automatic model fallback
 
 If a request to the current model fails (rate-limited, unreachable, etc.), `robin` automatically retries the message on the next model — first other models on the same provider, then models on any other provider you're logged into. Once a fallback succeeds, the session sticks with it (same as switching with `/model`/`/provider` yourself) rather than retrying the original model every turn.
@@ -326,6 +334,65 @@ A server that fails to start, or dies, is disabled with one muted line — the t
 
 **Not supported yet:** the Streamable-HTTP transport (stdio only), and MCP resources and prompts (tools only).
 
+## Remote control (Telegram)
+
+`robin serve` runs Robin as a bridge so you can drive it from a messaging app while you're away from the terminal.
+
+```bash
+robin serve telegram
+```
+
+Telegram works today. WhatsApp and Teams are recognised channel names that explain what they still need — both require a public webhook endpoint rather than the outbound long-poll Telegram allows, so they can't run from a laptop behind NAT the way this does. The access control, session handling and agent loop are already shared, so each is a transport adapter plus a webhook listener.
+
+### Setting it up
+
+1. Message [@BotFather](https://t.me/botfather) on Telegram, send `/newbot`, and copy the token it gives you.
+2. Put it in `~/.robin/channels.json`:
+
+```jsonc
+{
+  "channels": {
+    "telegram": {
+      "token": "123456:ABC-your-bot-token",
+      "allow": [],
+      "provider": "copilot",
+      "model": "claude-sonnet-5"
+    }
+  }
+}
+```
+
+3. Find your own sender id — you can't know it until something tells you:
+
+```bash
+robin serve telegram --whoami
+```
+
+Message the bot; it prints your numeric id and nothing else reaches the model. Add that id to `allow`, then start the bridge for real.
+
+`provider` and `model` are optional — without them Robin answers with the first provider you're logged into. The token can come from `TELEGRAM_BOT_TOKEN` instead of the file, which is the better habit: `channels.json` is a plain file that gets copied around with dotfiles.
+
+### Commands in the chat
+
+| Message | Effect |
+| --- | --- |
+| `/help` | The command list |
+| `/new` | Start a fresh conversation |
+| `/status` | Which model is answering, turns so far, tool policy |
+| anything else | Sent to the model |
+
+Each Telegram chat keeps its own conversation, and messages within one chat are handled strictly one at a time.
+
+### The allowlist is the whole security boundary
+
+A bot's username is public and anyone who finds it can message it. On the other side is a tool loop with access to your machine, so:
+
+- **An empty `allow` list authorises nobody**, and the bridge refuses to start rather than sitting there quietly declining everything.
+- **Refused senders get no reply at all** — not even an error. Any response confirms there's a live Robin behind the bot, which is what someone probing it wants to learn.
+- **Tool calls that would prompt in the REPL are denied**, because there's nobody at the keyboard to read the request. The reply tells you what was declined. Read-only commands are unaffected — those never hit the approval gate.
+
+`--allow-tools` lifts that last restriction, and means exactly what it says: a chat message can then run commands and write files on your machine unattended. Only worth it when you trust every id on the allowlist and the machine it's running on.
+
 ## Chat History
 
 Every conversation is automatically written to a readable markdown transcript in `~/.robin/chats/robin-chat-<timestamp>.md`, updated after every reply — nothing to remember to do. A new file starts whenever the conversation resets (`/clear`, `/model`, `/provider`, `/load`), so each distinct conversation gets its own file you can browse, search, or share later.
@@ -387,6 +454,19 @@ Full trust model, including what each control does *not* do: **[SECURITY.md](SEC
 
 ## Troubleshooting
 
+**Start here:**
+
+```bash
+robin doctor
+```
+
+It checks the things that actually stop Robin running — Node version, whether the native SQLite addon matches this Node's ABI, whether `~/.robin` is writable, whether `mcp.json` parses, and which providers are usable — and prints the fix next to anything that's wrong. It exits non-zero on a blocking problem, so it also works as a gate in a setup script.
+
+The first three of those are checked again automatically whenever you start a chat. A blocking failure stops startup with the remedy instead of surfacing as a stack trace several screens later.
+
+- **`robin` isn't a recognised command** — `bin` points at `dist/`, which isn't committed. Run `npm ci && npm run build` after cloning, then `npm link` (or invoke `node dist/cli.js` directly).
+- **"was compiled against a different Node.js version"** — you upgraded Node without rebuilding the native addon. `npm rebuild better-sqlite3`, or `npm ci`.
+- **"Robin needs an interactive terminal"** — the provider and model pickers need a TTY, so `robin chat` can't be piped or redirected.
 - **"Not logged in to Copilot"** — run `robin login copilot`.
 - **"Not logged in to Gemini"** — run `robin login gemini` and paste an API key from https://aistudio.google.com/apikey.
 - **"Not logged in to OpenRouter"** — run `robin login openrouter` and paste an API key from https://openrouter.ai/keys.
@@ -394,6 +474,8 @@ Full trust model, including what each control does *not* do: **[SECURITY.md](SEC
 - **A model doesn't show up in `/model`** — `/model` only lists what's actually available on the current provider. For Ollama, that means models you've `ollama pull`'d locally; run `ollama pull <model>` first.
 - **Copilot device code expires before you approve it** — device codes last about 15 minutes; just rerun `robin login copilot` for a fresh one.
 - **Chrome doesn't open automatically during login** — copy the printed URL and enter it manually on any device with a browser; this is expected over SSH/PuTTY to a headless machine.
+- **The login page opens in Edge instead of Chrome** — Robin only defers to the Windows default handler when it can't find `chrome.exe` in either of the usual locations. Point it at yours with `ROBIN_BROWSER`.
+- **The Telegram bridge starts but ignores you** — your sender id isn't on the allowlist. The console prints `Refused: sender <id> is not on the allowlist`; add that id to `allow` in `channels.json`.
 
 ## Development
 
