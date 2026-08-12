@@ -55,6 +55,35 @@ export function decodeHistoryLine(line: string): string {
 export class InputHistoryStore {
   constructor(private readonly dir: string = path.join(os.homedir(), '.robin')) {}
 
+  /**
+   * The in-flight or completed mkdir for this store, so the directory is
+   * created once per process rather than once per submitted prompt.
+   *
+   * append() runs on every line the user enters. Re-issuing mkdir each time
+   * costs a syscall round trip that on Windows goes through the filesystem
+   * filter driver stack — with real-time antivirus scanning that is
+   * milliseconds per call, and it is pure waste after the first one. Holding
+   * the promise (not a boolean) means concurrent appends share one mkdir
+   * instead of racing.
+   */
+  private ensuredDir: Promise<void> | undefined;
+
+  private ensureDir(): Promise<void> {
+    // Assigned before the await so a second caller arriving mid-flight joins
+    // the same promise.
+    this.ensuredDir ??= fs
+      .mkdir(this.dir, { recursive: true, mode: 0o700 })
+      .then(() => undefined)
+      .catch((err: unknown) => {
+        // Forget the failure so a transient one (a directory that is briefly
+        // locked, a disk that frees up) is retried on the next prompt rather
+        // than disabling history for the life of the process.
+        this.ensuredDir = undefined;
+        throw err;
+      });
+    return this.ensuredDir;
+  }
+
   private get filePath(): string {
     return path.join(this.dir, INPUT_HISTORY_FILENAME);
   }
@@ -88,17 +117,23 @@ export class InputHistoryStore {
   async append(line: string): Promise<void> {
     if (this.disabled || !line.trim()) return;
     try {
-      await fs.mkdir(this.dir, { recursive: true, mode: 0o700 });
+      await this.ensureDir();
       await fs.appendFile(this.filePath, `${encodeHistoryLine(line)}\n`, { mode: 0o600 });
       // appendFile's `mode` applies only when it creates the file, so a file
       // that already exists with looser permissions would silently keep them.
-      if (process.platform !== 'win32') {
+      // Like the mkdir above, this only needs doing once per process — the
+      // permissions cannot loosen underneath us between two of our own
+      // appends.
+      if (process.platform !== 'win32' && !this.tightenedPermissions) {
+        this.tightenedPermissions = true;
         await fs.chmod(this.filePath, 0o600);
       }
     } catch {
       // Deliberately swallowed — see the class comment.
     }
   }
+
+  private tightenedPermissions = false;
 
   async clear(): Promise<void> {
     try {
