@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { fileStamp } from './unsupported-models.js';
 
 export function defaultContextLimitsPath(): string {
   return path.join(os.homedir(), '.robin', 'context-limits.json');
@@ -24,11 +25,18 @@ type Stored = Record<string, Record<string, number>>;
  */
 export class ContextLimitStore {
   private cache: Stored | undefined;
+  /** What the file looked like when the cache was filled. */
+  private cachedStamp: string | undefined;
 
   constructor(private readonly filePath: string = defaultContextLimitsPath()) {}
 
+  /**
+   * Re-reads when another process has touched the file. The gateway holds one
+   * of these for its whole life; see UnsupportedModelStore for the full story.
+   */
   private async read(): Promise<Stored> {
-    if (this.cache) return this.cache;
+    const stamp = await fileStamp(this.filePath);
+    if (this.cache && stamp === this.cachedStamp) return this.cache;
     try {
       const parsed = JSON.parse(await fs.readFile(this.filePath, 'utf-8')) as unknown;
       this.cache = isStored(parsed) ? parsed : {};
@@ -36,6 +44,7 @@ export class ContextLimitStore {
       // Missing or corrupt: an unusable memo must never block chatting.
       this.cache = {};
     }
+    this.cachedStamp = stamp;
     return this.cache;
   }
 

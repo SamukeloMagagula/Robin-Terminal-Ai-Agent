@@ -22,11 +22,22 @@ type Stored = Record<string, string[]>;
 
 export class UnsupportedModelStore {
   private cache: Stored | undefined;
+  /** What the file looked like when the cache was filled. */
+  private cachedStamp: string | undefined;
 
   constructor(private readonly filePath: string = defaultUnsupportedPath()) {}
 
+  /**
+   * Re-reads when another process has touched the file.
+   *
+   * The gateway holds one of these for its whole life, and `robin models
+   * forget` runs in a different process. A cache that never revalidated meant
+   * the daemon kept hiding a model the user had just asked it to retry, with
+   * nothing on screen to say why.
+   */
   private async read(): Promise<Stored> {
-    if (this.cache) return this.cache;
+    const stamp = await fileStamp(this.filePath);
+    if (this.cache && stamp === this.cachedStamp) return this.cache;
     try {
       const raw = await fs.readFile(this.filePath, 'utf-8');
       const parsed = JSON.parse(raw) as unknown;
@@ -35,6 +46,7 @@ export class UnsupportedModelStore {
       // Missing or corrupt: an unusable memo must never block chatting.
       this.cache = {};
     }
+    this.cachedStamp = stamp;
     return this.cache;
   }
 
@@ -71,6 +83,23 @@ export class UnsupportedModelStore {
     } catch {
       // As above.
     }
+  }
+}
+
+/**
+ * A cheap identity for the file's current contents.
+ *
+ * Size and mtime together, because mtime alone has a coarse resolution on some
+ * filesystems and two writes inside the same tick would look identical.
+ * Undefined means the file is not there — itself a state worth noticing, since
+ * a file that appears later is new information.
+ */
+export async function fileStamp(filePath: string): Promise<string | undefined> {
+  try {
+    const stat = await fs.stat(filePath);
+    return `${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    return undefined;
   }
 }
 
