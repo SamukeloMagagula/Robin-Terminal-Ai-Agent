@@ -2,11 +2,6 @@ import chalk from 'chalk';
 import { expand } from '@inquirer/prompts';
 import { parseCommand, type ParsedCommand } from './parse-command.js';
 import { type ConfirmRequest } from '../tools/execute.js';
-import {
-  createApprovalGate,
-  type ApprovalAnswer,
-  type ApprovalWording,
-} from './approval-gate.js';
 import { printBanner, printConnectionLine } from '../ui/banner.js';
 import { gatherTelemetry } from '../ui/hud/telemetry.js';
 import { TOOL_DEFINITIONS } from '../tools/definitions.js';
@@ -15,24 +10,25 @@ import { SKILL_TOOL_DEFINITIONS } from '../skills/tools.js';
 import { newSessionId } from '../session-id.js';
 import { ConversationStore } from '../conversation-store.js';
 import { SkillStore } from '../skills/store.js';
-import { SessionList } from './session-list.js';
-import { runTurn } from './run-turn.js';
 import { listenForInterrupt } from './interrupt.js';
 import { readSlashAwareLine } from './slash-prompt.js';
 import { addToInputHistory, InputHistoryStore } from './input-history.js';
-import { UnsupportedModelStore } from '../providers/unsupported-models.js';
-import { ContextLimitStore } from '../providers/context-limits.js';
 import { PersonalityTrustStore } from '../personality-trust.js';
-import { TrustStore } from '../trust-store.js';
-import { loadMcpConfig } from '../mcp/config.js';
-import { McpRegistry } from '../mcp/registry.js';
-import { filterTrustedServers } from '../mcp/trust.js';
 import { MemoryStore } from '../memory/store.js';
 import { WorkflowStore } from '../workflow/store.js';
 import { RecallSearch } from '../recall/search.js';
 import { UsageCache } from '../usage/openrouter-usage.js';
 import { renderUsageLine } from '../usage/render-usage.js';
 import { assistantColor, errorColor, mutedColor, divider, box } from '../ui/theme.js';
+import { ensureGateway } from '../gateway/ensure.js';
+import { GatewayClient } from '../gateway/client.js';
+import type {
+  AttachResult,
+  GatewayEvent,
+  PromptAccepted,
+  SessionSnapshot,
+} from '../gateway/protocol.js';
+import { renderEvent, type EventOutput } from './render-events.js';
 import {
   type ReplContext,
   type CommandHandler,
@@ -86,83 +82,53 @@ const HANDLERS: Partial<Record<ParsedCommand['type'], CommandHandler>> = {
   workflow: handleWorkflow,
 };
 
+const APPROVAL_WORDING: Record<ConfirmRequest['kind'], string> = {
+  run_command: 'Run it?',
+  write_file: 'Write it?',
+  read_file: 'Read it?',
+  mcp_tool: 'Run it?',
+};
+
 /**
- * Loads mcp.json, asks about anything not already trusted, and connects what
- * survives. Returns an empty registry when there is nothing configured, so the
- * caller has one code path.
+ * Puts one approval in front of the user.
  *
- * An mcp.json entry says "run this command". Config files travel with
- * repositories and get pasted from the internet, so the user is shown the
- * exact command before anything is launched — the same gate PERSONALITY.md
- * gets, and the same two grants.
+ * The choices are yes and no. "Stop asking this session" is the gateway's
+ * memory now, not the REPL's — it already refuses an identical repeat without
+ * asking, and offering choices here that the protocol cannot yet carry would
+ * be two buttons that quietly do nothing.
  */
-async function startMcpServers(): Promise<McpRegistry> {
-  const registry = new McpRegistry({
-    onError: (server, message) =>
-      console.log(mutedColor(`✖ MCP server "${server}" unavailable — ${message}`)),
-  });
+function askApproval(
+  event: Extract<GatewayEvent, { kind: 'approval.request' }>
+): { answer: Promise<boolean>; cancel: () => void } {
+  const origin =
+    event.origin.surface === 'terminal'
+      ? []
+      : [
+          // Without this you cannot tell a command you asked for from one a
+          // remote message asked for, and the gate stops meaning anything.
+          `Requested from ${event.origin.surface}${event.origin.who ? ` by ${event.origin.who}` : ''}`,
+          '',
+        ];
+  console.log(`\n${box([...origin, ...event.request.message.split('\n')])}`);
 
-  const configured = await loadMcpConfig();
-  if (configured.length === 0) return registry;
-
-  const trusted = await filterTrustedServers(configured, new TrustStore(), async (config) => {
-    const command = [config.command, ...(config.args ?? [])].join(' ');
-    console.log(`\n${mutedColor(`MCP server "${config.name}" wants to run:`)}`);
-    console.log(box([command]));
-    console.log(
-      mutedColor('Its tools become available to the model, each still asking before it runs.')
-    );
-
-    return expand<'yes' | 'no' | 'always'>({
-      message: `Start "${config.name}"?`,
-      default: 'n',
-      choices: [
-        { key: 'y', name: 'yes, this exact command', value: 'yes' },
-        { key: 'n', name: 'no', value: 'no' },
-        { key: 'a', name: 'yes, and trust this server even if its command changes', value: 'always' },
-      ],
-    });
-  });
-
-  await registry.load(trusted);
-  const toolCount = registry.toolDefinitions().length;
-  if (toolCount > 0) {
-    console.log(mutedColor(`${toolCount} MCP tool(s) available from ${trusted.length} server(s).`));
-  }
-  return registry;
-}
-
-/** Draws the request and reads the answer. The policy lives in approval-gate.ts. */
-function askForApprovalOnConsole(
-  request: ConfirmRequest,
-  wording: ApprovalWording
-): Promise<ApprovalAnswer> {
-  console.log(`\n${box(request.message.split('\n'))}`);
-  return expand<ApprovalAnswer>({
-    message: wording.question,
+  const prompt = expand<'yes' | 'no'>({
+    message: APPROVAL_WORDING[event.request.kind],
     default: 'n',
     choices: [
       { key: 'y', name: 'yes, this once', value: 'yes' },
       { key: 'n', name: 'no', value: 'no' },
-      {
-        key: 'a',
-        name: `yes, and stop asking about ${wording.scope} this session`,
-        value: 'always',
-      },
-      {
-        key: 'x',
-        name: `no, and stop asking about ${wording.scope} for this reply`,
-        value: 'never',
-      },
     ],
   });
+
+  return {
+    // A cancelled prompt rejects; another client answering first is not an
+    // error, so it settles as a plain "no" that is never sent.
+    answer: prompt.then((answer) => answer === 'yes').catch(() => false),
+    cancel: () => prompt.cancel(),
+  };
 }
 
 export async function runRepl(deps: ReplDeps): Promise<void> {
-  // The active session is read through sessions.active rather than held in a
-  // variable: /session switches which one that is, and a captured reference
-  // would keep pointing at the conversation the user just left.
-  const sessions = new SessionList(deps.provider, deps.model);
   // Prompt lines, for up/down recall. Persisted to ~/.robin/input-history —
   // the same private tree that already holds full transcripts, so this adds no
   // new class of exposure. ROBIN_NO_HISTORY_FILE=1 keeps it session-only.
@@ -170,14 +136,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   let inputHistory: string[] = await inputHistoryStore.load();
   const conversationStore = new ConversationStore();
   const skillStore = new SkillStore();
-  const approvals = createApprovalGate({
-    ask: askForApprovalOnConsole,
-    notify: (message) => console.log(mutedColor(message)),
-  });
-  const askForApproval = approvals.confirm;
   const usageCache = new UsageCache();
-  const unsupportedStore = new UnsupportedModelStore();
-  const contextLimits = new ContextLimitStore();
   const personalityTrust = new PersonalityTrustStore();
   const memoryStore = new MemoryStore();
   const workflowStore = new WorkflowStore();
@@ -189,24 +148,43 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   // text that becomes the system prompt, and burying it under the banner is
   // how people learn to approve without reading.
   const { text: personality } = await loadPersonality(personalityTrust);
-  sessions.active.personality = personality;
 
-  // Same reasoning, same placement: an mcp.json entry is a command Robin will
-  // execute, so the user sees it before anything is launched.
-  const mcpRegistry = await startMcpServers();
+  const info = await ensureGateway();
+  const client = await GatewayClient.connect({
+    port: info.port,
+    token: info.token,
+    kind: 'terminal',
+    canApprove: true,
+    cwd: process.cwd(),
+  });
 
-  // Built once. `session` is never reassigned — commands mutate its fields —
-  // so this reference stays correct for the life of the loop.
+  // A session this directory already owns is the one to continue. Picking it up
+  // rather than starting another is the whole point of a daemon that outlives
+  // the terminal: closing the window is no longer the end of a conversation.
+  const here = client.sessions.find((session) => session.cwd === process.cwd());
+  let snapshot =
+    here ??
+    (await client.request<SessionSnapshot>('session.create', {
+      providerId: deps.provider.id,
+      model: deps.model,
+      cwd: process.cwd(),
+    }));
+  if (personality) {
+    snapshot = await client.request<SessionSnapshot>('session.update', {
+      id: snapshot.id,
+      patch: { personality },
+    });
+  }
+  const attached = await client.request<AttachResult>('session.attach', { id: snapshot.id });
+
   const ctx: ReplContext = {
-    get session() {
-      return sessions.active;
-    },
-    sessions,
+    client,
+    sessionId: snapshot.id,
+    snapshot,
     inputHistory,
     stores: {
       conversation: conversationStore,
       skill: skillStore,
-      unsupported: unsupportedStore,
       usage: usageCache,
       inputHistory: inputHistoryStore,
       personalityTrust,
@@ -214,9 +192,55 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       recall: recallSearch,
       workflow: workflowStore,
     },
-    confirm: askForApproval,
     deps,
   };
+
+  const output: EventOutput = {
+    text: (chunk) => process.stdout.write(chunk),
+    muted: (line) => process.stdout.write(mutedColor(line)),
+    error: (line) => console.log(errorColor(line)),
+    connectionChanged: (providerName, model) => printConnectionLine(providerName, model),
+  };
+
+  // Approvals in flight, so a box can be withdrawn when another client answers
+  // first rather than left on screen as a question nobody is waiting on.
+  const openApprovals = new Map<string, () => void>();
+
+  client.on((sessionId, event) => {
+    if (sessionId !== undefined && sessionId !== ctx.sessionId) return;
+
+    if (event.kind === 'approval.request') {
+      const { answer, cancel } = askApproval(event);
+      openApprovals.set(event.approvalId, cancel);
+      void answer.then(async (approved) => {
+        if (!openApprovals.delete(event.approvalId)) return;
+        await client
+          .request('approval.answer', { approvalId: event.approvalId, approved })
+          .catch(() => {});
+      });
+      return;
+    }
+    if (event.kind === 'approval.resolved') {
+      const cancel = openApprovals.get(event.approvalId);
+      if (cancel) {
+        openApprovals.delete(event.approvalId);
+        cancel();
+        console.log(mutedColor(`Answered elsewhere (${event.approved ? 'yes' : 'no'}).`));
+      }
+      return;
+    }
+    if (event.kind === 'session.changed') {
+      ctx.snapshot = event.snapshot;
+    }
+    renderEvent(event, output);
+  });
+
+  client.onClose(() => {
+    console.log(
+      errorColor('\n✖ The gateway went away. Start it again with `robin chat`.')
+    );
+    process.exit(1);
+  });
 
   // Fetched before the banner so the figure is on screen from the first
   // frame; null (no key, no network) simply omits the line.
@@ -226,25 +250,30 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   const hudStats = await gatherTelemetry({
     memory: memoryStore,
     skills: skillStore,
-    // Counted from the same arrays runTurn assembles, so the meter cannot
-    // drift from what the model is actually offered.
     toolCount:
-      TOOL_DEFINITIONS.length +
-      MEMORY_TOOL_DEFINITIONS.length +
-      SKILL_TOOL_DEFINITIONS.length +
-      mcpRegistry.toolDefinitions().length,
-    mcpServerCount: mcpRegistry.serverCount(),
+      TOOL_DEFINITIONS.length + MEMORY_TOOL_DEFINITIONS.length + SKILL_TOOL_DEFINITIONS.length,
+    mcpServerCount: 0,
   });
 
   printBanner({
     stats: hudStats,
-    providerName: sessions.active.provider.name,
-    model: sessions.active.model,
+    providerName: snapshot.providerName,
+    model: snapshot.model,
     cwd: process.cwd(),
     sessionId: newSessionId(),
-    toolsEnabled: sessions.active.toolsEnabled,
+    toolsEnabled: snapshot.toolsEnabled,
     usageLine: startupUsage ? renderUsageLine(startupUsage) : undefined,
   });
+
+  if (attached.history.length > 0) {
+    // Rejoining, not starting. Say so rather than presenting a conversation
+    // with history as a blank slate.
+    console.log(
+      mutedColor(
+        `Continuing the conversation in this directory — ${attached.history.length} message(s) so far. /clear starts over.`
+      )
+    );
+  }
   console.log(chalk.gray('Type your message, or / for commands.'));
 
   let isFirstTurn = true;
@@ -258,15 +287,10 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     }
     isFirstTurn = false;
 
-    // `inputHistory` is what the user typed at the prompt; `history` above is
-    // the conversation sent to the model. Distinct names on purpose.
-    const line = await readSlashAwareLine(
-      inputHistory,
-      sessions.list().length > 1 ? String(sessions.active.id) : undefined
-    );
+    // `inputHistory` is what the user typed at the prompt; the conversation
+    // itself lives in the gateway. Distinct names on purpose.
+    const line = await readSlashAwareLine(inputHistory, undefined);
     inputHistory = addToInputHistory(inputHistory, line);
-    // addToInputHistory returns a new array, so the context needs re-pointing
-    // at it — /history reads and clears the live one.
     ctx.inputHistory = inputHistory;
     // Fire-and-forget: the store swallows its own errors, and the prompt must
     // never wait on a disk write.
@@ -274,9 +298,9 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     const cmd = parseCommand(line);
 
     if (cmd.type === 'exit') {
-      // Each server is a child process Robin started; leaving them running
-      // would outlive the session that spawned them.
-      await mcpRegistry.closeAll();
+      // The gateway keeps running on purpose: a Telegram conversation must not
+      // end because a terminal was closed. `robin gateway stop` ends it.
+      await client.close();
       await recallSearch.close();
       break;
     }
@@ -295,60 +319,39 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     if (!cmd.arg) continue;
 
     process.stdout.write(assistantColor('» '));
-    // Refusals are remembered only until the user speaks again — this is where
-    // "again" happens.
-    approvals.beginTurn();
     const interrupt = listenForInterrupt();
-    const result = await runTurn(sessions.active, cmd.arg, {
-      signal: interrupt.signal,
-      onText: (text) => process.stdout.write(text),
-      confirm: askForApproval,
-      unsupportedStore,
-      contextLimits,
-      onTrim: ({ dropped, limit }) =>
-        console.log(
-          mutedColor(
-            `\n  Dropped the oldest ${dropped} message(s) to fit ${limit} tokens. /clear starts fresh.`
-          )
-        ),
-      // Read-only commands run unannounced otherwise; showing them keeps the
-      // user aware of what Robin actually did.
-      onAutoApproved: (command) => console.log(mutedColor(`\n  $ ${command}`)),
-      onOutput: (chunk) => process.stdout.write(mutedColor(chunk)),
-      onThinking: (text) => process.stdout.write(mutedColor(text)),
-      mcp: mcpRegistry,
-      memory: memoryStore,
-      skills: skillStore,
-      onFallback: ({ error, next }) => {
-        console.log(
-          mutedColor(`\n  ${error.message} — trying ${next.provider.name} · ${next.model}...`)
-        );
-        process.stdout.write(assistantColor('» '));
-      },
-    });
-
-    // Must run whatever the outcome — leaving the terminal in raw mode would
-    // make the next prompt unusable.
-    interrupt.dispose();
-
-    if (result.ok) {
+    let accepted: PromptAccepted | undefined;
+    try {
+      accepted = await client.request<PromptAccepted>('prompt.send', {
+        id: ctx.sessionId,
+        text: cmd.arg,
+      });
+      if (accepted.queuePosition > 0) {
+        console.log(mutedColor(`\n  Queued behind ${accepted.queuePosition} turn(s).`));
+      }
+      // The gateway owns the turn; this waits for it to say the turn is over.
+      await new Promise<void>((resolve) => {
+        const stop = client.on((sessionId, event) => {
+          if (sessionId !== ctx.sessionId) return;
+          if (event.kind !== 'turn.finished' || event.turnId !== accepted?.turnId) return;
+          stop();
+          resolve();
+        });
+        interrupt.signal.addEventListener('abort', () => {
+          void client.request('turn.interrupt', { turnId: accepted?.turnId }).catch(() => {});
+        });
+      });
       process.stdout.write('\n');
-      if (result.aborted) {
-        console.log(mutedColor('Interrupted. Your next message continues from here.'));
-      }
-      if (result.provider.id !== sessions.active.provider.id || result.model !== sessions.active.model) {
-        sessions.active.provider = result.provider;
-        sessions.active.model = result.model;
-        printConnectionLine(sessions.active.provider.name, sessions.active.model);
-      }
-      await sessions.active.chatLog.write(sessions.active.provider.name, sessions.active.model, sessions.active.history);
-      // Refresh in the background so the next divider has a fresh figure
-      // without the user ever waiting on it. Failures are already swallowed
-      // inside the cache; the catch is belt-and-braces against an unhandled
-      // rejection taking down the process.
-      void usageCache.get().catch(() => {});
-    } else {
-      console.log(errorColor(`\n✖ ${result.error?.message}`));
+    } catch (err) {
+      console.log(errorColor(`\n✖ ${(err as Error).message}`));
+    } finally {
+      // Must run whatever the outcome — leaving the terminal in raw mode would
+      // make the next prompt unusable.
+      interrupt.dispose();
     }
+
+    // Refresh in the background so the next divider has a fresh figure without
+    // the user ever waiting on it.
+    void usageCache.get().catch(() => {});
   }
 }

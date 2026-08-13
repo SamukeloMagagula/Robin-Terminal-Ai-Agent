@@ -4,13 +4,12 @@ import * as path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { runTurn } from '../../src/repl/run-turn';
 import { createSession, buildSystemPrompt } from '../../src/repl/session';
-import { handleClear } from '../../src/repl/commands/conversation';
+import { startHarness } from '../helpers/gateway-harness';
 import { MemoryStore } from '../../src/memory/store';
 import { composeMemoryContext, MEMORY_NUDGE, NUDGE_EVERY } from '../../src/memory/tools';
 import { executeTool } from '../../src/tools/execute';
 import { UnsupportedModelStore } from '../../src/providers/unsupported-models';
 import type { Provider } from '../../src/providers/types';
-import type { ReplContext } from '../../src/repl/repl-context';
 
 async function memoryStore(): Promise<MemoryStore> {
   return new MemoryStore(await fs.mkdtemp(path.join(os.tmpdir(), 'robin-memint-')));
@@ -136,13 +135,22 @@ describe('memory during a turn', () => {
     expect(systemSent(provider, NUDGE_EVERY - 1)).toContain(MEMORY_NUDGE);
   });
 
+  // The reset lives in the gateway now: /clear is an RPC, and the session it
+  // clears belongs to the daemon rather than to the terminal that asked.
   it('/clear resets the nudge counter with the conversation', async () => {
-    const session = createSession(fakeProvider(), 'm');
-    session.turnCount = 7;
+    const harness = await startHarness();
+    try {
+      for (let i = 0; i < 7; i++) {
+        harness.sessions.append(harness.session.id, { role: 'user', content: `turn ${i}` });
+      }
 
-    await handleClear({ session } as unknown as ReplContext);
+      const cleared = harness.sessions.clear(harness.session.id);
 
-    expect(session.turnCount).toBe(0);
+      expect(cleared.turnCount).toBe(0);
+      expect(harness.sessions.history(harness.session.id)).toEqual([]);
+    } finally {
+      await harness.close();
+    }
   });
 });
 

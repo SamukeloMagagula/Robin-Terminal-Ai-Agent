@@ -106,7 +106,7 @@ describe('SessionService sessions', () => {
   it('clears history when the provider changes', () => {
     const { svc } = service();
     const created = svc.create({ providerId: 'copilot', model: 'gpt-4o', cwd: '.' });
-    svc.appendForTest(created.id, { role: 'user', content: 'hi' });
+    svc.append(created.id, { role: 'user', content: 'hi' });
 
     svc.update(created.id, { providerId: 'ollama', model: 'llama3.1' });
 
@@ -116,7 +116,7 @@ describe('SessionService sessions', () => {
   it('leaves history alone when only the label changes', () => {
     const { svc } = service();
     const created = svc.create({ providerId: 'copilot', model: 'gpt-4o', cwd: '.' });
-    svc.appendForTest(created.id, { role: 'user', content: 'hi' });
+    svc.append(created.id, { role: 'user', content: 'hi' });
 
     const updated = svc.update(created.id, { label: 'the good one' });
 
@@ -127,7 +127,7 @@ describe('SessionService sessions', () => {
   it('clears history on request without changing the model', () => {
     const { svc } = service();
     const created = svc.create({ providerId: 'copilot', model: 'gpt-4o', cwd: '.' });
-    svc.appendForTest(created.id, { role: 'user', content: 'hi' });
+    svc.append(created.id, { role: 'user', content: 'hi' });
 
     const cleared = svc.clear(created.id);
 
@@ -168,6 +168,64 @@ describe('SessionService sessions', () => {
     const only = svc.create({ providerId: 'copilot', model: 'gpt-4o', cwd: '.' });
     svc.close(only.id);
     expect(svc.list()).toEqual([]);
+  });
+
+  it('hands back the history for /copy and /save', () => {
+    const { svc } = service();
+    const created = svc.create({ providerId: 'copilot', model: 'gpt-4o', cwd: '.' });
+    svc.append(created.id, { role: 'user', content: 'hi' });
+
+    expect(svc.history(created.id)).toEqual([{ role: 'user', content: 'hi' }]);
+  });
+
+  it('hands back a copy, so a client cannot mutate the daemon by accident', () => {
+    const { svc } = service();
+    const created = svc.create({ providerId: 'copilot', model: 'gpt-4o', cwd: '.' });
+    svc.append(created.id, { role: 'user', content: 'hi' });
+
+    svc.history(created.id).push({ role: 'user', content: 'smuggled' });
+
+    expect(svc.history(created.id)).toHaveLength(1);
+  });
+
+  it('replaces the history for /load, and starts a new transcript', () => {
+    const { svc } = service();
+    const created = svc.create({ providerId: 'copilot', model: 'gpt-4o', cwd: '.' });
+    svc.append(created.id, { role: 'user', content: 'the old conversation' });
+
+    svc.setHistory(created.id, [
+      { role: 'user', content: 'the loaded one' },
+      { role: 'assistant', content: 'hello again' },
+    ]);
+
+    expect(svc.history(created.id).map((m) => m.content)).toEqual([
+      'the loaded one',
+      'hello again',
+    ]);
+  });
+
+  it('announces a loaded conversation, so other clients redraw', () => {
+    const { svc, emit } = service();
+    const created = svc.create({ providerId: 'copilot', model: 'gpt-4o', cwd: '.' });
+    emit.mockClear();
+
+    svc.setHistory(created.id, [{ role: 'user', content: 'loaded' }]);
+
+    expect(emit).toHaveBeenCalledWith(
+      created.id,
+      expect.objectContaining({ kind: 'session.changed' })
+    );
+  });
+
+  it('sets the personality', () => {
+    const { svc } = service();
+    const created = svc.create({ providerId: 'copilot', model: 'gpt-4o', cwd: '.' });
+
+    svc.update(created.id, { personality: 'be terse' });
+    expect(svc.personality(created.id)).toBe('be terse');
+
+    svc.update(created.id, { personality: null });
+    expect(svc.personality(created.id)).toBeUndefined();
   });
 
   it('reports a missing session by id rather than throwing something opaque', () => {

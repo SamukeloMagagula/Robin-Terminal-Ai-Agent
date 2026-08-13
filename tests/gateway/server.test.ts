@@ -44,6 +44,10 @@ const sessions = {
   snapshot: vi.fn(),
   sendPrompt: vi.fn(),
   interrupt: vi.fn(),
+  history: vi.fn(),
+  setHistory: vi.fn(),
+  append: vi.fn(),
+  personality: vi.fn(),
 };
 const approvals = { answer: vi.fn() };
 

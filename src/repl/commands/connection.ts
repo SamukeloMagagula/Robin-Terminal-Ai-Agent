@@ -1,43 +1,43 @@
 import chalk from 'chalk';
-import type { Provider } from '../../providers/types.js';
 import type { ReplContext } from '../repl-context.js';
-import { printConnectionLine } from '../../ui/banner.js';
+import type { SessionSnapshot } from '../../gateway/protocol.js';
 import { environmentPrompt } from '../../environment-prompt.js';
 import { TOOL_DEFINITIONS } from '../../tools/definitions.js';
 import { assistantColor, errorColor, mutedColor } from '../../ui/theme.js';
 
 /**
- * A connection switch resets the conversation and starts a new transcript.
- * The model on the other side has not seen any of it, so keeping the history
- * would silently replay someone else's conversation as if it were its own.
+ * Asks the gateway to change the session, and remembers what it said back.
  *
- * Mutates `ctx.session` rather than replacing it — the context object is built
- * once and holds this exact reference.
+ * The connection line is not printed here: the gateway emits session.changed
+ * to every attached client, and run-repl prints it from there. Printing it
+ * locally as well would double it up for the terminal that made the change.
  */
-function applyConnectionChange(ctx: ReplContext, provider: Provider, model: string): void {
-  ctx.session.provider = provider;
-  ctx.session.model = model;
-  ctx.session.history = [];
-  ctx.session.chatLog.startNewSession();
-  printConnectionLine(provider.name, model);
+async function patchSession(
+  ctx: ReplContext,
+  patch: Record<string, unknown>
+): Promise<void> {
+  ctx.snapshot = await ctx.client.request<SessionSnapshot>('session.update', {
+    id: ctx.sessionId,
+    patch,
+  });
 }
 
 export async function handleModel(ctx: ReplContext): Promise<void> {
-  const model = await ctx.deps.pickModel(ctx.session.provider);
-  applyConnectionChange(ctx, ctx.session.provider, model);
+  const model = await ctx.deps.pickModel(ctx.deps.provider);
+  await patchSession(ctx, { model });
 }
 
 export async function handleProvider(ctx: ReplContext): Promise<void> {
   const picked = await ctx.deps.pickProviderAndModel();
-  applyConnectionChange(ctx, picked.provider, picked.model);
+  await patchSession(ctx, { providerId: picked.provider.id, model: picked.model });
 }
 
 export async function handleRandom(ctx: ReplContext): Promise<void> {
-  // A re-roll is a provider switch, so it resets history and starts a new
-  // transcript exactly like /model and /provider do.
+  // A re-roll is a provider switch, so the gateway resets history and starts a
+  // new transcript exactly as /model and /provider do.
   try {
     const rolled = await ctx.deps.rollRandom();
-    applyConnectionChange(ctx, rolled.provider, rolled.model);
+    await patchSession(ctx, { providerId: rolled.provider.id, model: rolled.model });
   } catch (err) {
     console.log(errorColor(`✖ ${(err as Error).message}`));
   }
@@ -46,16 +46,18 @@ export async function handleRandom(ctx: ReplContext): Promise<void> {
 export async function handleSystem(ctx: ReplContext, arg?: string): Promise<void> {
   if (!arg) {
     console.log(
-      ctx.session.systemPrompt
-        ? mutedColor(ctx.session.systemPrompt)
+      ctx.snapshot.systemPrompt
+        ? mutedColor(ctx.snapshot.systemPrompt)
         : mutedColor('No system prompt set. Usage: /system <text>  or  /system clear')
     );
     console.log(mutedColor(`\nAlways sent:\n${environmentPrompt()}`));
   } else if (arg === 'clear') {
-    ctx.session.systemPrompt = undefined;
+    // null clears it. undefined would mean "leave it alone" once this is a
+    // patch travelling over a wire.
+    await patchSession(ctx, { systemPrompt: null });
     console.log(chalk.gray('System prompt cleared.'));
   } else {
-    ctx.session.systemPrompt = arg;
+    await patchSession(ctx, { systemPrompt: arg });
     console.log(chalk.gray('System prompt set.'));
   }
 }
@@ -67,6 +69,9 @@ export async function handleTools(ctx: ReplContext, arg?: string): Promise<void>
     }
     return;
   }
-  ctx.session.toolsEnabled = !ctx.session.toolsEnabled;
-  console.log(chalk.gray(`Tools ${ctx.session.toolsEnabled ? 'enabled' : 'disabled'}.`));
+  // Sends the state it wants rather than a toggle: two clients toggling one
+  // session would otherwise race, and the gateway is the source of truth for
+  // what the value currently is.
+  await patchSession(ctx, { toolsEnabled: !ctx.snapshot.toolsEnabled });
+  console.log(chalk.gray(`Tools ${ctx.snapshot.toolsEnabled ? 'enabled' : 'disabled'}.`));
 }

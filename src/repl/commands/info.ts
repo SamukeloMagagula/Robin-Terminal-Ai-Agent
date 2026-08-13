@@ -77,9 +77,15 @@ export async function handleRecall(ctx: ReplContext, arg?: string): Promise<void
   // that were wrapped as untrusted the first time round. Replaying them as a
   // plain user message would launder that text back into the context as if the
   // user had typed it, so re-wrap it.
-  ctx.session.history.push({
-    role: 'user',
-    content: wrapUntrusted(`recalled excerpts from past conversations matching "${arg}"`, recalled),
+  await ctx.client.request('session.append', {
+    id: ctx.sessionId,
+    message: {
+      role: 'user',
+      content: wrapUntrusted(
+        `recalled excerpts from past conversations matching "${arg}"`,
+        recalled
+      ),
+    },
   });
   console.log(mutedColor('(Added to the conversation — you can refer to it in your next message.)'));
 }

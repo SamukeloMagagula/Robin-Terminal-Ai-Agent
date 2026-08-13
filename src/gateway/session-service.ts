@@ -108,6 +108,8 @@ export class SessionService {
       model?: string;
       /** null clears it; undefined leaves it alone. */
       systemPrompt?: string | null;
+      /** null clears it; undefined leaves it alone. */
+      personality?: string | null;
       toolsEnabled?: boolean;
       label?: string;
     }
@@ -126,6 +128,7 @@ export class SessionService {
     if (patch.toolsEnabled !== undefined) session.toolsEnabled = patch.toolsEnabled;
     if (patch.label !== undefined) session.label = patch.label;
     if (patch.systemPrompt !== undefined) session.systemPrompt = patch.systemPrompt ?? undefined;
+    if (patch.personality !== undefined) session.personality = patch.personality ?? undefined;
 
     if (switchingConnection) {
       session.history = [];
@@ -301,9 +304,31 @@ export class SessionService {
     }
   }
 
-  /** Test-only seam: history is otherwise written only by a turn. */
-  appendForTest(id: number, message: Message): void {
+  /** A copy: a client that mutated this would be editing the daemon's memory. */
+  history(id: number): Message[] {
+    return [...this.record(id).session.history];
+  }
+
+  /** Appends one message. /recall uses it to put found excerpts in front of the model. */
+  append(id: number, message: Message): void {
     this.record(id).session.history.push(message);
+  }
+
+  /** Replaces the conversation wholesale, as /load does. */
+  setHistory(id: number, messages: Message[]): SessionSnapshot {
+    const { session } = this.record(id);
+    session.history = [...messages];
+    // A loaded conversation is a different conversation, so it gets its own
+    // transcript rather than being appended to whatever was open.
+    session.chatLog.startNewSession();
+    const snapshot = this.snapshot(id);
+    this.deps.emit(id, { kind: 'session.changed', snapshot });
+    return snapshot;
+  }
+
+  /** The session's standing behaviour, for /personality to display. */
+  personality(id: number): string | undefined {
+    return this.record(id).session.personality;
   }
 
   private record(id: number): SessionRecord {

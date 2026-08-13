@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import type { ReplContext } from '../repl-context.js';
+import type { SessionSnapshot } from '../../gateway/protocol.js';
 import { assistantColor, errorColor, mutedColor } from '../../ui/theme.js';
 
 /** Descriptions are what the model reads to decide; a truncated prompt is a poor one. */
@@ -29,14 +30,14 @@ export async function handleSkill(ctx: ReplContext, arg?: string): Promise<void>
   if (sub === 'save') {
     if (!name) {
       console.log(errorColor('✖ Usage: /skill save <name>'));
-    } else if (!ctx.session.systemPrompt) {
+    } else if (!ctx.snapshot.systemPrompt) {
       console.log(errorColor('✖ No system prompt set. Set one with /system <text> first.'));
     } else {
       try {
         await store.write({
           name,
-          description: describeFromPrompt(ctx.session.systemPrompt),
-          body: ctx.session.systemPrompt,
+          description: describeFromPrompt(ctx.snapshot.systemPrompt),
+          body: ctx.snapshot.systemPrompt,
         });
         console.log(chalk.gray(`Saved skill "${name}".`));
       } catch (err) {
@@ -56,7 +57,10 @@ export async function handleSkill(ctx: ReplContext, arg?: string): Promise<void>
       console.log(errorColor(`✖ No skill named "${name}".`));
       return;
     }
-    ctx.session.systemPrompt = skill.body;
+    ctx.snapshot = await ctx.client.request<SessionSnapshot>('session.update', {
+      id: ctx.sessionId,
+      patch: { systemPrompt: skill.body },
+    });
     console.log(chalk.gray(`Using skill "${name}".`));
     return;
   }

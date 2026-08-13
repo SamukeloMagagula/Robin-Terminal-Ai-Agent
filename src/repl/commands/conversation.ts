@@ -1,5 +1,7 @@
 import chalk from 'chalk';
 import type { ReplContext } from '../repl-context.js';
+import type { Message } from '../../providers/types.js';
+import type { SessionSnapshot } from '../../gateway/protocol.js';
 import { copyToClipboard } from '../../clipboard.js';
 import { printConnectionLine } from '../../ui/banner.js';
 import { errorColor, mutedColor } from '../../ui/theme.js';
@@ -11,22 +13,30 @@ import { errorColor, mutedColor } from '../../ui/theme.js';
  */
 const CLEAR_SCREEN = '\x1b[2J\x1b[3J\x1b[H';
 
+/** The conversation as the gateway currently holds it. */
+async function history(ctx: ReplContext): Promise<Message[]> {
+  const result = await ctx.client.request<{ history: Message[] }>('session.history', {
+    id: ctx.sessionId,
+  });
+  return result.history;
+}
+
 export async function handleClear(ctx: ReplContext): Promise<void> {
-  ctx.session.history = [];
-  // Resets the memory nudge with the conversation: the nudge exists to catch
-  // what was learned in *this* exchange, so carrying the count across a clear
-  // would fire it on turn one of an unrelated one.
-  ctx.session.turnCount = 0;
-  ctx.session.chatLog.startNewSession();
+  // The gateway resets the turn count with the history: the memory nudge exists
+  // to catch what was learned in *this* exchange, so carrying the count across
+  // a clear would fire it on turn one of an unrelated one.
+  ctx.snapshot = await ctx.client.request<SessionSnapshot>('session.clear', {
+    id: ctx.sessionId,
+  });
   process.stdout.write(CLEAR_SCREEN);
   // Reprinted after the wipe, because clearing the screen also removes the
   // connection line — leaving no on-screen record of which model is answering.
-  printConnectionLine(ctx.session.provider.name, ctx.session.model);
+  printConnectionLine(ctx.snapshot.providerName, ctx.snapshot.model);
   console.log(chalk.gray('Conversation cleared.'));
 }
 
 export async function handleCopy(ctx: ReplContext): Promise<void> {
-  const lastReply = [...ctx.session.history]
+  const lastReply = [...(await history(ctx))]
     .reverse()
     .find((m) => m.role === 'assistant' && m.content);
   if (!lastReply) {
@@ -41,7 +51,6 @@ export async function handleCopy(ctx: ReplContext): Promise<void> {
   }
 }
 
-
 export async function handleSave(ctx: ReplContext, arg?: string): Promise<void> {
   if (!arg) {
     const names = await ctx.stores.conversation.list();
@@ -54,11 +63,11 @@ export async function handleSave(ctx: ReplContext, arg?: string): Promise<void> 
   }
   try {
     await ctx.stores.conversation.save(arg, {
-      providerId: ctx.session.provider.id,
-      providerName: ctx.session.provider.name,
-      model: ctx.session.model,
+      providerId: ctx.snapshot.providerId,
+      providerName: ctx.snapshot.providerName,
+      model: ctx.snapshot.model,
       savedAt: new Date().toISOString(),
-      messages: ctx.session.history,
+      messages: await history(ctx),
     });
     console.log(chalk.gray(`Saved conversation as "${arg}".`));
   } catch (err) {
@@ -78,8 +87,12 @@ export async function handleLoad(ctx: ReplContext, arg?: string): Promise<void> 
   }
   try {
     const saved = await ctx.stores.conversation.load(arg);
-    ctx.session.history = saved.messages;
-    ctx.session.chatLog.startNewSession();
+    // The gateway starts a new transcript for it: a loaded conversation is a
+    // different conversation, not a continuation of whatever was open.
+    ctx.snapshot = await ctx.client.request<SessionSnapshot>('session.setHistory', {
+      id: ctx.sessionId,
+      messages: saved.messages,
+    });
     console.log(
       chalk.gray(`Loaded conversation "${arg}" (saved on ${saved.providerName} · ${saved.model}).`)
     );

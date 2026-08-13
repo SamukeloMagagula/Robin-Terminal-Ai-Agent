@@ -1,16 +1,14 @@
-import type { Session } from './session.js';
-import type { SessionList } from './session-list.js';
 import type { Provider } from '../providers/types.js';
+import type { GatewayClient } from '../gateway/client.js';
+import type { SessionSnapshot } from '../gateway/protocol.js';
 import type { ConversationStore } from '../conversation-store.js';
 import type { SkillStore } from '../skills/store.js';
-import type { UnsupportedModelStore } from '../providers/unsupported-models.js';
 import type { UsageCache } from '../usage/openrouter-usage.js';
 import type { InputHistoryStore } from './input-history.js';
 import type { PersonalityTrustStore } from '../personality-trust.js';
 import type { MemoryStore } from '../memory/store.js';
 import type { RecallSearch } from '../recall/search.js';
 import type { WorkflowStore } from '../workflow/store.js';
-import type { ConfirmFn } from '../tools/execute.js';
 
 /**
  * The pickers, injected by the CLI so the REPL never imports inquirer's
@@ -28,19 +26,25 @@ export interface ReplDeps {
 /**
  * Everything a command handler is allowed to touch.
  *
- * `session` is the active conversation. Everything else is app-level and
- * deliberately shared: the approval gate's "stop asking this session" promise
- * means this process, and the stores are one-per-machine.
+ * The conversation is no longer here. It lives in the gateway, and `client` is
+ * how a handler asks about it or changes it — which is why handlers `await`
+ * where they used to assign. `snapshot` is the last state the gateway reported
+ * for the attached session: safe to read, never to write, and refreshed by
+ * whatever RPC the handler just made.
+ *
+ * The stores that remain are the ones that were never part of a conversation:
+ * the clipboard's input history, the spend figure, and the trust file.
  */
 export interface ReplContext {
-  /** The active conversation. A getter over `sessions` — never reassign it. */
-  readonly session: Session;
-  sessions: SessionList;
+  client: GatewayClient;
+  /** The session this terminal is attached to. */
+  sessionId: number;
+  /** Last known state of that session. Replaced, never mutated in place. */
+  snapshot: SessionSnapshot;
   inputHistory: string[];
   stores: {
     conversation: ConversationStore;
     skill: SkillStore;
-    unsupported: UnsupportedModelStore;
     usage: UsageCache;
     inputHistory: InputHistoryStore;
     personalityTrust: PersonalityTrustStore;
@@ -48,7 +52,6 @@ export interface ReplContext {
     recall: RecallSearch;
     workflow: WorkflowStore;
   };
-  confirm: ConfirmFn;
   deps: ReplDeps;
 }
 

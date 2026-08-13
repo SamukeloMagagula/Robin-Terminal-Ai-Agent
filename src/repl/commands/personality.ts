@@ -77,14 +77,21 @@ async function promptToTrust(
 
 export async function handlePersonality(ctx: ReplContext, arg?: string): Promise<void> {
   if (arg === 'off') {
-    ctx.session.personality = undefined;
+    // null clears it; undefined would mean "leave it alone" in a patch.
+    await ctx.client.request('session.update', {
+      id: ctx.sessionId,
+      patch: { personality: null },
+    });
     console.log(mutedColor('Personality dropped for this session.'));
     return;
   }
 
   if (arg === 'reload') {
     const { text, sources } = await loadPersonality(ctx.stores.personalityTrust);
-    ctx.session.personality = text;
+    await ctx.client.request('session.update', {
+      id: ctx.sessionId,
+      patch: { personality: text ?? null },
+    });
     console.log(
       sources.length
         ? mutedColor(`Reloaded from ${sources.map((s) => s.source).join(', ')}.`)
@@ -93,11 +100,15 @@ export async function handlePersonality(ctx: ReplContext, arg?: string): Promise
     return;
   }
 
-  if (!ctx.session.personality) {
+  const { personality } = await ctx.client.request<{ personality?: string }>(
+    'session.history',
+    { id: ctx.sessionId }
+  );
+  if (!personality) {
     console.log(mutedColor('No personality loaded. Create a PERSONALITY.md here, or in ~/.robin/.'));
     return;
   }
 
   console.log(assistantColor('Active personality:'));
-  console.log(mutedColor(ctx.session.personality));
+  console.log(mutedColor(personality));
 }

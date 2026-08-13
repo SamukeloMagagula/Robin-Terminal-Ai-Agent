@@ -206,6 +206,11 @@ export class GatewayServer {
         client.attached.add(id);
         return result;
       }
+      case 'session.detach':
+        // Unsubscribes without touching the session: a terminal that has moved
+        // to another conversation should stop receiving this one's events.
+        client.attached.delete(Number(params.id));
+        return {};
       case 'session.close': {
         const id = Number(params.id);
         this.deps.sessions.close(id);
@@ -216,6 +221,19 @@ export class GatewayServer {
         return this.deps.sessions.update(Number(params.id), params.patch as never);
       case 'session.clear':
         return this.deps.sessions.clear(Number(params.id));
+      case 'session.history':
+        return {
+          history: this.deps.sessions.history(Number(params.id)),
+          personality: this.deps.sessions.personality(Number(params.id)),
+        };
+      case 'session.setHistory':
+        return this.deps.sessions.setHistory(
+          Number(params.id),
+          (params.messages ?? []) as never
+        );
+      case 'session.append':
+        this.deps.sessions.append(Number(params.id), params.message as never);
+        return {};
       case 'prompt.send':
         return this.deps.sessions.sendPrompt(Number(params.id), String(params.text), {
           // A terminal is a terminal. Only a channel client may name its own

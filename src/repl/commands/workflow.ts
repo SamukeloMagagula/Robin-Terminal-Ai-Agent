@@ -5,7 +5,33 @@ import { getProvider } from '../../providers/index.js';
 import { runWorkflow, type CheckpointAnswer } from '../../workflow/run-workflow.js';
 import { WorkflowStore } from '../../workflow/store.js';
 import { ROLES, type Role, type RoleConfig } from '../../workflow/types.js';
+import { UnsupportedModelStore } from '../../providers/unsupported-models.js';
+import type { ConfirmFn } from '../../tools/execute.js';
 import { assistantColor, errorColor, mutedColor, box } from '../../ui/theme.js';
+
+/**
+ * The one thing the REPL still runs itself.
+ *
+ * A workflow is a self-contained multi-stage run against models the user names
+ * per role; it never touches the attached session's history, so it has nothing
+ * to gain from the gateway owning it and would need a second streaming channel
+ * to get there. It keeps its own approval gate for the same reason — the
+ * gateway's registry answers for a session, and this is not one.
+ */
+function workflowApproval(): ConfirmFn {
+  return async (request) => {
+    console.log(`\n${box(request.message.split('\n'))}`);
+    const answer = await expand<'yes' | 'no'>({
+      message: 'Allow it?',
+      default: 'n',
+      choices: [
+        { key: 'y', name: 'yes, this once', value: 'yes' },
+        { key: 'n', name: 'no', value: 'no' },
+      ],
+    });
+    return answer === 'yes';
+  };
+}
 
 const ROLE_BLURB: Record<Role, string> = {
   planner: 'decides what to do (no tools)',
@@ -117,8 +143,8 @@ async function startRun(ctx: ReplContext, goalAndName: string): Promise<void> {
   const outcome = await runWorkflow(config, goal, {
     resolveProvider: (id) => getProvider(id),
     turnOptions: {
-      confirm: ctx.confirm,
-      unsupportedStore: ctx.stores.unsupported,
+      confirm: workflowApproval(),
+      unsupportedStore: new UnsupportedModelStore(),
       memory: ctx.stores.memory,
       skills: ctx.stores.skill,
     },
