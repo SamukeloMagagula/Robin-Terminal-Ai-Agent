@@ -90,6 +90,15 @@ export interface ExecuteOptions {
   /** Receives stdout/stderr chunks as they arrive, for live display. */
   onOutput?: (chunk: string) => void;
   /**
+   * Where relative paths resolve and commands run.
+   *
+   * Defaults to the process's own directory, which is right for the REPL and
+   * wrong for the gateway: one daemon serves sessions created in different
+   * repositories, and "run the tests" has to mean the tests of the project the
+   * session belongs to.
+   */
+  cwd?: string;
+  /**
    * Tools contributed by MCP servers. Checked before the built-in switch, and
    * matched only on namespaced names, so a server can never claim a built-in.
    */
@@ -128,12 +137,13 @@ export async function executeTool(
   try {
     switch (toolCall.name) {
       case 'read_file':
-        return await readFileTool(requireString(args.path, 'path'), confirm);
+        return await readFileTool(requireString(args.path, 'path'), confirm, options.cwd);
       case 'write_file':
         return await writeFileTool(
           requireString(args.path, 'path'),
           requireString(args.content, 'content'),
-          confirm
+          confirm,
+          options.cwd
         );
       case 'remember':
         if (!options.memory) return 'Error: memory is not available in this session.';
@@ -153,7 +163,8 @@ export async function executeTool(
           confirm,
           options.commandTimeoutMs ?? COMMAND_TIMEOUT_MS,
           options.onAutoApproved,
-          options.onOutput
+          options.onOutput,
+          options.cwd
         );
       default:
         return `Error: unknown tool "${toolCall.name}".`;
@@ -166,17 +177,18 @@ export async function executeTool(
 async function readFileTool(
   filePath: string,
   confirm: ConfirmFn,
+  cwd: string = process.cwd(),
   sensitiveDirs = defaultSensitiveDirs()
 ): Promise<string> {
-  const verdict = await checkPath(filePath, 'read', sensitiveDirs);
+  const verdict = await checkPath(path.resolve(cwd, filePath), 'read', sensitiveDirs);
   if (verdict.blocked) {
     return `Error: ${verdict.refusal}`;
   }
 
-  // Reads inside the directory Robin was launched from are the normal case and
-  // stay friction-free. Anything outside it is a potential exfiltration of
-  // unrelated files into the model's context, so the user gets a say.
-  if (!isInsideCwd(verdict.realPath)) {
+  // Reads inside the session's own directory are the normal case and stay
+  // friction-free. Anything outside it is a potential exfiltration of unrelated
+  // files into the model's context, so the user gets a say.
+  if (!isInsideDir(verdict.realPath, cwd)) {
     const approved = await confirm({
       kind: 'read_file',
       message: `Read ${verdict.realPath}?\n(outside the current working directory)`,
@@ -198,9 +210,9 @@ async function readFileTool(
   }
 }
 
-function isInsideCwd(realPath: string): boolean {
-  const cwd = path.resolve(process.cwd());
-  const relative = path.relative(cwd, realPath);
+function isInsideDir(realPath: string, dir: string): boolean {
+  const base = path.resolve(dir);
+  const relative = path.relative(base, realPath);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
@@ -208,9 +220,10 @@ async function writeFileTool(
   filePath: string,
   content: string,
   confirm: ConfirmFn,
+  cwd: string = process.cwd(),
   sensitiveDirs = defaultSensitiveDirs()
 ): Promise<string> {
-  const verdict = await checkPath(filePath, 'write', sensitiveDirs);
+  const verdict = await checkPath(path.resolve(cwd, filePath), 'write', sensitiveDirs);
   if (verdict.blocked) {
     return `Error: ${verdict.refusal}`;
   }
@@ -356,7 +369,8 @@ async function runCommandTool(
   confirm: ConfirmFn,
   timeoutMs: number,
   onAutoApproved?: (command: string) => void,
-  onOutput?: (chunk: string) => void
+  onOutput?: (chunk: string) => void,
+  cwd: string = process.cwd()
 ): Promise<string> {
   // Listing and inspecting cost the user nothing to allow, and asking about
   // every `ls` trains them to approve without reading. Anything the allowlist
@@ -377,7 +391,7 @@ async function runCommandTool(
   // *model* receives is unchanged: same combined stdout+stderr, same
   // truncation, same Exit code prefix, same untrusted wrapper.
   return await new Promise<string>((resolve) => {
-    const child = spawn(command, { shell: true });
+    const child = spawn(command, { shell: true, cwd });
     let output = '';
     let settled = false;
 

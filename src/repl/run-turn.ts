@@ -29,6 +29,13 @@ export interface TurnOptions {
   contextLimits?: ContextLimitStore;
   /** Called when history had to be dropped to fit the model's context window. */
   onTrim?: (info: { dropped: number; limit: number }) => void;
+  /**
+   * Where tools run for this turn. Defaults to the process's own directory.
+   *
+   * The gateway sets it per session: one daemon serves conversations started
+   * in different repositories.
+   */
+  cwd?: string;
   /** Printed when a read-only command runs without asking. */
   onAutoApproved?: (command: string) => void;
   /** Live command output, for display only — the model still gets the whole result. */
@@ -151,6 +158,7 @@ export async function runTurn(
             executeTool(toolCall, confirm, {
               onAutoApproved: options.onAutoApproved,
               onOutput: options.onOutput,
+              cwd: options.cwd,
               mcp: options.mcp,
               memory: options.memory,
               skills: options.skills,
