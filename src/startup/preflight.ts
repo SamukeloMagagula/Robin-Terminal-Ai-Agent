@@ -11,6 +11,12 @@ import { promises as fs } from 'node:fs';
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import {
+  defaultGatewayInfoPath,
+  isProcessAlive,
+  readGatewayInfo,
+} from '../gateway/discovery.js';
+import { PROTOCOL_VERSION } from '../gateway/protocol.js';
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
 
@@ -193,6 +199,37 @@ export interface PreflightOptions {
 }
 
 /** The full check list, in the order they are reported. */
+/**
+ * Reports on the gateway, without ever calling its absence a problem.
+ *
+ * Not running is the ordinary state: `robin chat` starts one on demand. What is
+ * worth flagging is a record pointing at a process that is gone, and a daemon
+ * speaking a protocol this build does not — the second one is the failure mode
+ * auto-start creates, because a daemon outlives the build that started it and
+ * the resulting errors look like anything but version skew.
+ */
+export async function checkGateway(infoPath?: string): Promise<CheckResult> {
+  const info = await readGatewayInfo(infoPath ?? defaultGatewayInfoPath());
+  if (!info) {
+    return { status: 'ok', detail: 'not running (started on demand by `robin chat`)' };
+  }
+  if (!isProcessAlive(info.pid)) {
+    return {
+      status: 'warn',
+      detail: `a record points at pid ${info.pid}, which is gone`,
+      remedy: 'Run `robin gateway stop` to clear it. Nothing is actually running.',
+    };
+  }
+  if (info.protocol !== PROTOCOL_VERSION) {
+    return {
+      status: 'warn',
+      detail: `running on port ${info.port}, but speaking protocol ${info.protocol} — this build speaks ${PROTOCOL_VERSION}`,
+      remedy: 'Run `robin gateway stop`. That daemon predates your last build.',
+    };
+  }
+  return { status: 'ok', detail: `running on 127.0.0.1:${info.port} (pid ${info.pid})` };
+}
+
 export function buildChecks(options: PreflightOptions): Check[] {
   const configDir = options.configDir ?? path.join(os.homedir(), '.robin');
   const mcpConfigPath = options.mcpConfigPath ?? path.join(configDir, 'mcp.json');
@@ -221,6 +258,12 @@ export function buildChecks(options: PreflightOptions): Check[] {
       label: 'Terminal',
       critical: false,
       run: async () => checkTerminal(),
+    },
+    {
+      id: 'gateway',
+      label: 'Gateway',
+      critical: false,
+      run: () => checkGateway(path.join(configDir, 'gateway.json')),
     },
     {
       id: 'mcp',

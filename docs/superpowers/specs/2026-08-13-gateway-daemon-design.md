@@ -200,9 +200,22 @@ is. That separation is what makes it testable without a network.
 
 ### Unchanged
 
-`agent-loop.ts`, `run-turn.ts`, `tools/`, `providers/`, `memory/`, `skills/`,
-`mcp/`, `recall/`, `workflow/`. The daemon calls `runTurn` the same way the REPL
-does today.
+`agent-loop.ts`, `run-turn.ts`, `memory/`, `skills/`, `mcp/`, `recall/`,
+`workflow/`. The daemon calls `runTurn` the same way the REPL does today.
+
+> **Corrected during implementation.** `tools/` and `providers/` were on this
+> list and should not have been.
+>
+> `tools/execute.ts` had to learn a `cwd`: the daemon has one working
+> directory and its sessions have their own, and without threading it through,
+> "run the tests" runs them wherever the daemon happens to live.
+> `isInsideCwd` became `isInsideDir` — the same containment check, asked about
+> the right directory.
+>
+> `providers/unsupported-models.ts` and `providers/context-limits.ts` cache in
+> memory, and the daemon holds them for its whole life while
+> `robin models forget` runs in another process. Both now revalidate against
+> the file.
 
 ### Changed
 

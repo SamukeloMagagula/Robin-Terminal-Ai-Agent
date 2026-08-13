@@ -162,6 +162,50 @@ Several limits keep this from turning into a long wait:
 
 Errors show the provider's own explanation, not just a status code — "400 (request failed)" becomes "400 (request failed) — The requested model is not supported.", which is the difference between a mystery and something you can act on.
 
+## The gateway
+
+Your conversations don't live in the terminal any more. They live in a small
+local daemon — the gateway — and `robin chat` is a client of it. So is the
+[Telegram bridge](#remote-control-telegram). The practical upshot:
+
+- **Close the terminal, reopen it in the same directory, and your conversation is still there.** No `/load`, nothing to remember to save.
+- **A message you send from Telegram and a message you type at the keyboard go to the same conversation.** Ask something from your phone, come back to your desk, and it's there — mid-thought, with the reply already streamed in.
+- **A tool call raised by a Telegram turn asks you at your keyboard.** The approval box says where the request came from and who sent it; the first terminal to answer wins. With no terminal attached it's refused, exactly as `robin serve` has always behaved.
+
+You don't have to start it. `robin chat` and `robin serve` each start one if
+none is running:
+
+```bash
+robin gateway status    # is one running, and where
+robin gateway start     # run one in the foreground (mostly for watching it work)
+robin gateway stop      # stop it — conversations are lost, transcripts are not
+```
+
+It listens on **127.0.0.1:18790** and nowhere else. `ROBIN_GATEWAY_PORT`
+overrides the port. Details live in `~/.robin/gateway.json` (mode 0600): the
+port, the pid, and a random token every client must present. Anything that can
+read that file can run commands as you, which is why it's 0600 and why the
+socket is loopback-only.
+
+**`/session` now shows more than it used to** — sessions opened by other
+surfaces, their working directory, whether a turn is running, and whether the
+session auto-approves tools. That last one is what `--allow-tools` became: a
+visible property of a conversation rather than an invisible flag on a process.
+
+**Two honest limitations:**
+
+- **Conversations do not survive `robin gateway stop`**, or a reboot. They're
+  in memory. Markdown transcripts under `~/.robin/chats/` and anything you
+  `/save` are unaffected — it's the live session that goes.
+- **A session's working directory is fixed when it's created.** Tools run
+  there. Move your terminal elsewhere and continue an old session, and commands
+  still run in the original directory. `/session new` starts one bound to where
+  you are now.
+
+If something looks wrong, `robin doctor` checks the gateway too — including the
+one failure worth naming: a daemon left running from before your last build,
+speaking a protocol this build doesn't. It tells you to run `robin gateway stop`.
+
 ## OpenRouter spend
 
 If you're logged into OpenRouter, `robin` shows what you've spent — on the startup banner, on the divider between turns, and in full via `/usage`:
@@ -401,9 +445,11 @@ A bot's username is public and anyone who finds it can message it. On the other 
 
 - **An empty `allow` list authorises nobody**, and the bridge refuses to start rather than sitting there quietly declining everything.
 - **Refused senders get no reply at all** — not even an error. Any response confirms there's a live Robin behind the bot, which is what someone probing it wants to learn.
-- **Tool calls that would prompt in the REPL are denied**, because there's nobody at the keyboard to read the request. The reply tells you what was declined. Read-only commands are unaffected — those never hit the approval gate.
+- **Tool calls go to a human, or they don't happen.** A request raised by a Telegram turn appears at any terminal attached to the same [gateway](#the-gateway), labelled with the channel and the sender who caused it. With no terminal attached there's nobody to ask, and it's declined — the reply says how many were. Read-only commands are unaffected; those never hit the approval gate.
 
-`--allow-tools` lifts that last restriction, and means exactly what it says: a chat message can then run commands and write files on your machine unattended. Only worth it when you trust every id on the allowlist and the machine it's running on.
+`--allow-tools` lifts that last restriction, and means exactly what it says: a chat message can then run commands and write files on your machine unattended, with nobody asked. Only worth it when you trust every id on the allowlist and the machine it's running on. It now marks the *session* rather than the process, so `/session` and `robin gateway status` show which conversations carry it.
+
+Each Telegram chat maps to a gateway session, which is why a conversation you start on your phone is waiting in your terminal when you sit down.
 
 ## Chat History
 
