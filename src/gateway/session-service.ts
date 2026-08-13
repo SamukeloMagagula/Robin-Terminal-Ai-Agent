@@ -1,5 +1,13 @@
+import { randomUUID } from 'node:crypto';
 import type { Message, Provider } from '../providers/types.js';
-import type { AttachResult, GatewayEvent, SessionSnapshot } from './protocol.js';
+import type {
+  ApprovalOrigin,
+  AttachResult,
+  GatewayEvent,
+  PromptAccepted,
+  SessionSnapshot,
+} from './protocol.js';
+import { runTurn } from '../repl/run-turn.js';
 import type { ApprovalRegistry } from './approvals.js';
 import { createSession, type Session } from '../repl/session.js';
 import type { UnsupportedModelStore } from '../providers/unsupported-models.js';
@@ -30,8 +38,15 @@ interface SessionRecord {
   autoApprove: boolean;
   /** Turns waiting or running. A new prompt queues behind the tail. */
   queue: Promise<void>;
-  queued: number;
-  busy: boolean;
+  /**
+   * Turns accepted and not yet finished, including the one running.
+   *
+   * One counter rather than a `busy` flag and a `queued` count kept in step:
+   * `sendPrompt` returns before its turn begins, so a flag set inside the turn
+   * would report a session as idle in the window where a client has just been
+   * told its prompt was accepted.
+   */
+  pending: number;
 }
 
 /**
@@ -48,6 +63,8 @@ interface SessionRecord {
  */
 export class SessionService {
   private readonly records = new Map<number, SessionRecord>();
+  /** In-flight turns, so an interrupt can find the one it means. */
+  private readonly running = new Map<string, AbortController>();
   private nextId = 1;
 
   constructor(private readonly deps: SessionServiceDeps) {}
@@ -75,8 +92,7 @@ export class SessionService {
       cwd: params.cwd,
       autoApprove: params.autoApprove ?? false,
       queue: Promise.resolve(),
-      queued: 0,
-      busy: false,
+      pending: 0,
     });
     return this.snapshot(id);
   }
@@ -152,9 +168,137 @@ export class SessionService {
       autoApprove: record.autoApprove,
       turnCount: session.turnCount,
       systemPrompt: session.systemPrompt,
-      busy: record.busy,
-      queued: record.queued,
+      busy: record.pending > 0,
+      // Everything behind whichever turn is at the head of the queue.
+      queued: Math.max(0, record.pending - 1),
     };
+  }
+
+  /**
+   * Queues a prompt and returns immediately.
+   *
+   * The queue is per session, and the reason is not politeness: two messages
+   * arriving during a turn would otherwise both mutate one history array and
+   * interleave into nonsense. bridge.ts has always done this per chat; here it
+   * covers every surface at once, which is the point of a shared session.
+   */
+  sendPrompt(id: number, text: string, origin: ApprovalOrigin): PromptAccepted {
+    const record = this.record(id);
+    const turnId = randomUUID();
+    const queuePosition = record.pending;
+    record.pending += 1;
+
+    record.queue = record.queue
+      .catch(() => {})
+      .then(() => this.runOne(id, turnId, text, origin));
+
+    return { turnId, queuePosition };
+  }
+
+  /** False when that turn has already finished, or never existed. */
+  interrupt(turnId: string): boolean {
+    const controller = this.running.get(turnId);
+    if (!controller) return false;
+    controller.abort();
+    return true;
+  }
+
+  /** Resolves once nothing is queued. For shutdown, and for tests. */
+  async idle(): Promise<void> {
+    await Promise.all(
+      [...this.records.values()].map((record) => record.queue.catch(() => {}))
+    );
+  }
+
+  private async runOne(
+    id: number,
+    turnId: string,
+    text: string,
+    origin: ApprovalOrigin
+  ): Promise<void> {
+    const record = this.records.get(id);
+    // The session may have been closed while this sat in the queue.
+    if (!record) return;
+
+    const { session } = record;
+    const controller = new AbortController();
+    this.running.set(turnId, controller);
+
+    this.deps.emit(id, {
+      kind: 'turn.started',
+      turnId,
+      providerName: session.provider.name,
+      model: session.model,
+    });
+    this.deps.approvals.beginTurn(id);
+
+    try {
+      const result = await runTurn(session, text, {
+        signal: controller.signal,
+        cwd: record.cwd,
+        // Without this runTurn falls back to the real provider registry, so a
+        // daemon built with a restricted set of providers would quietly reach
+        // past it — and a test would make live network calls.
+        providers: this.deps.providers,
+        confirm: this.deps.approvals.confirmFor(id, origin, record.autoApprove),
+        unsupportedStore: this.deps.stores.unsupported,
+        contextLimits: this.deps.stores.contextLimits,
+        memory: this.deps.stores.memory,
+        skills: this.deps.stores.skills,
+        onText: (delta) => this.deps.emit(id, { kind: 'text', turnId, delta }),
+        onThinking: (delta) => this.deps.emit(id, { kind: 'thinking', turnId, delta }),
+        onAutoApproved: (command) =>
+          this.deps.emit(id, { kind: 'tool.auto_approved', turnId, command }),
+        onOutput: (chunk) => this.deps.emit(id, { kind: 'tool.output', turnId, chunk }),
+        onTrim: ({ dropped, limit }) =>
+          this.deps.emit(id, { kind: 'trim', turnId, dropped, limit }),
+        onFallback: ({ error, next }) =>
+          this.deps.emit(id, {
+            kind: 'fallback',
+            turnId,
+            message: error.message,
+            providerName: next.provider.name,
+            model: next.model,
+          }),
+      });
+
+      if (result.provider.id !== session.provider.id || result.model !== session.model) {
+        // Fallback rescued the turn on another model. The session follows it,
+        // exactly as the REPL has always done, and every attached client is
+        // told — otherwise their status line quietly becomes a lie.
+        session.provider = result.provider;
+        session.model = result.model;
+        this.deps.emit(id, { kind: 'session.changed', snapshot: this.snapshot(id) });
+      }
+
+      await session.chatLog.write(session.provider.name, session.model, session.history);
+
+      this.deps.emit(id, {
+        kind: 'turn.finished',
+        turnId,
+        ok: result.ok,
+        aborted: result.aborted ?? false,
+        providerName: result.provider.name,
+        model: result.model,
+        error: result.error?.message,
+      });
+    } catch (err) {
+      // runTurn reports failure in its result rather than throwing, so this is
+      // a bug or a store failure. It must still close the turn out: a client
+      // waiting on turn.finished would otherwise wait for good.
+      this.deps.emit(id, {
+        kind: 'turn.finished',
+        turnId,
+        ok: false,
+        aborted: false,
+        providerName: session.provider.name,
+        model: session.model,
+        error: (err as Error).message,
+      });
+    } finally {
+      this.running.delete(turnId);
+      record.pending = Math.max(0, record.pending - 1);
+    }
   }
 
   /** Test-only seam: history is otherwise written only by a turn. */
