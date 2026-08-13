@@ -109,9 +109,19 @@ export class GatewayServer {
     return offered;
   }
 
+  /**
+   * Tells clients an approval is settled.
+   *
+   * Wider than the request that raised it: approvers need it to close their
+   * box, and everyone attached to the session needs it because what happened
+   * to a tool call is part of that conversation's story. The Telegram bridge
+   * cannot approve anything, and would otherwise have no way to tell the user
+   * their request was refused.
+   */
   resolvedApproval(pending: PendingApproval, approved: boolean, by: string): void {
     for (const client of this.clients.values()) {
-      if (!client.connected || !client.canApprove) continue;
+      if (!client.connected) continue;
+      if (!client.canApprove && !client.attached.has(pending.sessionId)) continue;
       this.write(client, {
         type: 'event',
         sessionId: pending.sessionId,
@@ -221,6 +231,8 @@ export class GatewayServer {
         return this.deps.sessions.update(Number(params.id), params.patch as never);
       case 'session.clear':
         return this.deps.sessions.clear(Number(params.id));
+      case 'session.snapshot':
+        return this.deps.sessions.snapshot(Number(params.id));
       case 'session.history':
         return {
           history: this.deps.sessions.history(Number(params.id)),

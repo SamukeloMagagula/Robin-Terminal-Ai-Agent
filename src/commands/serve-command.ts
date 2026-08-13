@@ -7,6 +7,8 @@ import { TelegramTransport } from '../channels/telegram.js';
 import { ChannelBridge } from '../channels/bridge.js';
 import type { ChannelTransport } from '../channels/types.js';
 import { UserFacingError } from '../startup/bootstrap.js';
+import { ensureGateway } from '../gateway/ensure.js';
+import { GatewayClient } from '../gateway/client.js';
 
 /**
  * Channels Robin can be driven from.
@@ -129,15 +131,38 @@ export async function runServe(channelName: string, options: ServeOptions): Prom
   const provider = await resolveProvider(options.provider ?? config.provider);
   const model = await resolveModel(provider, options.model ?? config.model);
 
+  // The bridge is a gateway client like the terminal is. Starting one if none
+  // is running means `robin serve` works on its own, and joining one that is
+  // already up means a terminal and this bridge share live conversations.
+  const info = await ensureGateway();
+  const client = await GatewayClient.connect({
+    port: info.port,
+    token: info.token,
+    kind: 'channel',
+    // A chat client has nobody at a keyboard. Saying so is what makes the
+    // gateway route approvals to an attached terminal instead, and refuse them
+    // outright when there is none.
+    canApprove: false,
+    cwd: process.cwd(),
+  });
+  console.log(mutedColor(`Using the gateway on 127.0.0.1:${info.port}.`));
+
   const bridge = new ChannelBridge({
     transport,
-    provider,
+    client,
+    providerId: provider.id,
     model,
     allowlist: config.allow,
     allowTools: options.allowTools,
   });
 
-  await bridge.start(controller.signal);
+  try {
+    await bridge.start(controller.signal);
+  } finally {
+    // The gateway keeps running: a conversation must not end because the
+    // bridge did. `robin gateway stop` ends it.
+    await client.close();
+  }
   console.log(mutedColor('Bridge stopped.'));
 }
 
@@ -149,7 +174,8 @@ export function serveHelpText(): string {
     'Config lives in ~/.robin/channels.json. The bot token may instead come from',
     `an environment variable — ${tokenEnvVar('telegram')} for Telegram.`,
     '',
-    'Tool calls that would prompt in the REPL are DENIED by default, because there',
-    'is nobody at the keyboard to approve them. --allow-tools opts in.',
+    'Tool calls that would prompt in the REPL are offered to any terminal attached',
+    'to the same gateway, and DENIED when there is none — because then there really',
+    'is nobody at a keyboard. --allow-tools runs them unattended instead.',
   ].join('\n');
 }

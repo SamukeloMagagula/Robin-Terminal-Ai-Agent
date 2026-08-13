@@ -22,6 +22,9 @@ export interface GatewayHarness {
   client: GatewayClient;
   sessions: SessionService;
   session: SessionSnapshot;
+  port: number;
+  /** Connects another client to the same gateway — a second terminal, or a channel. */
+  connect(options: { kind: 'terminal' | 'channel'; canApprove: boolean }): Promise<GatewayClient>;
   close(): Promise<void>;
 }
 
@@ -86,12 +89,27 @@ export async function startHarness(
   });
   await client.request('session.attach', { id: session.id });
 
+  const extra: GatewayClient[] = [];
+
   return {
     client,
     sessions,
     session,
+    port,
+    async connect({ kind, canApprove }): Promise<GatewayClient> {
+      const another = await GatewayClient.connect({
+        port,
+        token: 'test-token',
+        kind,
+        canApprove,
+        cwd: options.cwd ?? '.',
+      });
+      extra.push(another);
+      return another;
+    },
     async close(): Promise<void> {
-      await client.close();
+      for (const another of extra) await another.close().catch(() => {});
+      await client.close().catch(() => {});
       await server.close();
     },
   };

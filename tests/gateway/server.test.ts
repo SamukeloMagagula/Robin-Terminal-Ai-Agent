@@ -392,6 +392,52 @@ describe('GatewayServer events', () => {
     });
   });
 
+  // A channel client cannot approve anything, but it raised the turn and has
+  // to be able to tell its user what happened to the tool call.
+  it('tells a non-approving client attached to the session that an approval settled', async () => {
+    const channel = await connected({ kind: 'channel', canApprove: false });
+    await attached(channel, 1);
+    const received = next(channel);
+
+    server.resolvedApproval(
+      {
+        id: 'ap-5',
+        sessionId: 1,
+        request: { kind: 'run_command', message: 'Run "ls"?' },
+        origin: { surface: 'telegram' },
+      },
+      false,
+      'nobody attached'
+    );
+
+    expect(await received).toMatchObject({
+      event: { kind: 'approval.resolved', approvalId: 'ap-5', approved: false },
+    });
+  });
+
+  it('does not tell a client with no stake in that session', async () => {
+    const bystander = await connected({ kind: 'channel', canApprove: false });
+    const seen: Frame[] = [];
+    bystander.on('message', (data) => {
+      const frame = parseFrame(String(data));
+      if (frame) seen.push(frame);
+    });
+
+    server.resolvedApproval(
+      {
+        id: 'ap-6',
+        sessionId: 77,
+        request: { kind: 'run_command', message: 'Run "ls"?' },
+        origin: { surface: 'terminal' },
+      },
+      true,
+      'someone'
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(seen).toEqual([]);
+  });
+
   it('does not count a client that has gone away', async () => {
     const socket = await connected({ canApprove: true });
     await new Promise<void>((resolve) => {
