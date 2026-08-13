@@ -158,6 +158,8 @@ Several limits keep this from turning into a long wait:
 - **A quota refusal skips the rest of that provider.** Rate limits and exhausted credit are account-wide, so every sibling model would refuse identically.
 - **Models a provider rejects as unsupported are remembered** in `~/.robin/unsupported-models.json` and never offered again — in the picker or the fallback chain. Only explicit "model not supported" / "not found" style refusals are recorded; a rate limit is transient and never is. Delete that file to start over.
 
+- **"Too long" is fixed, not fallen back from.** A prompt refused for exceeding the context window says nothing about the model — it will take the same conversation once it is shorter, and the next model down the chain has a different window anyway. Robin reads the limit out of the refusal, records it in `~/.robin/context-limits.json`, and immediately retries the same model with the oldest messages dropped. Every later turn on that model is trimmed to fit before it is sent, with a note saying how much was dropped. The system prompt and the message you just typed are always kept, and a tool result is never separated from the call it answers. Your session history is untouched — this is about what gets sent, not about forgetting the conversation.
+
 Errors show the provider's own explanation, not just a status code — "400 (request failed)" becomes "400 (request failed) — The requested model is not supported.", which is the difference between a mystery and something you can act on.
 
 ## OpenRouter spend
@@ -431,13 +433,16 @@ When the model wants to write a file or run a command that needs approval, you'l
 ╭──────────────────────────╮
 │ Run "npm install lodash"? │
 ╰──────────────────────────╯
-? Run it? (yna)
+? Run it? (ynax)
   y) yes, this once
   n) no
   a) yes, and stop asking about commands this session
+  x) no, and stop asking about commands for this reply
 ```
 
 `a` remembers your answer for that *kind* of action — commands, file writes, or outside-directory reads — until you restart `robin`. Declined actions are reported back to the model so it can adjust instead of silently failing.
+
+**No is remembered too, for the rest of the reply.** A refusal reads to a model as a failed attempt, and the reflex after a failed attempt is another attempt: one session put the same skill proposal up four times and seven variants of the same search command, each a fresh box to answer. So an *identical* request that comes back is refused silently, `x` refuses that whole kind for the rest of the reply, and the refusal the model receives says outright not to retry it in another form. All of it is scoped to the one reply — the next thing you type may be exactly a request to do the thing you just refused.
 
 ### Read-only commands run without asking
 

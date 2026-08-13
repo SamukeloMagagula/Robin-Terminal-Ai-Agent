@@ -3,8 +3,11 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { runTurn } from '../../src/repl/run-turn';
 import { createSession } from '../../src/repl/session';
-import type { Provider } from '../../src/providers/types';
+import type { Message, Provider } from '../../src/providers/types';
 import { UnsupportedModelStore } from '../../src/providers/unsupported-models';
+import { ContextLimitStore } from '../../src/providers/context-limits';
+import { ChatRequestError } from '../../src/providers/chat-error';
+import { budgetFor, estimateMessagesTokens } from '../../src/repl/trim-history';
 
 // Note: UnsupportedModelStore's constructor takes a *file* path, not a
 // directory (see src/providers/unsupported-models.ts). Pointing it at a
@@ -150,6 +153,108 @@ describe('runTurn', () => {
     expect(result.aborted).toBe(true);
     expect(rescue.chat).not.toHaveBeenCalled();
     expect(session.history[1].content).toContain('half an ans');
+  });
+
+  describe('context windows', () => {
+    function throwawayLimits(): ContextLimitStore {
+      return new ContextLimitStore(
+        path.join(os.tmpdir(), `robin-limits-${Date.now()}-${Math.random()}.json`)
+      );
+    }
+
+    const overflow = (): ChatRequestError =>
+      new ChatRequestError('400 — too long', {
+        status: 400,
+        serverMessage: 'prompt token count of 12660 exceeds the limit of 12288',
+      });
+
+    /** Fails with the given error on the first call, answers on the second. */
+    function flakyProvider(error: Error): Provider {
+      let calls = 0;
+      return {
+        id: 'copilot',
+        name: 'GitHub Copilot',
+        isAuthenticated: vi.fn().mockResolvedValue(true),
+        login: vi.fn(),
+        logout: vi.fn(),
+        listModels: vi.fn().mockResolvedValue([]),
+        chat: vi.fn().mockImplementation(async function* () {
+          calls += 1;
+          if (calls === 1) throw error;
+          yield { type: 'text', text: 'answered after trimming' };
+        }),
+      } as unknown as Provider;
+    }
+
+    it('learns the limit and retries the same model instead of falling back', async () => {
+      const provider = flakyProvider(overflow());
+      const rescue = fakeProvider('gemini', 'Gemini', { text: 'should not be needed' });
+      const contextLimits = throwawayLimits();
+      const session = createSession(provider, 'gpt-4o');
+      // Long enough that trimming has something to drop.
+      session.history = Array.from({ length: 20 }, (_, i) => ({
+        role: i % 2 === 0 ? ('user' as const) : ('assistant' as const),
+        content: 'x'.repeat(4000),
+      }));
+
+      const result = await runTurn(
+        session,
+        'hi',
+        options({ providers: [rescue], contextLimits })
+      );
+
+      expect(result.ok).toBe(true);
+      expect(result.provider.id).toBe('copilot');
+      expect(rescue.chat).not.toHaveBeenCalled();
+      expect(await contextLimits.get('copilot', 'gpt-4o')).toBe(12288);
+    });
+
+    it('trims a known-oversized history before sending it', async () => {
+      const provider = fakeProvider('copilot', 'GitHub Copilot', { text: 'ok' });
+      const contextLimits = throwawayLimits();
+      await contextLimits.record('copilot', 'gpt-4o', 12288);
+      const session = createSession(provider, 'gpt-4o');
+      session.history = Array.from({ length: 20 }, (_, i) => ({
+        role: i % 2 === 0 ? ('user' as const) : ('assistant' as const),
+        content: 'x'.repeat(4000),
+      }));
+      const onTrim = vi.fn();
+
+      await runTurn(session, 'and now?', options({ contextLimits, onTrim }));
+
+      expect(onTrim).toHaveBeenCalledWith(
+        expect.objectContaining({ limit: 12288, dropped: expect.any(Number) })
+      );
+      const sent = (provider.chat as unknown as { mock: { calls: unknown[][] } }).mock
+        .calls[0][1] as Message[];
+      expect(estimateMessagesTokens(sent)).toBeLessThanOrEqual(budgetFor(12288));
+      // The system prompt and the message just typed both survive.
+      expect(sent[0].role).toBe('system');
+      expect(sent[sent.length - 1].content).toBe('and now?');
+      // The full history is kept on the session — trimming is about what gets
+      // sent, not about forgetting the conversation.
+      expect(session.history.length).toBeGreaterThan(sent.length);
+    });
+
+    it('gives up on the model rather than looping when trimming does not help', async () => {
+      const alwaysTooLong = fakeProvider('copilot', 'GitHub Copilot', { error: overflow() });
+      const rescue = fakeProvider('ollama', 'Ollama (local)', {
+        text: 'rescued',
+        models: ['llama3.1:latest'],
+      });
+      const session = createSession(alwaysTooLong, 'gpt-4o');
+
+      const result = await runTurn(
+        session,
+        'hi',
+        options({ providers: [alwaysTooLong, rescue], contextLimits: throwawayLimits() })
+      );
+
+      expect(result.ok).toBe(true);
+      expect(result.provider.id).toBe('ollama');
+      // One original attempt plus exactly one retry with a trimmed history.
+      expect(alwaysTooLong.chat).toHaveBeenCalledTimes(2);
+    });
   });
 
   it('sends no tools when tools are disabled for the turn', async () => {

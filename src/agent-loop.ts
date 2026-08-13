@@ -61,6 +61,18 @@ export async function runAgentTurn(
     workingHistory = [...workingHistory, assistantMessage];
 
     if (toolCalls.length === 0) {
+      // A round can end with neither text nor tool calls: the model emitted
+      // only reasoning, or only a wrapper tag whose body was empty. Returning
+      // as-is leaves the user staring at a bare prompt with no way to tell a
+      // silent answer from a crash, so say which of the two it was.
+      if (text.trim() === '') {
+        const note =
+          round === 0
+            ? `[${model} returned an empty reply — ask again, or /model to switch.]`
+            : `[${model} ran its tools but produced no answer — ask again, or /model to switch.]`;
+        assistantMessage.content = note;
+        deps.onText(note);
+      }
       return newMessages;
     }
 

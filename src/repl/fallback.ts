@@ -79,9 +79,7 @@ export async function buildFallbackCandidates(
     if (!(await safeIsAuthenticated(provider))) continue;
     const models = (await usable(provider)).filter(isChatCapableModel);
     if (models.length > 0) otherModels.push({ provider, models });
-  }
-
-  for (let round = 0; candidates.length < MAX_FALLBACK_CANDIDATES; round++) {
+  }  for (let round = 0; candidates.length < MAX_FALLBACK_CANDIDATES; round++) {
     const added = otherModels.filter((entry) => entry.models.length > round);
     if (added.length === 0) break;
     for (const entry of added) {

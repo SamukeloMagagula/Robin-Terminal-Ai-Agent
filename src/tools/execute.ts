@@ -17,6 +17,15 @@ export {
 } from './sensitive-paths.js';
 
 const MAX_OUTPUT_LENGTH = 4000;
+/**
+ * Appended to every decline. "Declined by the user" on its own reads to a model
+ * as a failed attempt, and the reflex after a failed attempt is another attempt
+ * — one session produced the same skill proposal four times and seven variants
+ * of a command, each one a fresh prompt for the user to answer. The refusal has
+ * to say that retrying is not the way forward.
+ */
+const DECLINE_GUIDANCE =
+  ' Do not retry it or ask again in a different form; continue without it and answer from what you already have.';
 const MAX_PREVIEW_LENGTH = 500;
 const COMMAND_TIMEOUT_MS = 120_000;
 
@@ -173,7 +182,7 @@ async function readFileTool(
       message: `Read ${verdict.realPath}?\n(outside the current working directory)`,
     });
     if (!approved) {
-      return `Reading ${filePath} was declined by the user.`;
+      return `Reading ${filePath} was declined by the user.${DECLINE_GUIDANCE}`;
     }
   }
 
@@ -212,7 +221,7 @@ async function writeFileTool(
     message: `Write to ${verdict.realPath}?\n---\n${preview}\n---`,
   });
   if (!approved) {
-    return `Write to ${filePath} was declined by the user.`;
+    return `Write to ${filePath} was declined by the user.${DECLINE_GUIDANCE}`;
   }
   try {
     await fs.mkdir(path.dirname(verdict.realPath), { recursive: true });
@@ -297,7 +306,7 @@ async function createSkillTool(
       `Save a new skill "${name}"?\n${description}\n\n` +
       `${body.length > MAX_PREVIEW_LENGTH ? `${body.slice(0, MAX_PREVIEW_LENGTH)}...` : body}`,
   });
-  if (!approved) return `Saving skill "${name}" was declined by the user.`;
+  if (!approved) return `Saving skill "${name}" was declined by the user.${DECLINE_GUIDANCE}`;
 
   await skills.write({ name, description, body });
   return `Saved skill "${name}". It will be offered in future sessions.`;
@@ -331,7 +340,7 @@ async function runMcpTool(
       '(provided by an external server — Robin cannot tell what it does)',
   });
   if (!approved) {
-    return `Running MCP tool "${name}" was declined by the user.`;
+    return `Running MCP tool "${name}" was declined by the user.${DECLINE_GUIDANCE}`;
   }
 
   const result = await mcp.call(name, args);
@@ -360,7 +369,7 @@ async function runCommandTool(
       : '';
     const approved = await confirm({ kind: 'run_command', message: `${warning}Run "${command}"?` });
     if (!approved) {
-      return `Command "${command}" was declined by the user.`;
+      return `Command "${command}" was declined by the user.${DECLINE_GUIDANCE}`;
     }
   }
   // spawn rather than exec, so output can be shown as it arrives. A long build

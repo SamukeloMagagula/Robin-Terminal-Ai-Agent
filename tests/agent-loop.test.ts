@@ -93,6 +93,60 @@ describe('runAgentTurn when aborted mid-stream', () => {
     expect(messages[0].content).toContain('[interrupted]');
   });
 
+  it('says so when the model replies with nothing at all', async () => {
+    const provider = fakeProvider([[]]);
+    const onText = vi.fn();
+
+    const messages = await runAgentTurn(provider, 'gpt-5.6-terra', [], [], {
+      confirm: async () => true,
+      executeTool: vi.fn(),
+      onText,
+    });
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].content).toContain('gpt-5.6-terra');
+    expect(messages[0].content).toContain('empty reply');
+    expect(onText).toHaveBeenCalledWith(expect.stringContaining('empty reply'));
+  });
+
+  it('says so when a reply is only reasoning', async () => {
+    const provider = fakeProvider([[{ type: 'thinking', text: 'hmm...' }]]);
+    const onText = vi.fn();
+
+    await runAgentTurn(provider, 'm', [], [], {
+      confirm: async () => true,
+      executeTool: vi.fn(),
+      onText,
+      onThinking: vi.fn(),
+    });
+
+    expect(onText).toHaveBeenCalledWith(expect.stringContaining('empty reply'));
+  });
+
+  it('says so when tools ran but no answer followed', async () => {
+    const toolCall: ToolCall = { id: 'c1', name: 'run_command', arguments: '{"command":"dir"}' };
+    const provider = fakeProvider([[{ type: 'tool_call', toolCall }], []]);
+    const onText = vi.fn();
+
+    const messages = await runAgentTurn(provider, 'm', [], [], {
+      confirm: async () => true,
+      executeTool: vi.fn().mockResolvedValue('files'),
+      onText,
+    });
+
+    expect(messages[messages.length - 1].content).toContain('produced no answer');
+  });
+
+  it('leaves a normal reply alone', async () => {
+    const provider = fakeProvider([[{ type: 'text', text: 'a real answer' }]]);
+    const messages = await runAgentTurn(provider, 'm', [], [], {
+      confirm: async () => true,
+      executeTool: vi.fn(),
+      onText: vi.fn(),
+    });
+    expect(messages[0].content).toBe('a real answer');
+  });
+
   it('still throws a genuine failure rather than swallowing it', async () => {
     const provider = {
       chat: async function* () {

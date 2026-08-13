@@ -36,5 +36,18 @@ export function environmentPrompt(cwd: string = process.cwd()): string {
     '',
     'Prefer commands available on this platform. Do not suggest commands from',
     'other operating systems.',
+    '',
+    // Without this, a general-knowledge question gets treated as a research
+    // task about the working directory: an exam-difficulty question once sent
+    // a model through dir, find, grep and a proposal to look the exam up in a
+    // materials database. Tools act on this machine; they are not a search
+    // engine, and most questions are not about the files in front of you.
+    'The tools act on this machine. Use them only when the answer depends on',
+    'something here — a file, the state of the system, the result of running',
+    'something. Answer general questions from your own knowledge, directly. If',
+    'you do not know, say so; searching the working directory will not help.',
+    '',
+    'If the user declines a command or a file write, do not retry it in another',
+    'form. Take the decline as an answer and continue without it.',
   ].join('\n');
 }

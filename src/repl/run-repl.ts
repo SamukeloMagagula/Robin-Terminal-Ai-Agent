@@ -2,6 +2,11 @@ import chalk from 'chalk';
 import { expand } from '@inquirer/prompts';
 import { parseCommand, type ParsedCommand } from './parse-command.js';
 import { type ConfirmRequest } from '../tools/execute.js';
+import {
+  createApprovalGate,
+  type ApprovalAnswer,
+  type ApprovalWording,
+} from './approval-gate.js';
 import { printBanner, printConnectionLine } from '../ui/banner.js';
 import { gatherTelemetry } from '../ui/hud/telemetry.js';
 import { TOOL_DEFINITIONS } from '../tools/definitions.js';
@@ -16,6 +21,7 @@ import { listenForInterrupt } from './interrupt.js';
 import { readSlashAwareLine } from './slash-prompt.js';
 import { addToInputHistory, InputHistoryStore } from './input-history.js';
 import { UnsupportedModelStore } from '../providers/unsupported-models.js';
+import { ContextLimitStore } from '../providers/context-limits.js';
 import { PersonalityTrustStore } from '../personality-trust.js';
 import { TrustStore } from '../trust-store.js';
 import { loadMcpConfig } from '../mcp/config.js';
@@ -80,13 +86,6 @@ const HANDLERS: Partial<Record<ParsedCommand['type'], CommandHandler>> = {
   workflow: handleWorkflow,
 };
 
-const APPROVAL_WORDING: Record<ConfirmRequest['kind'], { question: string; scope: string }> = {
-  run_command: { question: 'Run it?', scope: 'commands' },
-  write_file: { question: 'Write it?', scope: 'file writes' },
-  read_file: { question: 'Read it?', scope: 'reads outside this directory' },
-  mcp_tool: { question: 'Run it?', scope: 'MCP tools' },
-};
-
 /**
  * Loads mcp.json, asks about anything not already trusted, and connects what
  * survives. Returns an empty registry when there is nothing configured, so the
@@ -133,37 +132,30 @@ async function startMcpServers(): Promise<McpRegistry> {
   return registry;
 }
 
-/**
- * Approval gate for one session. Remembering a decision per *kind* is what
- * makes this bearable: a model exploring a project issues a stream of
- * near-identical requests, and being asked about each one individually trains
- * the user to approve without reading — the opposite of what the gate is for.
- */
-function createApprovalGate(): (request: ConfirmRequest) => Promise<boolean> {
-  const alwaysAllow = new Set<ConfirmRequest['kind']>();
-
-  return async (request: ConfirmRequest): Promise<boolean> => {
-    if (alwaysAllow.has(request.kind)) return true;
-
-    const { question, scope } = APPROVAL_WORDING[request.kind];
-    console.log(`\n${box(request.message.split('\n'))}`);
-    const answer = await expand<'yes' | 'no' | 'always'>({
-      message: question,
-      default: 'n',
-      choices: [
-        { key: 'y', name: 'yes, this once', value: 'yes' },
-        { key: 'n', name: 'no', value: 'no' },
-        { key: 'a', name: `yes, and stop asking about ${scope} this session`, value: 'always' },
-      ],
-    });
-
-    if (answer === 'always') {
-      alwaysAllow.add(request.kind);
-      console.log(mutedColor(`Will not ask about ${scope} again until you restart Robin.`));
-      return true;
-    }
-    return answer === 'yes';
-  };
+/** Draws the request and reads the answer. The policy lives in approval-gate.ts. */
+function askForApprovalOnConsole(
+  request: ConfirmRequest,
+  wording: ApprovalWording
+): Promise<ApprovalAnswer> {
+  console.log(`\n${box(request.message.split('\n'))}`);
+  return expand<ApprovalAnswer>({
+    message: wording.question,
+    default: 'n',
+    choices: [
+      { key: 'y', name: 'yes, this once', value: 'yes' },
+      { key: 'n', name: 'no', value: 'no' },
+      {
+        key: 'a',
+        name: `yes, and stop asking about ${wording.scope} this session`,
+        value: 'always',
+      },
+      {
+        key: 'x',
+        name: `no, and stop asking about ${wording.scope} for this reply`,
+        value: 'never',
+      },
+    ],
+  });
 }
 
 export async function runRepl(deps: ReplDeps): Promise<void> {
@@ -178,9 +170,14 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   let inputHistory: string[] = await inputHistoryStore.load();
   const conversationStore = new ConversationStore();
   const skillStore = new SkillStore();
-  const askForApproval = createApprovalGate();
+  const approvals = createApprovalGate({
+    ask: askForApprovalOnConsole,
+    notify: (message) => console.log(mutedColor(message)),
+  });
+  const askForApproval = approvals.confirm;
   const usageCache = new UsageCache();
   const unsupportedStore = new UnsupportedModelStore();
+  const contextLimits = new ContextLimitStore();
   const personalityTrust = new PersonalityTrustStore();
   const memoryStore = new MemoryStore();
   const workflowStore = new WorkflowStore();
@@ -298,12 +295,22 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     if (!cmd.arg) continue;
 
     process.stdout.write(assistantColor('» '));
+    // Refusals are remembered only until the user speaks again — this is where
+    // "again" happens.
+    approvals.beginTurn();
     const interrupt = listenForInterrupt();
     const result = await runTurn(sessions.active, cmd.arg, {
       signal: interrupt.signal,
       onText: (text) => process.stdout.write(text),
       confirm: askForApproval,
       unsupportedStore,
+      contextLimits,
+      onTrim: ({ dropped, limit }) =>
+        console.log(
+          mutedColor(
+            `\n  Dropped the oldest ${dropped} message(s) to fit ${limit} tokens. /clear starts fresh.`
+          )
+        ),
       // Read-only commands run unannounced otherwise; showing them keeps the
       // user aware of what Robin actually did.
       onAutoApproved: (command) => console.log(mutedColor(`\n  $ ${command}`)),

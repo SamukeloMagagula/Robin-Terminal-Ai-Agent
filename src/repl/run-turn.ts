@@ -15,13 +15,20 @@ import { executeTool } from '../tools/execute.js';
 import { TOOL_DEFINITIONS } from '../tools/definitions.js';
 import { buildFallbackCandidates, type FallbackCandidate } from './fallback.js';
 import { isModelUnsupported, isProviderQuotaExhausted } from '../providers/chat-error.js';
+import { isContextOverflow, parseContextLimit } from '../providers/context-limit.js';
+import { ContextLimitStore } from '../providers/context-limits.js';
 import { UnsupportedModelStore } from '../providers/unsupported-models.js';
+import { estimateMessagesTokens, trimHistory } from './trim-history.js';
 import { listProviders } from '../providers/index.js';
 
 export interface TurnOptions {
   onText: (text: string) => void;
   confirm: ConfirmFn;
   unsupportedStore: UnsupportedModelStore;
+  /** Learned context windows. Defaults to the real store. */
+  contextLimits?: ContextLimitStore;
+  /** Called when history had to be dropped to fit the model's context window. */
+  onTrim?: (info: { dropped: number; limit: number }) => void;
   /** Printed when a read-only command runs without asking. */
   onAutoApproved?: (command: string) => void;
   /** Live command output, for display only — the model still gets the whole result. */
@@ -96,6 +103,7 @@ export async function runTurn(
   const useTools = options.tools ?? session.toolsEnabled;
   const allowFallback = options.fallback ?? true;
   const providers = options.providers ?? listProviders();
+  const contextLimits = options.contextLimits ?? new ContextLimitStore();
 
   let activeProvider = session.provider;
   let activeModel = session.model;
@@ -106,16 +114,28 @@ export async function runTurn(
   // rate-limit window can reopen between messages.
   const quotaBlocked = new Set<string>();
 
+  // Models whose context window has already been re-measured this turn. One
+  // correction is a fix; a second would mean the trim did not work, and looping
+  // on it would re-send the same oversized prompt forever.
+  const remeasured = new Set<string>();
+
   while (true) {
     try {
       const messagesForTurn: Message[] = [
         { role: 'system', content: buildSystemPrompt(session, { nudge }) },
         ...session.history,
       ];
+      // A limit is only known once this model has refused something for being
+      // too long. Until then the history goes out whole, as it always did.
+      const limit = await contextLimits.get(activeProvider.id, activeModel);
+      const trimmed = limit ? trimHistory(messagesForTurn, limit) : undefined;
+      if (limit && trimmed && trimmed.dropped > 0) {
+        options.onTrim?.({ dropped: trimmed.dropped, limit });
+      }
       const newMessages = await runAgentTurn(
         activeProvider,
         activeModel,
-        messagesForTurn,
+        trimmed?.messages ?? messagesForTurn,
         useTools
           ? [
               ...TOOL_DEFINITIONS,
@@ -150,6 +170,30 @@ export async function runTurn(
       };
     } catch (err) {
       lastError = err as Error;
+      // Too long is not the same as unavailable: this model will take this
+      // conversation once it is shorter. Learn the window, then retry the same
+      // model with the history trimmed — walking down the fallback chain would
+      // just discover that the next model has a different window.
+      if (isContextOverflow(err)) {
+        const key = `${activeProvider.id}:${activeModel}`;
+        const stated = parseContextLimit(err);
+        if (stated || !remeasured.has(key)) {
+          // When the provider did not say what the limit was, infer one from
+          // the prompt that was just rejected: it is known not to fit, so
+          // anything below it is a strictly better guess than the unknown.
+          const estimated = Math.floor(
+            estimateMessagesTokens([
+              { role: 'system', content: buildSystemPrompt(session, { nudge }) },
+              ...session.history,
+            ]) * 0.75
+          );
+          await contextLimits.record(activeProvider.id, activeModel, stated ?? estimated);
+        }
+        if (!remeasured.has(key)) {
+          remeasured.add(key);
+          continue;
+        }
+      }
       // A model the provider says it does not support will never work, so
       // remember it rather than retrying into the same wall.
       if (isModelUnsupported(err)) {

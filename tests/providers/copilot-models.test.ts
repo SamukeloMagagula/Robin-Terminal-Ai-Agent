@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { CopilotProvider } from '../../src/providers/copilot';
 import { AuthStore } from '../../src/auth-store';
+import { UnsupportedModelStore } from '../../src/providers/unsupported-models';
 
 /** Shape of the real GET /models response, trimmed to the fields we read. */
 function modelsBody(entries: { id: string; type: string }[]) {
@@ -33,7 +34,13 @@ describe('CopilotProvider.listModels', () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'copilot-models-'));
     const authStore = new AuthStore(path.join(dir, 'auth.json'));
     await authStore.set('copilot', { githubToken: 'gh-token' });
-    provider = new CopilotProvider(authStore);
+    // The second argument matters: without it the provider filters against the
+    // real ~/.robin/unsupported-models.json, and these expectations then depend
+    // on which models the machine running the tests has happened to try.
+    provider = new CopilotProvider(
+      authStore,
+      new UnsupportedModelStore(path.join(dir, 'unsupported.json'))
+    );
   });
 
   afterEach(() => {

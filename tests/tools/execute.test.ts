@@ -67,7 +67,7 @@ describe('executeTool', () => {
       call('write_file', { path: filePath, content: 'nope' }),
       async () => false
     );
-    expect(result).toBe(`Write to ${filePath} was declined by the user.`);
+    expect(result).toContain(`Write to ${filePath} was declined by the user.`);
     await expect(fs.access(filePath)).rejects.toThrow();
   });
 
@@ -95,7 +95,7 @@ describe('executeTool', () => {
       call('run_command', { command: 'node -e "process.exit(1)"' }),
       async () => false
     );
-    expect(result).toBe('Command "node -e "process.exit(1)"" was declined by the user.');
+    expect(result).toContain('Command "node -e "process.exit(1)"" was declined by the user.');
   });
 
   it('returns an error message for an unknown tool name', async () => {
