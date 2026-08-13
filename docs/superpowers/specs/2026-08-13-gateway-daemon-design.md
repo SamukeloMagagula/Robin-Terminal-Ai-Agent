@@ -59,13 +59,26 @@ shared but not live, which is not the success criterion.
 
 ### The daemon
 
-One process, `robin gateway`, bound to loopback only. It owns what is currently
-REPL-local state: `SessionList`, `MemoryStore`, `SkillStore`,
-`ConversationStore`, `UnsupportedModelStore`, `ContextLimitStore`,
-`RecallSearch`, the MCP registry, and the personality/trust load.
+One process, `robin gateway`, bound to loopback only. It owns the session state
+that was REPL-local — the open conversations and their histories — plus the
+stores a turn needs: `MemoryStore`, `SkillStore`, `UnsupportedModelStore`,
+`ContextLimitStore`.
 
-Those stores are file-backed and were never safe to have two writers on. The
-daemon makes single ownership real rather than incidental.
+> **Corrected during implementation.** This section originally claimed those
+> stores "were never safe to have two writers on", and Task 12 of the plan was
+> going to route every store-backed command through the daemon on that basis.
+> It is not true of the file-per-item stores: `MemoryStore` and `SkillStore`
+> never cached, so both processes have always read the same files and see each
+> other's writes immediately. Task 12 was dropped.
+>
+> It *was* true of the two stores that cache in memory,
+> `UnsupportedModelStore` and `ContextLimitStore` — and only once a daemon
+> existed to hold them across the lifetime of a `robin models forget` in
+> another process. Both now revalidate against the file rather than being
+> owned exclusively.
+>
+> `ConversationStore` and `RecallSearch` stayed with the REPL: nothing in the
+> daemon touches them.
 
 ### Transport
 

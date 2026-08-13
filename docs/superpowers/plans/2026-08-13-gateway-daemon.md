@@ -3602,7 +3602,34 @@ git commit -m "repl: session commands ask the gateway"
 
 ---
 
-### Task 12: Store-backed commands over RPC
+### Task 12: Store-backed commands over RPC — **DROPPED, not built**
+
+This task was written on a premise that does not hold. It exists to give the
+daemon "one owner for the stores too", but `MemoryStore` and `SkillStore` never
+cached: every `list()` and `read()` goes to disk, and both processes read the
+same directory. A memory the model writes inside the daemon already appears in
+`/memory` immediately. The remaining stores are REPL-only by nature — input
+history, the OpenRouter spend figure, the trust file, workflow definitions.
+
+Building it would have added a protocol surface, a round-trip per command and
+roughly 300 lines, for behaviour identical to what already happens.
+
+**It did surface a real bug next door, which was fixed instead.**
+`UnsupportedModelStore` and `ContextLimitStore` *do* cache in memory, and the
+gateway holds them for its whole life. `robin models forget` runs in a separate
+process: it cleared the file while the daemon kept serving its stale copy, so a
+model the user had just asked to retry stayed hidden until the gateway was
+restarted. Before the gateway this could not happen — the process holding the
+cache was the one you would restart anyway. Both stores now revalidate on
+mtime and size. See `tests/providers/store-staleness.test.ts`.
+
+**When this task becomes real:** a browser or remote client cannot read
+`~/.robin` directly, so a control UI would need these methods. That is the
+milestone to build them in, against a client that actually needs them.
+
+The original plan follows, unbuilt.
+
+### Task 12 (original, unbuilt): Store-backed commands over RPC
 
 **Files:**
 - Modify: `src/repl/commands/conversation.ts` (`/save`, `/load`), `skill.ts`, `memory.ts`, `personality.ts`, `workflow.ts`, `history.ts` (`/recall`)
