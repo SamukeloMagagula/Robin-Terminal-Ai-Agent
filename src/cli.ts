@@ -8,6 +8,11 @@ import { runStatus } from './commands/status-command.js';
 import { runModelsList, runModelsForget } from './commands/models-command.js';
 import { runRepl } from './repl/run-repl.js';
 import { runDoctor } from './commands/doctor-command.js';
+import {
+  runGatewayStart,
+  runGatewayStop,
+  runGatewayStatus,
+} from './commands/gateway-command.js';
 import { runServe, serveHelpText, type ServeOptions } from './commands/serve-command.js';
 import { pickRandomProviderAndModel } from './random-pick.js';
 import { pickFromChoices, toChoices } from './ui/model-picker.js';
@@ -185,6 +190,31 @@ program
   .addHelpText('after', `\n${serveHelpText()}`)
   .action(async (channel: string, options: ServeOptions) => {
     await runServe(channel, options);
+  });
+
+const gateway = program
+  .command('gateway')
+  .description('The local control plane that owns sessions. `robin chat` starts one for you');
+
+gateway
+  .command('status', { isDefault: true })
+  .description('Report whether a gateway is running, and where')
+  .action(async () => {
+    await runGatewayStatus();
+  });
+
+gateway
+  .command('start')
+  .description('Run the gateway in the foreground')
+  .action(async () => {
+    await runGatewayStart();
+  });
+
+gateway
+  .command('stop')
+  .description('Stop the running gateway')
+  .action(async () => {
+    await runGatewayStop();
   });
 
 program
