@@ -250,9 +250,15 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   const hudStats = await gatherTelemetry({
     memory: memoryStore,
     skills: skillStore,
+    // The MCP counts come from the gateway, which is what actually runs those
+    // servers. A number computed here would be this process's guess about
+    // another process's state.
     toolCount:
-      TOOL_DEFINITIONS.length + MEMORY_TOOL_DEFINITIONS.length + SKILL_TOOL_DEFINITIONS.length,
-    mcpServerCount: 0,
+      TOOL_DEFINITIONS.length +
+      MEMORY_TOOL_DEFINITIONS.length +
+      SKILL_TOOL_DEFINITIONS.length +
+      client.mcp.tools,
+    mcpServerCount: client.mcp.servers,
   });
 
   printBanner({

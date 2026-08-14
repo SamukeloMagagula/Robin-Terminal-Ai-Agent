@@ -29,6 +29,8 @@ export interface GatewayServerDeps {
    * WebSocket only, which is all the tests of this file need.
    */
   http?: { handle(req: IncomingMessage, res: ServerResponse): Promise<void> };
+  /** Reported at connect, so a client's HUD can say what the daemon actually has. */
+  mcpSummary?: () => { servers: number; tools: number };
 }
 
 interface Client {
@@ -259,7 +261,11 @@ export class GatewayServer {
       client.kind = params.kind === 'channel' ? 'channel' : 'terminal';
       client.canApprove = params.canApprove === true;
       if (typeof params.cwd === 'string') client.cwd = params.cwd;
-      return { sessions: this.deps.sessions.list(), protocol: PROTOCOL_VERSION };
+      return {
+        sessions: this.deps.sessions.list(),
+        protocol: PROTOCOL_VERSION,
+        mcp: this.deps.mcpSummary?.() ?? { servers: 0, tools: 0 },
+      };
     }
 
     if (!client.connected) throw coded('not-connected', 'Send connect first.');

@@ -42,7 +42,9 @@ export class GatewayClient {
 
   private constructor(
     private readonly socket: WebSocket,
-    readonly sessions: SessionSnapshot[]
+    readonly sessions: SessionSnapshot[],
+    /** What the daemon has, for a client that wants to display it. */
+    readonly mcp: { servers: number; tools: number }
   ) {
     socket.on('message', (data) => this.receive(String(data)));
     socket.on('close', () => this.onSocketClosed());
@@ -63,7 +65,10 @@ export class GatewayClient {
     });
 
     const id = randomUUID();
-    const hello = await new Promise<{ sessions: SessionSnapshot[] }>((resolve, reject) => {
+    const hello = await new Promise<{
+      sessions: SessionSnapshot[];
+      mcp?: { servers: number; tools: number };
+    }>((resolve, reject) => {
       socket.once('message', (data) => {
         const frame = parseFrame(String(data));
         if (!frame || frame.type !== 'res' || frame.id !== id) {
@@ -95,7 +100,7 @@ export class GatewayClient {
       throw err;
     });
 
-    return new GatewayClient(socket, hello.sessions);
+    return new GatewayClient(socket, hello.sessions, hello.mcp ?? { servers: 0, tools: 0 });
   }
 
   request<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {

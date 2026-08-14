@@ -447,7 +447,9 @@ Robin can connect to [Model Context Protocol](https://modelcontextprotocol.io) s
 
 **Two gates, and neither can be turned off:**
 
-- **Starting a server is approved once.** An `mcp.json` entry says "run this command", and config files get pasted from the internet. On first sight Robin prints the exact command and asks — `y` approves that exact command, `a` trusts the server whatever its command becomes, `n` skips it. Changing an approved command asks again. Approvals live in `~/.robin/personality-trust.json` alongside the `PERSONALITY.md` ones.
+- **Starting a server is approved once, with `robin mcp`.** An `mcp.json` entry says "run this command", and config files get pasted from the internet. `robin mcp` prints the exact command and asks — `y` approves that exact command, `a` trusts the server whatever its command becomes, `n` skips it. Changing an approved command asks again. Approvals live in `~/.robin/personality-trust.json` alongside the `PERSONALITY.md` ones.
+
+  The [gateway](#the-gateway) runs the servers, and it never asks: it is detached with no terminal, so a server you have not approved is skipped rather than launched quietly. It says which ones on startup, and `robin mcp` is where you answer. Approving something while the gateway is already running needs a `robin gateway stop` — it reads trust once, at startup.
 - **Every MCP tool call is approved individually.** Robin auto-approves its own read-only shell commands because it can inspect the command; there is no equivalent for an opaque third-party tool, and trusting a name the server chose would be trusting the thing being gated. A tool called `list_files` may do anything. Use the gate's "stop asking about MCP tools this session" option if that gets tiring.
 
 Results are wrapped as untrusted content before the model sees them, exactly like file reads and command output.

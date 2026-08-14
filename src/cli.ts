@@ -13,6 +13,7 @@ import {
   runGatewayStop,
   runGatewayStatus,
 } from './commands/gateway-command.js';
+import { runMcp } from './commands/mcp-command.js';
 import { runServe, serveHelpText, type ServeOptions } from './commands/serve-command.js';
 import { pickRandomProviderAndModel } from './random-pick.js';
 import { pickFromChoices, toChoices } from './ui/model-picker.js';
@@ -215,6 +216,13 @@ gateway
   .description('Stop the running gateway')
   .action(async () => {
     await runGatewayStop();
+  });
+
+program
+  .command('mcp')
+  .description('Review and approve the MCP servers in ~/.robin/mcp.json')
+  .action(async () => {
+    await runMcp();
   });
 
 program

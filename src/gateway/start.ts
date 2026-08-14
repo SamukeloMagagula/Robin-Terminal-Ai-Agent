@@ -16,6 +16,7 @@ import { MemoryStore } from '../memory/store.js';
 import { SkillStore } from '../skills/store.js';
 import { SessionStore } from './session-store.js';
 import { createHttpApi } from './http-api.js';
+import { startTrustedMcpServers } from './mcp.js';
 
 export interface StartedGateway {
   port: number;
@@ -53,9 +54,14 @@ export async function startGateway(
     resolved: (pending, approved, by) => server.resolvedApproval(pending, approved, by),
   });
 
+  // Before the service, because a session created on the first connect should
+  // already be able to see the MCP tools.
+  const mcp = await startTrustedMcpServers({ log });
+
   const sessions = new SessionService({
     providers: listProviders(),
     approvals,
+    mcp: mcp.registry,
     emit: (sessionId, event) => server.emit(sessionId, event),
     stores: {
       unsupported: new UnsupportedModelStore(),
@@ -77,6 +83,10 @@ export async function startGateway(
     token,
     port: options.port ?? defaultPort(),
     log,
+    mcpSummary: () => ({
+      servers: mcp.started.length,
+      tools: mcp.registry.toolDefinitions().length,
+    }),
     http: createHttpApi({
       token,
       providers: listProviders(),
@@ -87,9 +97,17 @@ export async function startGateway(
 
   const port = await server.listen();
   await writeGatewayInfo({ port, pid: process.pid, token, protocol: PROTOCOL_VERSION }, infoPath);
+  const notes = [
+    restored > 0 ? `${restored} conversation(s) restored` : undefined,
+    // Counted from the tools, not the servers: a server that was launched but
+    // never answered would otherwise be announced as though it had worked.
+    mcp.registry.toolDefinitions().length > 0
+      ? `${mcp.registry.toolDefinitions().length} MCP tool(s)`
+      : undefined,
+  ].filter(Boolean);
   log(
     `Robin gateway listening on 127.0.0.1:${port}` +
-      (restored > 0 ? ` — ${restored} conversation(s) restored` : '')
+      (notes.length > 0 ? ` — ${notes.join(', ')}` : '')
   );
 
   return {
@@ -97,6 +115,9 @@ export async function startGateway(
     token,
     async stop(): Promise<void> {
       await server.close();
+      // Each server is a child process the daemon started; leaving them behind
+      // would outlive the thing that spawned them.
+      await mcp.registry.closeAll();
       // Belt-and-braces only: conversations are written as they happen,
       // precisely because on Windows this never runs.
       await sessions.flush();

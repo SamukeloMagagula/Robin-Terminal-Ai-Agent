@@ -33,6 +33,12 @@ export interface SessionServiceDeps {
   };
   /** PERSONALITY.md, already loaded and approved by the caller. */
   personality?: string;
+  /** Tools contributed by approved MCP servers, offered alongside the built-ins. */
+  mcp?: {
+    toolDefinitions(): { name: string; description: string; parameters: Record<string, unknown> }[];
+    has(name: string): boolean;
+    call(name: string, args: Record<string, unknown>): Promise<string>;
+  };
 }
 
 /** A session plus what the daemon needs that a REPL session never carried. */
@@ -269,6 +275,7 @@ export class SessionService {
         contextLimits: this.deps.stores.contextLimits,
         memory: this.deps.stores.memory,
         skills: this.deps.stores.skills,
+        mcp: this.deps.mcp,
         onText: (delta) => this.deps.emit(id, { kind: 'text', turnId, delta }),
         onThinking: (delta) => this.deps.emit(id, { kind: 'thinking', turnId, delta }),
         onAutoApproved: (command) =>
