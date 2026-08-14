@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { executeTool } from '../../src/tools/execute';
 import { SkillStore } from '../../src/skills/store';
+import { SKILL_TOOL_DEFINITIONS } from '../../src/skills/tools';
 import { composeSkillContext } from '../../src/skills/tools';
 import { createSession, buildSystemPrompt } from '../../src/repl/session';
 import type { Provider } from '../../src/providers/types';
@@ -61,10 +62,18 @@ describe('use_skill', () => {
   });
 });
 
-describe('create_skill', () => {
-  it('asks before writing — a skill shapes every later session', async () => {
+describe('create_skill, which no longer exists', () => {
+  // Skills come from a catalogue now — Anthropic's, OpenClaw's or Hermes's —
+  // installed with `robin skill add`. A model authoring its own was how a
+  // question about an exam produced a skill for measuring the hardness of
+  // metals, and how one reply put five proposals in front of the user.
+  it('is not offered to the model', () => {
+    expect(SKILL_TOOL_DEFINITIONS.map((t) => t.name)).toEqual(['use_skill']);
+  });
+
+  it('is refused if a model asks for it anyway', async () => {
     const store = await skills();
-    const confirm = vi.fn().mockResolvedValue(false);
+    const confirm = vi.fn();
 
     const result = await executeTool(
       call('create_skill', { name: 'x', description: 'd', body: 'b' }),
@@ -72,24 +81,13 @@ describe('create_skill', () => {
       { skills: store }
     );
 
-    expect(confirm).toHaveBeenCalledTimes(1);
-    expect(result).toMatch(/declined by the user/);
+    expect(result).toMatch(/unknown tool/i);
+    expect(confirm).not.toHaveBeenCalled();
     expect(await store.read('x')).toBeUndefined();
   });
+});
 
-  it('writes the skill once approved', async () => {
-    const store = await skills();
-
-    const result = await executeTool(
-      call('create_skill', { name: 'release', description: 'How we release', body: 'steps' }),
-      async () => true,
-      { skills: store }
-    );
-
-    expect(result).toMatch(/Saved skill/);
-    expect((await store.read('release'))?.body).toBe('steps');
-  });
-
+describe('the rest of the skill tools', () => {
   it('the skill tools are unavailable when no store is configured', async () => {
     const result = await executeTool(call('use_skill', { name: 'x' }), async () => true, {});
     expect(result).toMatch(/not available/);

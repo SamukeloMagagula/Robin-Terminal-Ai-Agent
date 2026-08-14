@@ -14,6 +14,21 @@ export interface Frontmatter {
  * Returns undefined when the fences are missing, which callers treat as "skip
  * this file" rather than as an error.
  */
+/**
+ * Removes quotes that are YAML's, not the author's.
+ *
+ * Robin writes values bare, but skills published by Hermes and OpenClaw quote
+ * theirs — and the quotes were surviving into the skills index the model reads
+ * on every turn.
+ */
+function unquote(value: string): string {
+  if (value.length < 2) return value;
+  const first = value[0];
+  const last = value[value.length - 1];
+  if ((first === '"' || first === "'") && first === last) return value.slice(1, -1);
+  return value;
+}
+
 export function parseFrontmatter(raw: string): Frontmatter | undefined {
   const normalised = raw.replace(/\r\n/g, '\n');
   if (!normalised.startsWith('---\n')) return undefined;
@@ -24,7 +39,7 @@ export function parseFrontmatter(raw: string): Frontmatter | undefined {
   for (const line of normalised.slice(4, end).split('\n')) {
     const separator = line.indexOf(':');
     if (separator === -1) continue;
-    fields[line.slice(0, separator).trim()] = line.slice(separator + 1).trim();
+    fields[line.slice(0, separator).trim()] = unquote(line.slice(separator + 1).trim());
   }
   const body = normalised.slice(end + '\n---'.length).replace(/^\n+/, '').trimEnd();
   return { fields, body };

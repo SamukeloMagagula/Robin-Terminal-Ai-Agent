@@ -401,7 +401,25 @@ A skill is a reusable instruction set. Each lives in its own directory as `~/.ro
 
 Save the current system prompt as a skill with `/skill save <name>`, apply one with `/skill use <name>`, and `/skill` lists them with their descriptions.
 
-**Robin can also write its own.** After working something out, it may call `create_skill` to keep the procedure — but unlike memories, this **asks first**. A memory is a private note; a skill is a standing instruction set that will shape every later session, and one written from a misunderstanding would quietly steer future work. Cheap to approve now, expensive to find months later.
+### Where skills come from
+
+Skills are installed from published catalogues, not written by the model. Three are built in, all using the same `SKILL.md` layout:
+
+```bash
+robin skill list                      # the catalogues
+robin skill list hermes review        # what's in one, filtered
+robin skill add anthropic pdf docx    # install by name
+```
+
+| Source | Repository | Skills |
+|---|---|---|
+| `anthropic` | [anthropics/skills](https://github.com/anthropics/skills) | 17 |
+| `openclaw` | [openclaw/openclaw](https://github.com/openclaw/openclaw) | 45 |
+| `hermes` | [Undermybelt/hermes-skills](https://github.com/Undermybelt/hermes-skills) | 1400+ |
+
+Installed skills keep their source in the name — `hermes-aegis-brainstorming` — because the catalogues overlap, and more than one publishes a "brainstorming". Installing asks first: a skill is a standing instruction set that shapes every later session, these come from public repositories, and nobody reviewed them on the way in.
+
+**The model cannot write skills.** There used to be a `create_skill` tool, and removing it is deliberate. A question about two Azure certification exams once produced a skill for measuring the hardness of metals, and a single reply put five proposals in front of the user — each one a prompt to answer. A stream of prompts is what teaches people to stop reading the prompts that matter. `/skill save <name>` still keeps a system prompt *you* wrote.
 
 Only the descriptions go into the system prompt. The bodies are whole instruction sets, so the model pulls one with `use_skill` when a line matches the task — the same index/body split memory uses.
 

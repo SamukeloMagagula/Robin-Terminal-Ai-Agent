@@ -14,6 +14,7 @@ import {
   runGatewayStatus,
 } from './commands/gateway-command.js';
 import { runMcp } from './commands/mcp-command.js';
+import { runSkillList, runSkillAdd } from './commands/skill-command.js';
 import { runServe, serveHelpText, type ServeOptions } from './commands/serve-command.js';
 import { pickRandomProviderAndModel } from './random-pick.js';
 import { pickFromChoices, toChoices } from './ui/model-picker.js';
@@ -216,6 +217,24 @@ gateway
   .description('Stop the running gateway')
   .action(async () => {
     await runGatewayStop();
+  });
+
+const skill = program
+  .command('skill')
+  .description('Install skills from the Anthropic, OpenClaw and Hermes catalogues');
+
+skill
+  .command('list [source] [filter]', { isDefault: true })
+  .description('List a catalogue, or the catalogues themselves')
+  .action(async (source?: string, filter?: string) => {
+    await runSkillList(source, filter);
+  });
+
+skill
+  .command('add <source> <names...>')
+  .description('Install named skills from a catalogue')
+  .action(async (source: string, names: string[]) => {
+    await runSkillAdd(source, names);
   });
 
 program
