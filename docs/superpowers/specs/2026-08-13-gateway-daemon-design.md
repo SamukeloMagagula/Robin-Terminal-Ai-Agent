@@ -290,10 +290,12 @@ lingers after a rebuild.
 
 ## Non-goals
 
-- **Sessions do not survive a daemon restart.** They are in-memory. Transcripts
-  and `/save` are unaffected. `ConversationStore` already serialises a session
-  to JSON, so persistence is a small follow-up — but it is not needed for the
-  success criterion.
+- ~~**Sessions do not survive a daemon restart.**~~ **Done in a follow-up.**
+  Sessions are written to `~/.robin/sessions/` after every turn rather than on
+  shutdown — on Windows `robin gateway stop` terminates the daemon outright and
+  no exit handler runs, so a save-on-exit design would have lost every
+  conversation on the platform it most needed to work on. Writing as it goes
+  also survives a crash and a reboot.
 - No HTTP or OpenAI-compatible endpoints.
 - No control UI.
 - No new channels.

@@ -62,6 +62,24 @@ export class ChatLog {
     this.filePath = path.join(this.dir, `robin-chat-${timestampForFilename(now)}.md`);
   }
 
+  /**
+   * Points this log back at a transcript it was already writing.
+   *
+   * Without it, a session restored after the gateway restarts would start a
+   * second file for a conversation that never ended, and one conversation would
+   * arrive on disk as two.
+   */
+  resume(filePath: string, startedAt: Date): void {
+    this.filePath = filePath;
+    this.startedAt = startedAt;
+  }
+
+  /** Where this log is writing, so a restored session can carry on with it. */
+  location(): { filePath: string; startedAt: Date } | undefined {
+    if (!this.filePath || !this.startedAt) return undefined;
+    return { filePath: this.filePath, startedAt: this.startedAt };
+  }
+
   async write(providerName: string, model: string, messages: Message[]): Promise<void> {
     if (!this.filePath || !this.startedAt) this.startNewSession();
     const content = renderMarkdown(providerName, model, this.startedAt!, messages);

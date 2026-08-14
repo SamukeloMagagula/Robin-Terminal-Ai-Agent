@@ -14,6 +14,7 @@ import { UnsupportedModelStore } from '../providers/unsupported-models.js';
 import { ContextLimitStore } from '../providers/context-limits.js';
 import { MemoryStore } from '../memory/store.js';
 import { SkillStore } from '../skills/store.js';
+import { SessionStore } from './session-store.js';
 
 export interface StartedGateway {
   port: number;
@@ -60,8 +61,14 @@ export async function startGateway(
       contextLimits: new ContextLimitStore(),
       memory: new MemoryStore(),
       skills: new SkillStore(),
+      sessions: new SessionStore(),
     },
   });
+
+  // Before the port opens: a client that connects must never see an empty
+  // session list that is about to fill in.
+  await sessions.restore();
+  const restored = sessions.list().length;
 
   server = new GatewayServer({
     sessions,
@@ -73,13 +80,19 @@ export async function startGateway(
 
   const port = await server.listen();
   await writeGatewayInfo({ port, pid: process.pid, token, protocol: PROTOCOL_VERSION }, infoPath);
-  log(`Robin gateway listening on 127.0.0.1:${port}`);
+  log(
+    `Robin gateway listening on 127.0.0.1:${port}` +
+      (restored > 0 ? ` — ${restored} conversation(s) restored` : '')
+  );
 
   return {
     port,
     token,
     async stop(): Promise<void> {
       await server.close();
+      // Belt-and-braces only: conversations are written as they happen,
+      // precisely because on Windows this never runs.
+      await sessions.flush();
       // Leaving the file behind would point the next client at a dead port.
       await removeGatewayInfo(infoPath);
     },

@@ -14,6 +14,8 @@ import type { UnsupportedModelStore } from '../providers/unsupported-models.js';
 import type { ContextLimitStore } from '../providers/context-limits.js';
 import type { MemoryStore } from '../memory/store.js';
 import type { SkillStore } from '../skills/store.js';
+import type { SessionStore, PersistedSession } from './session-store.js';
+import { ChatLog } from '../chat-log.js';
 
 export interface SessionServiceDeps {
   providers: Provider[];
@@ -26,6 +28,8 @@ export interface SessionServiceDeps {
     memory?: MemoryStore;
     /** Absent disables the skill tools. */
     skills?: SkillStore;
+    /** Absent means conversations do not survive a restart. */
+    sessions?: SessionStore;
   };
   /** PERSONALITY.md, already loaded and approved by the caller. */
   personality?: string;
@@ -65,6 +69,15 @@ export class SessionService {
   private readonly records = new Map<number, SessionRecord>();
   /** In-flight turns, so an interrupt can find the one it means. */
   private readonly running = new Map<string, AbortController>();
+  /**
+   * One write chain per session id.
+   *
+   * Ordering matters and is not obvious: a create and the close that follows it
+   * are two separate writes, and without a chain the delete can land first and
+   * the save then puts the file back. The chain outlives the session, because
+   * the last write for an id is usually its removal.
+   */
+  private readonly writeChains = new Map<number, Promise<void>>();
   private nextId = 1;
 
   constructor(private readonly deps: SessionServiceDeps) {}
@@ -94,6 +107,7 @@ export class SessionService {
       queue: Promise.resolve(),
       pending: 0,
     });
+    this.persist(id);
     return this.snapshot(id);
   }
 
@@ -136,6 +150,7 @@ export class SessionService {
     }
 
     const snapshot = this.snapshot(id);
+    this.persist(id);
     this.deps.emit(id, { kind: 'session.changed', snapshot });
     return snapshot;
   }
@@ -148,6 +163,7 @@ export class SessionService {
     session.turnCount = 0;
     session.chatLog.startNewSession();
     const snapshot = this.snapshot(id);
+    this.persist(id);
     this.deps.emit(id, { kind: 'session.changed', snapshot });
     return snapshot;
   }
@@ -155,6 +171,10 @@ export class SessionService {
   close(id: number): void {
     this.record(id);
     this.records.delete(id);
+    const store = this.deps.stores.sessions;
+    // Behind the same chain as this session's saves, so the delete cannot be
+    // overtaken by a write that was already in flight.
+    if (store) this.queueWrite(id, () => store.remove(id));
   }
 
   snapshot(id: number): SessionSnapshot {
@@ -206,11 +226,12 @@ export class SessionService {
     return true;
   }
 
-  /** Resolves once nothing is queued. For shutdown, and for tests. */
+  /** Resolves once nothing is queued and everything is written. */
   async idle(): Promise<void> {
     await Promise.all(
       [...this.records.values()].map((record) => record.queue.catch(() => {}))
     );
+    await this.flush();
   }
 
   private async runOne(
@@ -275,6 +296,9 @@ export class SessionService {
       }
 
       await session.chatLog.write(session.provider.name, session.model, session.history);
+      // After the transcript, so the persisted record carries where that
+      // transcript lives and a restart continues the same file.
+      this.persist(id);
 
       this.deps.emit(id, {
         kind: 'turn.finished',
@@ -304,6 +328,98 @@ export class SessionService {
     }
   }
 
+  /**
+   * Reads conversations back off disk. Call once, before serving.
+   *
+   * A session whose provider this build no longer has is dropped rather than
+   * failing the start: the conversation is still readable on disk, it just
+   * cannot be continued as-is, and refusing to boot over it would be a poor
+   * trade.
+   */
+  async restore(): Promise<void> {
+    const store = this.deps.stores.sessions;
+    if (!store) return;
+
+    for (const saved of await store.load()) {
+      const provider = this.deps.providers.find((p) => p.id === saved.providerId);
+      if (!provider) {
+        await store.remove(saved.id);
+        continue;
+      }
+
+      const session = createSession(provider, saved.model, saved.id);
+      session.label = saved.label;
+      session.history = saved.history;
+      session.turnCount = saved.turnCount;
+      session.systemPrompt = saved.systemPrompt;
+      session.toolsEnabled = saved.toolsEnabled;
+      // Personality is deliberately not restored: it comes from PERSONALITY.md,
+      // which is trust-gated and may have changed since. The client re-applies
+      // it when it attaches.
+      if (saved.transcript) {
+        session.chatLog.resume(saved.transcript.path, new Date(saved.transcript.startedAt));
+      }
+
+      this.records.set(saved.id, {
+        session,
+        cwd: saved.cwd,
+        autoApprove: saved.autoApprove,
+        queue: Promise.resolve(),
+        // Whatever was running when the daemon stopped is not running now.
+        pending: 0,
+      });
+      this.nextId = Math.max(this.nextId, saved.id + 1);
+    }
+  }
+
+  /** Writes one conversation out. Called after anything that changes it. */
+  private persist(id: number): void {
+    const store = this.deps.stores.sessions;
+    if (!store) return;
+    const record = this.records.get(id);
+    if (!record) return;
+
+    const { session } = record;
+    const transcript = session.chatLog.location();
+    const saved: PersistedSession = {
+      id,
+      label: session.label,
+      providerId: session.provider.id,
+      model: session.model,
+      cwd: record.cwd,
+      toolsEnabled: session.toolsEnabled,
+      autoApprove: record.autoApprove,
+      turnCount: session.turnCount,
+      systemPrompt: session.systemPrompt,
+      history: session.history,
+      transcript: transcript
+        ? { path: transcript.filePath, startedAt: transcript.startedAt.toISOString() }
+        : undefined,
+      updatedAt: new Date().toISOString(),
+    };
+    // Not awaited here: the user is waiting on a reply, not on a disk write.
+    // Queued, though, so a shutdown — or a test — can wait for writes to settle
+    // rather than racing them.
+    this.queueWrite(id, () => store.save(saved));
+  }
+
+  private queueWrite(id: number, write: () => Promise<void>): void {
+    const chain = (this.writeChains.get(id) ?? Promise.resolve())
+      .catch(() => {})
+      .then(write);
+    this.writeChains.set(id, chain);
+  }
+
+  /** Waits for every queued write to settle. */
+  async flush(): Promise<void> {
+    await Promise.all([...this.writeChains.values()].map((chain) => chain.catch(() => {})));
+  }
+
+  /** Where this session's transcript is being written. Test seam. */
+  transcriptPathForTest(id: number): string | undefined {
+    return this.record(id).session.chatLog.location()?.filePath;
+  }
+
   /** A copy: a client that mutated this would be editing the daemon's memory. */
   history(id: number): Message[] {
     return [...this.record(id).session.history];
@@ -312,6 +428,7 @@ export class SessionService {
   /** Appends one message. /recall uses it to put found excerpts in front of the model. */
   append(id: number, message: Message): void {
     this.record(id).session.history.push(message);
+    this.persist(id);
   }
 
   /** Replaces the conversation wholesale, as /load does. */
@@ -322,6 +439,7 @@ export class SessionService {
     // transcript rather than being appended to whatever was open.
     session.chatLog.startNewSession();
     const snapshot = this.snapshot(id);
+    this.persist(id);
     this.deps.emit(id, { kind: 'session.changed', snapshot });
     return snapshot;
   }

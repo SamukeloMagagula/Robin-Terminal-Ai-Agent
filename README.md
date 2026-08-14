@@ -217,11 +217,18 @@ surfaces, their working directory, whether a turn is running, and whether the
 session auto-approves tools. That last one is what `--allow-tools` became: a
 visible property of a conversation rather than an invisible flag on a process.
 
-**Two honest limitations:**
+**Conversations survive the gateway stopping.** They're written to
+`~/.robin/sessions/` (mode 0600 — a history holds the contents of every file
+the model read) after each turn rather than on shutdown, so a crash, a reboot
+or a `gateway stop` all keep them. Restarting picks them up:
+`Robin gateway listening on 127.0.0.1:18790 — 3 conversation(s) restored`.
 
-- **Conversations do not survive `robin gateway stop`**, or a reboot. They're
-  in memory. Markdown transcripts under `~/.robin/chats/` and anything you
-  `/save` are unaffected — it's the live session that goes.
+A session untouched for two weeks is dropped on the next start, so directories
+you visited once don't pile up in `/session`. Closing a session forgets it
+immediately.
+
+**One honest limitation:**
+
 - **A session's working directory is fixed when it's created.** Tools run
   there. Move your terminal elsewhere and continue an old session, and commands
   still run in the original directory. `/session new` starts one bound to where
