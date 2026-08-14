@@ -47,6 +47,31 @@ function coded(code: string, message: string): Error & { code: string } {
   return Object.assign(new Error(message), { code });
 }
 
+/** Loopback, by address or by name, on any port. */
+export function isLoopbackHost(hostname: string): boolean {
+  return hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '[::1]' || hostname === '::1';
+}
+
+/**
+ * Whether a WebSocket upgrade may proceed.
+ *
+ * WebSockets are not subject to CORS, so any page you happen to visit can open
+ * a socket to a loopback port. The token still guards what can be done with it,
+ * but the control UI is a browser client holding that token, and a browser is
+ * exactly what can be tricked into spending one it already has.
+ *
+ * No Origin header means no browser — every Node client, the REPL and the
+ * bridge included, sends none, and those are trusted by the token alone.
+ */
+export function allowedOrigin(info: { origin?: string }): boolean {
+  if (!info.origin) return true;
+  try {
+    return isLoopbackHost(new URL(info.origin).hostname);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The socket half.
  *
@@ -88,7 +113,7 @@ export class GatewayServer {
       });
       this.http = http;
 
-      const wss = new WebSocketServer({ server: http });
+      const wss = new WebSocketServer({ server: http, verifyClient: allowedOrigin });
       this.wss = wss;
       wss.on('connection', (socket) => this.accept(socket));
       // ws re-emits the HTTP server's errors on itself. Without a listener

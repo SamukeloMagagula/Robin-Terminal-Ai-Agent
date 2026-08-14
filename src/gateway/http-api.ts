@@ -3,6 +3,9 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Message, Provider } from '../providers/types.js';
 import type { GatewayEvent } from './protocol.js';
 import type { SessionService } from './session-service.js';
+import { controlUiPage } from './ui-page.js';
+import { PROTOCOL_VERSION } from './protocol.js';
+import { isLoopbackHost } from './server.js';
 
 /** Bodies are a conversation, not an upload. Anything larger is a mistake. */
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -317,6 +320,35 @@ export function createHttpApi(deps: HttpApiDeps) {
   return {
     async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
       const url = (req.url ?? '').split('?')[0];
+
+      // DNS rebinding: a site points its own name at 127.0.0.1, so the browser
+      // treats this port as same-origin and can read whatever the page holds.
+      // The Host header is what tells the two cases apart.
+      const host = (req.headers.host ?? '').replace(/:\d+$/, '');
+      if (host && !isLoopbackHost(host)) {
+        fail(res, 403, 'This port only answers to localhost.', 'invalid_request_error');
+        return;
+      }
+
+      // The page itself needs no token: it has to load before it can be given
+      // one, and everything it can then do is behind the socket and the API.
+      if (req.method === 'GET' && (url === '/' || url === '/index.html')) {
+        const page = controlUiPage(PROTOCOL_VERSION);
+        res.writeHead(200, {
+          'content-type': 'text/html; charset=utf-8',
+          'content-length': Buffer.byteLength(page),
+          // Everything the page needs is inline and same-origin. Nothing is
+          // fetched, so nothing needs to be fetchable.
+          'content-security-policy':
+            "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; " +
+            "connect-src 'self' ws://127.0.0.1:* ws://localhost:*; img-src 'self' data:; " +
+            "base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+          'referrer-policy': 'no-referrer',
+          'x-content-type-options': 'nosniff',
+        });
+        res.end(page);
+        return;
+      }
 
       // Same token as the WebSocket. Anything reaching this port can run
       // commands as this user, whichever protocol it speaks.

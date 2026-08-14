@@ -234,6 +234,37 @@ immediately.
   still run in the original directory. `/session new` starts one bound to where
   you are now.
 
+### The control UI
+
+```bash
+robin ui
+```
+
+Opens a browser onto the same gateway: your open sessions down the left, the
+conversation in the middle, and a box to type in. It is a client like the
+terminal is — attach to a session started at the keyboard and you are in the
+same conversation, streaming as it happens.
+
+Approvals appear here too, as a dialog, with the same origin line the terminal
+shows. Answer in either place; the first answer wins and the other closes.
+
+**The link carries the gateway token**, because a page cannot read
+`~/.robin/gateway.json`. Treat it like a password. The page takes it out of the
+address bar the moment it loads — a URL is history, a bookmark and a referrer —
+and keeps it in `sessionStorage` instead.
+
+Three things keep the browser from being a way in:
+
+- **Loopback only, and the `Host` header is checked.** A site that points its
+  own hostname at 127.0.0.1 to make your browser treat this port as same-origin
+  gets a 403.
+- **WebSocket upgrades are refused from web origins.** WebSockets are not
+  subject to CORS, so any page you visit can open a socket to a local port. One
+  with an `Origin` that is not this port is turned away; clients that send no
+  `Origin` at all — every non-browser one — are unaffected.
+- **A strict `Content-Security-Policy`.** Everything the page needs is inline
+  and same-origin, so nothing is fetchable from anywhere else.
+
 ### Driving Robin from other tools
 
 The gateway serves an OpenAI-compatible API on the same port, so anything that

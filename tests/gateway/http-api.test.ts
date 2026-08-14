@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { request as httpRequest } from 'node:http';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { request } from 'node:http';
 import { GatewayServer } from '../../src/gateway/server';
 import { SessionService } from '../../src/gateway/session-service';
 import { ApprovalRegistry } from '../../src/gateway/approvals';
@@ -391,5 +393,55 @@ describe('a client that hangs up', () => {
     await vi.waitFor(() => expect(sawAbort).toBe(true), { timeout: 3000 });
     // And nothing is left behind for /session to show.
     await vi.waitFor(() => expect(sessions.list()).toEqual([]), { timeout: 3000 });
+  });
+});
+
+describe('the control UI', () => {
+  it('serves a page at the root without needing a token', async () => {
+    // The page has to load before it can ask for one; the token guards the
+    // socket and the API, which is where anything actually happens.
+    const res = await fetch(`${base}/`);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    expect(await res.text()).toContain('<!doctype html>');
+  });
+
+  // DNS rebinding: a site resolves its own name to 127.0.0.1, so the browser
+  // treats our port as same-origin and can read what the page holds. Checking
+  // the Host header costs nothing and closes it.
+  // fetch refuses to set Host — it is a forbidden header name, silently
+  // dropped — so these go out over a raw request, which is also what anything
+  // exploiting this would use.
+  function getWithHost(host: string): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const req = httpRequest(
+        { hostname: '127.0.0.1', port: Number(new URL(base).port), path: '/', headers: { host } },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        }
+      );
+      req.on('error', reject);
+      req.end();
+    });
+  }
+
+  it('refuses a request that arrived under someone else\'s hostname', async () => {
+    expect(await getWithHost('evil.example')).toBe(403);
+  });
+
+  it('accepts localhost by name', async () => {
+    expect(await getWithHost(`localhost:${new URL(base).port}`)).toBe(200);
+  });
+
+  it('sends a content security policy that keeps the page to itself', async () => {
+    const res = await fetch(`${base}/`);
+    const csp = res.headers.get('content-security-policy') ?? '';
+
+    // Everything the page needs is inline and same-origin; nothing should be
+    // fetchable from anywhere else.
+    expect(csp).toContain("default-src 'self'");
+    expect(csp).toContain('connect-src');
   });
 });

@@ -14,6 +14,7 @@ import {
   runGatewayStatus,
 } from './commands/gateway-command.js';
 import { runMcp } from './commands/mcp-command.js';
+import { runUi } from './commands/ui-command.js';
 import { runSkillList, runSkillAdd } from './commands/skill-command.js';
 import { runServe, serveHelpText, type ServeOptions } from './commands/serve-command.js';
 import { pickRandomProviderAndModel } from './random-pick.js';
@@ -235,6 +236,13 @@ skill
   .description('Install named skills from a catalogue')
   .action(async (source: string, names: string[]) => {
     await runSkillAdd(source, names);
+  });
+
+program
+  .command('ui')
+  .description('Open the control UI in a browser')
+  .action(async () => {
+    await runUi();
   });
 
 program

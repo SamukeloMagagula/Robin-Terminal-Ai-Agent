@@ -460,3 +460,38 @@ describe('GatewayServer events', () => {
     });
   });
 });
+
+describe('GatewayServer and browser origins', () => {
+  function connectFrom(origin?: string): Promise<{ opened: boolean }> {
+    return new Promise((resolve) => {
+      const socket = new WebSocket(`ws://127.0.0.1:${port}`, {
+        headers: origin ? { origin } : {},
+      });
+      socket.once('open', () => {
+        socket.close();
+        resolve({ opened: true });
+      });
+      socket.once('error', () => resolve({ opened: false }));
+      socket.once('unexpected-response', () => resolve({ opened: false }));
+    });
+  }
+
+  // WebSockets are not subject to CORS, so any page you visit can open a
+  // socket to a loopback port. The token still guards it, but a browser is
+  // exactly the client that can be tricked into spending one it already holds.
+  it('refuses an upgrade from a web page', async () => {
+    expect((await connectFrom('https://evil.example')).opened).toBe(false);
+  });
+
+  it('allows a client that sends no origin, which is every non-browser one', async () => {
+    expect((await connectFrom()).opened).toBe(true);
+  });
+
+  it('allows the control UI, served from this very port', async () => {
+    expect((await connectFrom(`http://127.0.0.1:${port}`)).opened).toBe(true);
+  });
+
+  it('allows localhost by name as well as by address', async () => {
+    expect((await connectFrom(`http://localhost:${port}`)).opened).toBe(true);
+  });
+});
