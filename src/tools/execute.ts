@@ -145,6 +145,15 @@ export async function executeTool(
           confirm,
           options.cwd
         );
+      case 'edit_file':
+        return await editFileTool(
+          requireString(args.path, 'path'),
+          requireString(args.old_string, 'old_string'),
+          requireString(args.new_string, 'new_string'),
+          args.replace_all === true,
+          confirm,
+          options.cwd
+        );
       case 'remember':
         if (!options.memory) return 'Error: memory is not available in this session.';
         return await rememberTool(args, options.memory);
@@ -240,6 +249,101 @@ async function writeFileTool(
   } catch (err) {
     return `Error: ${(err as Error).message}`;
   }
+}
+
+/** How much of each side to show when asking. Enough to judge, not a wall. */
+const MAX_EDIT_PREVIEW = 400;
+
+function forPreview(text: string): string {
+  return text.length > MAX_EDIT_PREVIEW ? `${text.slice(0, MAX_EDIT_PREVIEW)}…` : text;
+}
+
+/**
+ * Replaces an exact string in a file.
+ *
+ * The alternative was `write_file` for everything, which means reproducing a
+ * whole file to change one line of it: expensive in tokens, and a single
+ * dropped line silently loses work that was never part of the edit.
+ *
+ * Ambiguity is refused rather than guessed. A model cannot see which of three
+ * identical lines it hit, so picking one would be a coin flip with someone
+ * else's code — `replace_all` is how you say you meant all of them.
+ */
+async function editFileTool(
+  filePath: string,
+  oldString: string,
+  newString: string,
+  replaceAll: boolean,
+  confirm: ConfirmFn,
+  cwd: string = process.cwd(),
+  sensitiveDirs = defaultSensitiveDirs()
+): Promise<string> {
+  if (oldString === '') {
+    return 'Error: old_string is empty — it would match everywhere. Give the exact text to replace.';
+  }
+  if (oldString === newString) {
+    return 'Error: old_string and new_string are identical, so this edit would change nothing.';
+  }
+
+  const verdict = await checkPath(path.resolve(cwd, filePath), 'write', sensitiveDirs);
+  if (verdict.blocked) return `Error: ${verdict.refusal}`;
+
+  let content: string;
+  try {
+    content = await fs.readFile(verdict.realPath, 'utf-8');
+  } catch (err) {
+    return `Error: ${(err as Error).message}`;
+  }
+
+  // Windows files are full of CRLF and models emit LF. Matching only the
+  // literal bytes would make this tool useless on the machine it runs on, so
+  // the search string is translated to the file's own endings when that is
+  // what it takes — and the file keeps them.
+  let search = oldString;
+  let replacement = newString;
+  if (!content.includes(search) && content.includes('\r\n')) {
+    const crlf = (text: string): string => text.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
+    search = crlf(oldString);
+    replacement = crlf(newString);
+  }
+
+  const occurrences = content.split(search).length - 1;
+  if (occurrences === 0) {
+    return (
+      `Error: old_string was not found in ${filePath}. ` +
+      'It must match the file exactly, including indentation.'
+    );
+  }
+  if (occurrences > 1 && !replaceAll) {
+    return (
+      `Error: old_string appears ${occurrences} times in ${filePath}. ` +
+      'Include enough surrounding text to make it unique, or pass replace_all.'
+    );
+  }
+
+  const approved = await confirm({
+    kind: 'write_file',
+    message:
+      `Edit ${verdict.realPath}?\n` +
+      `${occurrences > 1 ? `${occurrences} occurrences\n` : ''}` +
+      `--- replace ---\n${forPreview(oldString)}\n` +
+      `--- with ---\n${forPreview(newString)}\n---`,
+  });
+  if (!approved) return `Editing ${filePath} was declined by the user.${DECLINE_GUIDANCE}`;
+
+  const updated = replaceAll
+    ? content.split(search).join(replacement)
+    : content.replace(search, replacement);
+
+  try {
+    await fs.writeFile(verdict.realPath, updated, 'utf-8');
+  } catch (err) {
+    return `Error: ${(err as Error).message}`;
+  }
+
+  return occurrences > 1
+    ? `Edited ${verdict.realPath} — replaced ${occurrences} occurrences.`
+    : `Edited ${verdict.realPath}.`;
 }
 
 /**

@@ -1,6 +1,6 @@
 # robin
 
-Robin is a terminal agent that lets you run your AI. Supports Anthropic (Claude), GitHub Copilot, Google Gemini, OpenRouter (via API key), Ollama, and any OpenAI-compatible server you run yourself (llama.cpp, LM Studio, vLLM, …), with tool-calling (read files, write files, run shell commands) built in.
+Robin is a terminal agent that lets you run your AI. Supports Anthropic (Claude), GitHub Copilot, Google Gemini, OpenRouter (via API key), Ollama, and any OpenAI-compatible server you run yourself (llama.cpp, LM Studio, vLLM, …), with tool-calling (read files, edit and write files, run shell commands) built in.
 
 It can also be driven from [Telegram](#remote-control-telegram) when you're away from the terminal, and `robin doctor` tells you what's wrong with an install before you hit it.
 
@@ -595,11 +595,26 @@ The lines you type at the prompt are kept too, so the up arrow still reaches yes
 
 ## Tool-Calling
 
-Every chat session gives the model access to three tools:
+Every chat session gives the model access to four tools:
 
 - `read_file` — reads a file's contents (confirms only for paths outside the current directory)
-- `write_file` — writes/overwrites a file (always confirms)
+- `write_file` — writes/overwrites a whole file (always confirms)
+- `edit_file` — replaces an exact string in an existing file (always confirms)
 - `run_command` — runs a shell command in the current directory (confirms unless the command is recognised as read-only)
+
+**Changes to existing files go through `edit_file`, not `write_file`.** Rewriting
+a whole file to change one line costs the entire file in tokens and silently
+loses anything the model did not reproduce. `edit_file` replaces an exact
+string, and refuses rather than guessing: a search string that matches twice is
+an error naming the count, because a model cannot see which of the two it would
+have hit. `replace_all` is how you say you meant both.
+
+It also matches across line-ending styles. Models emit `
+` and Windows files
+are full of `
+
+`; failing on that alone would make the tool useless on the
+machine it runs on. The file keeps whatever endings it had.
 
 When the model wants to write a file or run a command that needs approval, you'll see a prompt like:
 
