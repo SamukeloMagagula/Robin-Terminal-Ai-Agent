@@ -1,6 +1,6 @@
 # robin
 
-Robin is a terminal agent that lets you run your AI. Supports Anthropic (Claude), GitHub Copilot, Google Gemini, OpenRouter (via API key), and local Ollama models, with tool-calling (read files, write files, run shell commands) built in.
+Robin is a terminal agent that lets you run your AI. Supports Anthropic (Claude), GitHub Copilot, Google Gemini, OpenRouter (via API key), Ollama, and any OpenAI-compatible server you run yourself (llama.cpp, LM Studio, vLLM, …), with tool-calling (read files, write files, run shell commands) built in.
 
 It can also be driven from [Telegram](#remote-control-telegram) when you're away from the terminal, and `robin doctor` tells you what's wrong with an install before you hit it.
 
@@ -128,6 +128,31 @@ ollama serve              # if it isn't already running as a background service
 ```
 
 No login needed — `robin` just checks `http://localhost:11434` is reachable. Older/smaller Ollama models that don't support tool-calling will still chat normally; they just won't be able to use tools.
+
+**Local (any OpenAI-compatible server):**
+
+Ollama is one way to run a model locally, not the only one, and when it breaks you shouldn't have to wait for it. The `local` provider talks to anything that speaks OpenAI's `/v1/chat/completions` — llama.cpp's `llama-server`, LM Studio, Jan, KoboldCpp, llamafile, vLLM, LocalAI:
+
+```bash
+# llama.cpp — the engine Ollama itself shells out to
+llama-server -m model.gguf --port 8080 --jinja
+
+robin chat local
+```
+
+It looks at `http://127.0.0.1:8080/v1` by default, which is llama.cpp's port. Point it anywhere else with an environment variable — both spellings of the base work:
+
+```bash
+ROBIN_LOCAL_BASE_URL=http://127.0.0.1:1234/v1   # LM Studio
+ROBIN_LOCAL_BASE_URL=http://127.0.0.1:1337      # Jan; the /v1 is added for you
+ROBIN_LOCAL_API_KEY=...                          # only if you started the server with one
+```
+
+No login and no stored credentials — "logged in" here means something is answering. The variables are read per request, so switching runtimes takes effect on the next message rather than on the next restart.
+
+**Already have models pulled through Ollama?** They're plain GGUF files under `~/.ollama/models/blobs/` (the big one is the weights). Point `llama-server -m` straight at that path — nothing to re-download.
+
+`--jinja` matters if you want tool-calling: it makes llama.cpp use the model's own chat template, which is what emits OpenAI-style `tool_calls`. Without it the model will chat but never call a tool. Expect local models to be slower than hosted ones — an 8B model on CPU runs around 20 tokens/second, so a turn takes tens of seconds, and a tool-using turn multiplies that by the number of rounds.
 
 ### Picking a model
 
@@ -532,7 +557,9 @@ The first three of those are checked again automatically whenever you start a ch
 - **"Not logged in to Copilot"** — run `robin login copilot`.
 - **"Not logged in to Gemini"** — run `robin login gemini` and paste an API key from https://aistudio.google.com/apikey.
 - **"Not logged in to OpenRouter"** — run `robin login openrouter` and paste an API key from https://openrouter.ai/keys.
-- **Ollama chat hangs or errors immediately** — confirm `ollama serve` is running and `ollama list` shows at least one pulled model.
+- **Ollama chat hangs or errors immediately** — confirm `ollama serve` is running and `ollama list` shows at least one pulled model. If Ollama itself fails to start a model (`llama-server process has terminated: invalid argument: --load-mode` and similar), that is Ollama's own runner disagreeing with its bundled binary — reinstall it, or skip it entirely and use the `local` provider against `llama-server` directly.
+- **`robin chat local` says nothing is answering** — check the port. It defaults to llama.cpp's 8080; LM Studio is 1234 and Jan is 1337, so set `ROBIN_LOCAL_BASE_URL`. `curl http://127.0.0.1:8080/v1/models` tells you whether the problem is Robin or the server.
+- **A local model chats but never uses tools** — start `llama-server` with `--jinja` so it applies the model's own chat template, and use a model whose template supports tool calls.
 - **A model doesn't show up in `/model`** — `/model` only lists what's actually available on the current provider. For Ollama, that means models you've `ollama pull`'d locally; run `ollama pull <model>` first.
 - **Copilot device code expires before you approve it** — device codes last about 15 minutes; just rerun `robin login copilot` for a fresh one.
 - **Chrome doesn't open automatically during login** — copy the printed URL and enter it manually on any device with a browser; this is expected over SSH/PuTTY to a headless machine.

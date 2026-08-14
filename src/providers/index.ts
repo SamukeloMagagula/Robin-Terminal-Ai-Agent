@@ -1,6 +1,7 @@
 import type { Provider } from './types.js';
 import { CopilotProvider } from './copilot.js';
 import { OllamaProvider } from './ollama.js';
+import { LocalProvider } from './local.js';
 import { GeminiProvider } from './gemini.js';
 import { OpenRouterProvider } from './openrouter.js';
 import { AnthropicProvider } from './anthropic.js';
@@ -9,6 +10,7 @@ import { UserFacingError } from '../startup/bootstrap.js';
 const providers: Provider[] = [
   new CopilotProvider(),
   new OllamaProvider(),
+  new LocalProvider(),
   new GeminiProvider(),
   new OpenRouterProvider(),
   new AnthropicProvider(),
