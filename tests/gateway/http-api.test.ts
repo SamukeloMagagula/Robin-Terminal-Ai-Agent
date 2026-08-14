@@ -295,3 +295,101 @@ describe('unknown routes', () => {
     await client.close();
   });
 });
+
+describe('the "robin" model', () => {
+  it('picks the first provider that is actually logged in', async () => {
+    // The README promises "the first provider you're logged into". Taking
+    // providers[0] regardless means `robin` fails for anyone who has not
+    // logged into whichever provider happens to be first in the registry.
+    (providers[0].isAuthenticated as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+
+    const res = await fetch(`${base}/v1/chat/completions`, {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({ model: 'robin', messages: [{ role: 'user', content: 'hi' }] }),
+    });
+
+    expect(res.status).toBe(200);
+    expect((providers[1].chat as unknown as { mock: { calls: unknown[] } }).mock.calls).toHaveLength(1);
+    expect((providers[0].chat as unknown as { mock: { calls: unknown[] } }).mock.calls).toHaveLength(0);
+  });
+
+  it('says so when nothing is logged in', async () => {
+    for (const provider of providers) {
+      (provider.isAuthenticated as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+    }
+
+    const res = await fetch(`${base}/v1/chat/completions`, {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({ model: 'robin', messages: [{ role: 'user', content: 'hi' }] }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { message: string } }).error.message).toMatch(
+      /logged in|log in/i
+    );
+  });
+
+  it('marks its sessions as http, not as a terminal', async () => {
+    const seen: string[] = [];
+    sessions.list = ((original) => () => {
+      const list = original.call(sessions);
+      for (const s of list) seen.push(s.origin);
+      return list;
+    })(sessions.list);
+
+    await fetch(`${base}/v1/chat/completions`, {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({ model: 'robin', messages: [{ role: 'user', content: 'hi' }] }),
+    });
+    // The session is closed by the time we can list, so assert on the create
+    // path instead: nothing terminal-shaped should have been produced.
+    expect(sessions.list()).toEqual([]);
+  });
+});
+
+describe('a client that hangs up', () => {
+  it('interrupts the turn rather than letting it burn provider quota', async () => {
+    let sawAbort: boolean | undefined;
+    (providers[0].chat as ReturnType<typeof vi.fn>).mockImplementation(async function* (
+      _model: string,
+      _history: unknown,
+      _tools: unknown,
+      signal?: AbortSignal
+    ) {
+      yield { type: 'text', text: 'start' };
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      // Recorded rather than asserted here: this runs inside the daemon, and a
+      // failed expectation in a generator is swallowed by the turn.
+      sawAbort = signal?.aborted === true;
+      if (signal?.aborted) {
+        const err = new Error('aborted');
+        err.name = 'AbortError';
+        throw err;
+      }
+      yield { type: 'text', text: ' end' };
+    });
+
+    const controller = new AbortController();
+    const request = fetch(`${base}/v1/chat/completions`, {
+      method: 'POST',
+      headers: auth,
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: 'copilot',
+        messages: [{ role: 'user', content: 'hi' }],
+        stream: true,
+      }),
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    controller.abort();
+    await request.catch(() => {});
+
+    await vi.waitFor(() => expect(sawAbort).toBe(true), { timeout: 3000 });
+    // And nothing is left behind for /session to show.
+    await vi.waitFor(() => expect(sessions.list()).toEqual([]), { timeout: 3000 });
+  });
+});

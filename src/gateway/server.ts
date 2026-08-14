@@ -274,7 +274,17 @@ export class GatewayServer {
       case 'session.list':
         return { sessions: this.deps.sessions.list() };
       case 'session.create':
-        return this.deps.sessions.create(params as never);
+        return this.deps.sessions.create({
+          ...(params as unknown as Parameters<SessionService['create']>[0]),
+          // A client cannot claim to be a kind it is not: the connect frame
+          // already said what it was, and that is what counts here.
+          origin:
+            params.origin === 'http' && client.kind === 'terminal'
+              ? 'http'
+              : client.kind === 'channel'
+                ? 'channel'
+                : 'terminal',
+        });
       case 'session.attach': {
         const id = Number(params.id);
         const result = this.deps.sessions.attach(id);

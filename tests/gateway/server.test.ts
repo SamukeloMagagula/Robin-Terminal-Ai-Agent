@@ -178,10 +178,13 @@ describe('GatewayServer methods', () => {
     });
     const frame = await next(socket);
 
+    // The origin comes from the connect frame, not from the request: a client
+    // cannot claim to be a kind it already said it was not.
     expect(sessions.create).toHaveBeenCalledWith({
       providerId: 'copilot',
       model: 'gpt-4o',
       cwd: 'C:/work',
+      origin: 'terminal',
     });
     expect(frame).toMatchObject({ type: 'res', id: '2', ok: true, result: { id: 7 } });
   });

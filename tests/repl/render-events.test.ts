@@ -12,6 +12,7 @@ const snapshot: SessionSnapshot = {
   providerName: 'Ollama (local)',
   model: 'llama3.1',
   cwd: '.',
+  origin: 'terminal',
   toolsEnabled: true,
   autoApprove: false,
   turnCount: 1,

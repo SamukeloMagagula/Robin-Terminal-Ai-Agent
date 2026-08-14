@@ -21,9 +21,18 @@ export interface ApprovalOrigin {
   who?: string;
 }
 
+/** Which kind of surface opened a session. */
+export type SessionOrigin = 'terminal' | 'channel' | 'http';
+
 /** A session as clients see it. Never carries history — that comes from attach. */
 export interface SessionSnapshot {
   id: number;
+  /**
+   * What opened it. A terminal reopened in a directory reuses its own previous
+   * session, and must not adopt one a chat or an HTTP request happens to share
+   * a working directory with.
+   */
+  origin: SessionOrigin;
   label?: string;
   providerId: string;
   providerName: string;

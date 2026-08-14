@@ -5,6 +5,7 @@ import type {
   AttachResult,
   GatewayEvent,
   PromptAccepted,
+  SessionOrigin,
   SessionSnapshot,
 } from './protocol.js';
 import { runTurn } from '../repl/run-turn.js';
@@ -45,6 +46,7 @@ export interface SessionServiceDeps {
 interface SessionRecord {
   session: Session;
   cwd: string;
+  origin: SessionOrigin;
   autoApprove: boolean;
   /** Turns waiting or running. A new prompt queues behind the tail. */
   queue: Promise<void>;
@@ -98,6 +100,7 @@ export class SessionService {
     cwd: string;
     label?: string;
     autoApprove?: boolean;
+    origin?: SessionOrigin;
   }): SessionSnapshot {
     const provider = this.provider(params.providerId);
     // Ids are never reused: a client still holding a closed session's id would
@@ -109,6 +112,7 @@ export class SessionService {
     this.records.set(id, {
       session,
       cwd: params.cwd,
+      origin: params.origin ?? 'terminal',
       autoApprove: params.autoApprove ?? false,
       queue: Promise.resolve(),
       pending: 0,
@@ -193,6 +197,7 @@ export class SessionService {
       providerName: session.provider.name,
       model: session.model,
       cwd: record.cwd,
+      origin: record.origin,
       toolsEnabled: session.toolsEnabled,
       autoApprove: record.autoApprove,
       turnCount: session.turnCount,
@@ -370,6 +375,7 @@ export class SessionService {
       this.records.set(saved.id, {
         session,
         cwd: saved.cwd,
+        origin: saved.origin ?? 'terminal',
         autoApprove: saved.autoApprove,
         queue: Promise.resolve(),
         // Whatever was running when the daemon stopped is not running now.
@@ -394,6 +400,7 @@ export class SessionService {
       providerId: session.provider.id,
       model: session.model,
       cwd: record.cwd,
+      origin: record.origin,
       toolsEnabled: session.toolsEnabled,
       autoApprove: record.autoApprove,
       turnCount: session.turnCount,

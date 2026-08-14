@@ -161,7 +161,12 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   // A session this directory already owns is the one to continue. Picking it up
   // rather than starting another is the whole point of a daemon that outlives
   // the terminal: closing the window is no longer the end of a conversation.
-  const here = client.sessions.find((session) => session.cwd === process.cwd());
+  // Terminal sessions only. The Telegram bridge and the HTTP API create theirs
+  // in the daemon's working directory, so matching on the directory alone once
+  // meant a terminal opened there silently joined a chat's conversation.
+  const here = client.sessions.find(
+    (session) => session.cwd === process.cwd() && session.origin === 'terminal'
+  );
   let snapshot =
     here ??
     (await client.request<SessionSnapshot>('session.create', {

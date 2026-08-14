@@ -20,6 +20,8 @@ export interface PersistedSession {
   providerId: string;
   model: string;
   cwd: string;
+  /** Absent in files written before origins existed; treated as a terminal. */
+  origin?: 'terminal' | 'channel' | 'http';
   toolsEnabled: boolean;
   autoApprove: boolean;
   turnCount: number;

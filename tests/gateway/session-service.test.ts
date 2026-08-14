@@ -246,3 +246,31 @@ describe('SessionService sessions', () => {
     expect(second.id).not.toBe(first.id);
   });
 });
+
+describe('SessionService origins', () => {
+  it('records a session as a terminal session by default', () => {
+    const { svc } = service();
+    expect(svc.create({ providerId: 'copilot', model: 'm', cwd: '.' }).origin).toBe('terminal');
+  });
+
+  // Without this a terminal reopened in the daemon's own directory reuses
+  // whatever session happens to share that cwd — and the bridge and the HTTP
+  // API both create theirs there. Typing into a Telegram chat's conversation
+  // by accident is not a shared session, it is a wrong one.
+  it('keeps a channel session distinguishable from a terminal one', () => {
+    const { svc } = service();
+    const chat = svc.create({ providerId: 'copilot', model: 'm', cwd: '.', origin: 'channel' });
+    const terminal = svc.create({ providerId: 'copilot', model: 'm', cwd: '.' });
+
+    expect(chat.origin).toBe('channel');
+    expect(terminal.origin).toBe('terminal');
+    expect(svc.list().filter((s) => s.origin === 'terminal')).toHaveLength(1);
+  });
+
+  it('records an http session as its own kind', () => {
+    const { svc } = service();
+    expect(
+      svc.create({ providerId: 'copilot', model: 'm', cwd: '.', origin: 'http' }).origin
+    ).toBe('http');
+  });
+});

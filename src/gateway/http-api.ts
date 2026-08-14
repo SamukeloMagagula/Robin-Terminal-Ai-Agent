@@ -74,12 +74,24 @@ function isMessage(value: unknown): value is { role: string; content: string } {
  * conversation nobody owns cluttering `/session`.
  */
 export function createHttpApi(deps: HttpApiDeps) {
-  /** Turns a requested model into a provider and a model name. */
-  function route(model: string): { providerId: string; model: string } | undefined {
+  /**
+   * Turns a requested model into a provider and a model name.
+   *
+   * "robin" means the first provider actually logged in, not the first in the
+   * registry — which is what the documentation has always said, and what a
+   * caller who has only ever logged into one provider expects.
+   */
+  async function route(
+    model: string
+  ): Promise<{ providerId: string; model: string } | undefined> {
     const wanted = model.trim();
     if (!wanted || wanted === 'robin') {
-      const first = deps.providers[0];
-      return first ? { providerId: first.id, model: '' } : undefined;
+      for (const provider of deps.providers) {
+        if (await provider.isAuthenticated().catch(() => false)) {
+          return { providerId: provider.id, model: '' };
+        }
+      }
+      return undefined;
     }
     const slash = wanted.indexOf('/');
     const providerId = slash === -1 ? wanted : wanted.slice(0, slash);
@@ -129,9 +141,15 @@ export function createHttpApi(deps: HttpApiDeps) {
     }
 
     const requested = typeof parsed.model === 'string' ? parsed.model : 'robin';
-    const routed = route(requested);
+    const routed = await route(requested);
     if (!routed) {
-      fail(res, 400, `Unknown model "${requested}". Try "robin", or "<provider>/<model>".`);
+      fail(
+        res,
+        400,
+        requested === 'robin' || !requested.trim()
+          ? 'No provider is logged in. Run `robin login <provider>` first.'
+          : `Unknown model "${requested}". Try "robin", or "<provider>/<model>".`
+      );
       return;
     }
 
@@ -160,6 +178,9 @@ export function createHttpApi(deps: HttpApiDeps) {
       model,
       cwd: process.cwd(),
       label: 'http',
+      // So a terminal opened in the daemon's own directory never adopts one of
+      // these as the conversation it was working in.
+      origin: 'http',
     });
     if (system.length > 0) {
       deps.sessions.update(session.id, { systemPrompt: system.join('\n\n') });
@@ -216,12 +237,33 @@ export function createHttpApi(deps: HttpApiDeps) {
       );
     }
 
+    // A client that walks away — a user hitting stop, a socket dropping — must
+    // not leave a turn running against a provider nobody is waiting on.
+    let abandoned = false;
+    res.on('close', () => {
+      if (res.writableFinished) return;
+      abandoned = true;
+      if (turnId) deps.sessions.interrupt(turnId);
+    });
+    // Writes to a socket that has gone are not an error worth crashing over.
+    res.on('error', () => {});
+
     const accepted = deps.sessions.sendPrompt(session.id, lastUser.content, { surface: 'http' });
     turnId = accepted.turnId;
+    // The listener was registered before the id existed, so a turn that
+    // finished this quickly would not have matched. Re-check now.
+    if (abandoned) deps.sessions.interrupt(turnId);
+
     const result = await finished;
 
     // Closed however the turn went: the session existed only for this request.
     deps.sessions.close(session.id);
+
+    // Nobody is reading. Anything written now goes into a closed socket.
+    if (abandoned) {
+      res.end();
+      return;
+    }
 
     if (!result.ok) {
       const message = result.error ?? 'The turn failed.';
