@@ -429,7 +429,7 @@ Never stored: credentials, tokens or key material. The tool description forbids 
 
 ## MCP servers
 
-Robin can connect to [Model Context Protocol](https://modelcontextprotocol.io) servers over stdio, adding their tools alongside its own three. Declare them in `~/.robin/mcp.json` — the same shape other MCP hosts use, so you can paste server blocks straight from their docs:
+Robin can connect to [Model Context Protocol](https://modelcontextprotocol.io) servers over stdio, adding their tools alongside its own three. Declare them in `~/.robin/mcp.json`. Either `"servers"` or `"mcpServers"` works — the second is what Claude Desktop, Cursor and most other hosts use, so a block pasted from their docs works unchanged:
 
 ```jsonc
 {

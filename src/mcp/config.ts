@@ -42,11 +42,21 @@ export async function loadMcpConfig(
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
 
-  const servers = (parsed as { servers?: unknown }).servers;
-  if (!servers || typeof servers !== 'object' || Array.isArray(servers)) return [];
+  // Both spellings. Robin documents `servers`, but Claude Desktop, Cursor and
+  // most other hosts key this `mcpServers` — and Robin's own README invites you
+  // to paste server blocks straight from their docs, which silently did nothing
+  // while only one spelling was read.
+  const file = parsed as { servers?: unknown; mcpServers?: unknown };
+  const entries: Record<string, unknown> = {};
+  for (const candidate of [file.mcpServers, file.servers]) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue;
+    // `servers` is read last, so Robin's documented spelling wins a collision.
+    Object.assign(entries, candidate as Record<string, unknown>);
+  }
+  if (Object.keys(entries).length === 0) return [];
 
   const out: McpServerConfig[] = [];
-  for (const [name, raw] of Object.entries(servers as Record<string, unknown>)) {
+  for (const [name, raw] of Object.entries(entries)) {
     if (!isValidServerName(name)) continue;
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
     const entry = raw as Record<string, unknown>;

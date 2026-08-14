@@ -85,3 +85,50 @@ describe('serverFingerprint', () => {
     expect(a).not.toBe(b);
   });
 });
+
+describe('loadMcpConfig and the mcpServers spelling', () => {
+  // Claude Desktop, Cursor and most other hosts key this "mcpServers". Robin
+  // documented "the same shape other MCP hosts use" while only reading
+  // "servers", so a block pasted from any of their docs silently did nothing.
+  it('reads a config written with mcpServers', async () => {
+    const file = await withConfig(
+      JSON.stringify({ mcpServers: { fs: { command: 'npx', args: ['-y', 'server-fs'] } } })
+    );
+
+    expect(await loadMcpConfig(file)).toEqual([
+      { name: 'fs', command: 'npx', args: ['-y', 'server-fs'], env: undefined, cwd: undefined },
+    ]);
+  });
+
+  it('still reads a config written with servers', async () => {
+    const file = await withConfig(JSON.stringify({ servers: { fs: { command: 'x' } } }));
+    expect((await loadMcpConfig(file)).map((s) => s.name)).toEqual(['fs']);
+  });
+
+  it('takes both when a file has both', async () => {
+    const file = await withConfig(
+      JSON.stringify({ servers: { a: { command: 'x' } }, mcpServers: { b: { command: 'y' } } })
+    );
+
+    expect((await loadMcpConfig(file)).map((s) => s.name).sort()).toEqual(['a', 'b']);
+  });
+
+  // Robin's own spelling is the documented one, so it decides.
+  it('prefers the servers entry when a name appears under both', async () => {
+    const file = await withConfig(
+      JSON.stringify({
+        servers: { same: { command: 'from-servers' } },
+        mcpServers: { same: { command: 'from-mcpServers' } },
+      })
+    );
+
+    const loaded = await loadMcpConfig(file);
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].command).toBe('from-servers');
+  });
+
+  it('returns nothing when neither key is present', async () => {
+    const file = await withConfig(JSON.stringify({ somethingElse: {} }));
+    expect(await loadMcpConfig(file)).toEqual([]);
+  });
+});
