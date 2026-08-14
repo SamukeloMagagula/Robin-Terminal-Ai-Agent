@@ -15,6 +15,7 @@ import { ContextLimitStore } from '../providers/context-limits.js';
 import { MemoryStore } from '../memory/store.js';
 import { SkillStore } from '../skills/store.js';
 import { SessionStore } from './session-store.js';
+import { createHttpApi } from './http-api.js';
 
 export interface StartedGateway {
   port: number;
@@ -76,6 +77,12 @@ export async function startGateway(
     token,
     port: options.port ?? defaultPort(),
     log,
+    http: createHttpApi({
+      token,
+      providers: listProviders(),
+      sessions,
+      subscribe: (handler) => server.onEvent(handler),
+    }),
   });
 
   const port = await server.listen();

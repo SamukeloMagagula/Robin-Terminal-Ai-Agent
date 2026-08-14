@@ -1,4 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import {
+  createServer,
+  type Server as HttpServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
   PROTOCOL_VERSION,
@@ -18,6 +24,11 @@ export interface GatewayServerDeps {
   token: string;
   port: number;
   log?: (line: string) => void;
+  /**
+   * Serves the /v1 routes on the same port. Absent means the port speaks
+   * WebSocket only, which is all the tests of this file need.
+   */
+  http?: { handle(req: IncomingMessage, res: ServerResponse): Promise<void> };
 }
 
 interface Client {
@@ -43,26 +54,70 @@ function coded(code: string, message: string): Error & { code: string } {
  */
 export class GatewayServer {
   private wss: WebSocketServer | undefined;
+  private http: HttpServer | undefined;
   private readonly clients = new Map<string, Client>();
+  private readonly eventListeners = new Set<(sessionId: number, event: GatewayEvent) => void>();
   private readonly log: (line: string) => void;
 
   constructor(private readonly deps: GatewayServerDeps) {
     this.log = deps.log ?? ((line) => console.log(line));
   }
 
+  /**
+   * Subscribes to every event the daemon emits.
+   *
+   * The HTTP API needs the same stream the WebSocket clients get, without
+   * being one. Returns the unsubscribe.
+   */
+  onEvent(handler: (sessionId: number, event: GatewayEvent) => void): () => void {
+    this.eventListeners.add(handler);
+    return () => {
+      this.eventListeners.delete(handler);
+    };
+  }
+
   listen(): Promise<number> {
     return new Promise((resolve, reject) => {
-      // Loopback only. This socket can run commands as the user who started
-      // it; the token is a second lock, not the first one.
-      const wss = new WebSocketServer({ host: '127.0.0.1', port: this.deps.port });
+      // One port for both protocols: the WebSocket rides on the same HTTP
+      // server the /v1 routes are served from, so there is a single address to
+      // find, a single token to hold, and one thing to firewall.
+      const http = createServer((req, res) => {
+        void this.deps.http?.handle(req, res);
+      });
+      this.http = http;
+
+      const wss = new WebSocketServer({ server: http });
       this.wss = wss;
-      wss.once('error', reject);
-      wss.once('listening', () => {
-        wss.removeListener('error', reject);
-        const address = wss.address();
+      wss.on('connection', (socket) => this.accept(socket));
+      // ws re-emits the HTTP server's errors on itself. Without a listener
+      // here, a failed listen — the ordinary case when two clients race to
+      // auto-start — is an unhandled 'error' event that takes the process down
+      // instead of a rejected promise the caller can act on.
+      wss.on('error', () => {});
+
+      // `on`, not `once`: a failed listen can emit more than once, and a second
+      // emission with no listener left is an unhandled error that takes the
+      // process down instead of the port simply being unavailable.
+      let settled = false;
+      http.on('error', (err: Error) => {
+        if (settled) {
+          this.log(`gateway server error: ${err.message}`);
+          return;
+        }
+        settled = true;
+        // Nothing is listening, so this server is not going to be closed by
+        // the caller — it never got a handle to it.
+        http.close(() => {});
+        reject(err);
+      });
+      http.once('listening', () => {
+        settled = true;
+        const address = http.address();
         resolve(typeof address === 'object' && address ? address.port : this.deps.port);
       });
-      wss.on('connection', (socket) => this.accept(socket));
+      // Loopback only. This port can run commands as the user who started it;
+      // the token is a second lock, not the first one.
+      http.listen(this.deps.port, '127.0.0.1');
     });
   }
 
@@ -70,9 +125,14 @@ export class GatewayServer {
     for (const client of this.clients.values()) client.socket.close();
     this.clients.clear();
     const wss = this.wss;
-    if (!wss) return;
-    await new Promise<void>((resolve) => wss.close(() => resolve()));
-    this.wss = undefined;
+    if (wss) {
+      await new Promise<void>((resolve) => wss.close(() => resolve()));
+      this.wss = undefined;
+    }
+    const http = this.http;
+    if (!http) return;
+    await new Promise<void>((resolve) => http.close(() => resolve()));
+    this.http = undefined;
   }
 
   /** Delivers a session's event to every client watching that session. */
@@ -81,6 +141,7 @@ export class GatewayServer {
     for (const client of this.clients.values()) {
       if (client.connected && client.attached.has(sessionId)) this.write(client, frame);
     }
+    for (const listener of this.eventListeners) listener(sessionId, event);
   }
 
   /**

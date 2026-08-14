@@ -234,6 +234,40 @@ immediately.
   still run in the original directory. `/session new` starts one bound to where
   you are now.
 
+### Driving Robin from other tools
+
+The gateway serves an OpenAI-compatible API on the same port, so anything that
+speaks `chat/completions` — an editor plugin, a script, the `openai` SDK — can
+use Robin. Not as a model proxy: the turn runs with Robin's tools, memory and
+skills, and a tool call it raises is offered to whatever terminal is attached,
+refused when there is none.
+
+```bash
+TOKEN=$(node -e "console.log(require(require('os').homedir()+'/.robin/gateway.json').token)")
+
+curl http://127.0.0.1:18790/v1/chat/completions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"model":"robin","messages":[{"role":"user","content":"say pong"}]}'
+```
+
+The API key is the gateway token from `~/.robin/gateway.json`. `model` is either
+`robin` (the first provider you're logged into, its default model) or
+`<provider>/<model>` — `copilot/gpt-5.4`, `local/llama-3.1`. `GET /v1/models`
+lists what's available. `"stream": true` returns SSE chunks in the usual shape.
+
+Two things differ from a hosted API, both deliberate:
+
+- **The `model` in the response is the one that actually answered.** If your
+  request fell back to another model, the reply says so rather than echoing
+  what you asked for.
+- **Token counts are reported as zero.** Robin doesn't count them, and inventing
+  numbers would be worse than admitting that.
+
+Each request gets its own session, closed when the answer is sent — the endpoint
+is stateless by OpenAI's design, so your client sends the whole conversation
+each time and nothing accumulates in `/session`.
+
 If something looks wrong, `robin doctor` checks the gateway too — including the
 one failure worth naming: a daemon left running from before your last build,
 speaking a protocol this build doesn't. It tells you to run `robin gateway stop`.
