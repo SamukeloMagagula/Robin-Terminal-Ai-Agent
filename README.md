@@ -299,9 +299,20 @@ Each request gets its own session, closed when the answer is sent — the endpoi
 is stateless by OpenAI's design, so your client sends the whole conversation
 each time and nothing accumulates in `/session`.
 
-If something looks wrong, `robin doctor` checks the gateway too — including the
-one failure worth naming: a daemon left running from before your last build,
-speaking a protocol this build doesn't. It tells you to run `robin gateway stop`.
+If something looks wrong, `robin doctor` checks the gateway too. Two failures
+are worth naming, both caused by the same thing — a daemon outliving the build
+that started it:
+
+- **A protocol it doesn't speak.** Refused outright, because the two sides
+  cannot understand each other.
+- **A different build of the same protocol.** The quieter case, and far more
+  common: the daemon understands everything and simply behaves like the code it
+  started with. Once, that made token counting look broken when it wasn't.
+  `robin gateway status`, `robin doctor` and `robin chat` all say so, and none
+  of them refuses — most rebuilds change nothing a running daemon would get
+  wrong.
+
+Either way the fix is `robin gateway stop`; the next message starts a fresh one.
 
 ## OpenRouter spend
 

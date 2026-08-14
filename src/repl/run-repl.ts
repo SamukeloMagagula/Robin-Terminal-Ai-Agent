@@ -276,6 +276,18 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     usageLine: startupUsage ? renderUsageLine(startupUsage) : undefined,
   });
 
+  if (client.staleBuild) {
+    // The protocol version catches a daemon that cannot be understood. This
+    // catches the quieter one: a daemon that understands everything and
+    // behaves like the code it started with.
+    console.log(
+      errorColor(
+        'The gateway is running an older build than this one. Run `robin gateway stop` ' +
+          'to pick up your changes — it restarts on the next message.'
+      )
+    );
+  }
+
   if (attached.history.length > 0) {
     // Rejoining, not starting. Say so rather than presenting a conversation
     // with history as a blank slate.

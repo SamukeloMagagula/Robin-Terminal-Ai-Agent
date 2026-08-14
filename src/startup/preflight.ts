@@ -17,6 +17,7 @@ import {
   readGatewayInfo,
 } from '../gateway/discovery.js';
 import { PROTOCOL_VERSION } from '../gateway/protocol.js';
+import { buildFingerprint } from '../gateway/build-id.js';
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
 
@@ -208,7 +209,11 @@ export interface PreflightOptions {
  * auto-start creates, because a daemon outlives the build that started it and
  * the resulting errors look like anything but version skew.
  */
-export async function checkGateway(infoPath?: string): Promise<CheckResult> {
+export async function checkGateway(
+  infoPath?: string,
+  /** Injected so the stale-build path is testable; see the header. */
+  ownBuild?: string
+): Promise<CheckResult> {
   const info = await readGatewayInfo(infoPath ?? defaultGatewayInfoPath());
   if (!info) {
     return { status: 'ok', detail: 'not running (started on demand by `robin chat`)' };
@@ -227,6 +232,17 @@ export async function checkGateway(infoPath?: string): Promise<CheckResult> {
       remedy: 'Run `robin gateway stop`. That daemon predates your last build.',
     };
   }
+  // Same protocol, different code — the quiet case. Worth a warning, never a
+  // failure: most rebuilds change nothing a running daemon would get wrong.
+  const own = ownBuild ?? (await buildFingerprint());
+  if (own && info.build && info.build !== own) {
+    return {
+      status: 'warn',
+      detail: `running on port ${info.port}, but from an older build (${info.build}, this one is ${own})`,
+      remedy: 'Run `robin gateway stop` to pick up your latest build.',
+    };
+  }
+
   return { status: 'ok', detail: `running on 127.0.0.1:${info.port} (pid ${info.pid})` };
 }
 

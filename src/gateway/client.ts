@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import WebSocket from 'ws';
+import { buildFingerprint } from './build-id.js';
 import {
   PROTOCOL_VERSION,
   parseFrame,
@@ -44,7 +45,9 @@ export class GatewayClient {
     private readonly socket: WebSocket,
     readonly sessions: SessionSnapshot[],
     /** What the daemon has, for a client that wants to display it. */
-    readonly mcp: { servers: number; tools: number }
+    readonly mcp: { servers: number; tools: number },
+    /** True when the daemon is running different compiled output than this. */
+    readonly staleBuild: boolean
   ) {
     socket.on('message', (data) => this.receive(String(data)));
     socket.on('close', () => this.onSocketClosed());
@@ -64,10 +67,14 @@ export class GatewayClient {
       );
     });
 
+    // Before the promise: its executor is not async, and this is IO.
+    const build = await buildFingerprint();
+
     const id = randomUUID();
     const hello = await new Promise<{
       sessions: SessionSnapshot[];
       mcp?: { servers: number; tools: number };
+      staleBuild?: boolean;
     }>((resolve, reject) => {
       socket.once('message', (data) => {
         const frame = parseFrame(String(data));
@@ -92,6 +99,7 @@ export class GatewayClient {
             canApprove: options.canApprove,
             cwd: options.cwd,
             protocol: PROTOCOL_VERSION,
+            build,
           },
         })
       );
@@ -100,7 +108,12 @@ export class GatewayClient {
       throw err;
     });
 
-    return new GatewayClient(socket, hello.sessions, hello.mcp ?? { servers: 0, tools: 0 });
+    return new GatewayClient(
+      socket,
+      hello.sessions,
+      hello.mcp ?? { servers: 0, tools: 0 },
+      hello.staleBuild === true
+    );
   }
 
   request<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {

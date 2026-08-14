@@ -31,6 +31,8 @@ export interface GatewayServerDeps {
   http?: { handle(req: IncomingMessage, res: ServerResponse): Promise<void> };
   /** Reported at connect, so a client's HUD can say what the daemon actually has. */
   mcpSummary?: () => { servers: number; tools: number };
+  /** Identifies the compiled output this daemon is running. */
+  buildId?: string;
 }
 
 interface Client {
@@ -286,10 +288,23 @@ export class GatewayServer {
       client.kind = params.kind === 'channel' ? 'channel' : 'terminal';
       client.canApprove = params.canApprove === true;
       if (typeof params.cwd === 'string') client.cwd = params.cwd;
+      // Both known and different is the only case worth reporting: a client
+      // that cannot work out its own build is unknown, not stale.
+      const clientBuild = typeof params.build === 'string' ? params.build : undefined;
+      const staleBuild =
+        clientBuild !== undefined &&
+        this.deps.buildId !== undefined &&
+        clientBuild !== this.deps.buildId;
+
       return {
         sessions: this.deps.sessions.list(),
         protocol: PROTOCOL_VERSION,
         mcp: this.deps.mcpSummary?.() ?? { servers: 0, tools: 0 },
+        build: this.deps.buildId,
+        // Reported, never enforced. Most rebuilds change nothing a running
+        // daemon would get wrong, and refusing every edit would be worse than
+        // the problem this exists to name.
+        staleBuild,
       };
     }
 

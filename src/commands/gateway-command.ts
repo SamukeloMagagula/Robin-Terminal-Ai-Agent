@@ -6,6 +6,7 @@ import {
   removeGatewayInfo,
 } from '../gateway/discovery.js';
 import { PROTOCOL_VERSION } from '../gateway/protocol.js';
+import { buildFingerprint } from '../gateway/build-id.js';
 import { mutedColor, errorColor } from '../ui/theme.js';
 
 /**
@@ -54,6 +55,15 @@ export async function runGatewayStatus(): Promise<void> {
     return;
   }
   console.log(`Running on 127.0.0.1:${info.port} (pid ${info.pid}), protocol ${info.protocol}.`);
+  const own = await buildFingerprint();
+  if (own && info.build && info.build !== own) {
+    console.log(
+      errorColor(
+        `It is running build ${info.build}; this one is ${own}. ` +
+          'Run `robin gateway stop` to pick up your changes.'
+      )
+    );
+  }
   if (info.protocol !== PROTOCOL_VERSION) {
     // Auto-start means a daemon outlives the build that started it.
     console.log(

@@ -76,3 +76,37 @@ describe('checkGateway', () => {
     expect(['ok', 'warn']).toContain(result.status);
   });
 });
+
+describe('checkGateway and stale builds', () => {
+  it('warns when the daemon is running a different build', async () => {
+    const file = throwawayPath();
+    await writeGatewayInfo(
+      {
+        port: 18790,
+        pid: process.pid,
+        token: 't',
+        protocol: PROTOCOL_VERSION,
+        build: 'notthisbuild',
+      },
+      file
+    );
+
+    const result = await checkGateway(file, 'thisbuild');
+
+    expect(result.status).toBe('warn');
+    expect(result.detail).toMatch(/older build/i);
+    expect(result.remedy).toContain('robin gateway stop');
+  });
+
+  // Files written before builds were recorded, and builds whose directory
+  // cannot be read, are unknown rather than stale.
+  it('says nothing when the daemon recorded no build', async () => {
+    const file = throwawayPath();
+    await writeGatewayInfo(
+      { port: 18790, pid: process.pid, token: 't', protocol: PROTOCOL_VERSION },
+      file
+    );
+
+    expect((await checkGateway(file, 'thisbuild')).status).toBe('ok');
+  });
+});

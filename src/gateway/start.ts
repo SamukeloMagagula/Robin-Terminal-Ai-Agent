@@ -17,6 +17,7 @@ import { SkillStore } from '../skills/store.js';
 import { SessionStore } from './session-store.js';
 import { createHttpApi } from './http-api.js';
 import { startTrustedMcpServers } from './mcp.js';
+import { buildFingerprint } from './build-id.js';
 
 export interface StartedGateway {
   port: number;
@@ -46,6 +47,7 @@ export async function startGateway(
   // 32 bytes because anything that can read this token can open the socket,
   // and anything that can open the socket can run commands as this user.
   const token = randomBytes(32).toString('hex');
+  const buildId = await buildFingerprint();
 
   let server: GatewayServer;
 
@@ -83,6 +85,7 @@ export async function startGateway(
     token,
     port: options.port ?? defaultPort(),
     log,
+    buildId,
     mcpSummary: () => ({
       servers: mcp.started.length,
       tools: mcp.registry.toolDefinitions().length,
@@ -96,7 +99,10 @@ export async function startGateway(
   });
 
   const port = await server.listen();
-  await writeGatewayInfo({ port, pid: process.pid, token, protocol: PROTOCOL_VERSION }, infoPath);
+  await writeGatewayInfo(
+    { port, pid: process.pid, token, protocol: PROTOCOL_VERSION, build: buildId },
+    infoPath
+  );
   const notes = [
     restored > 0 ? `${restored} conversation(s) restored` : undefined,
     // Counted from the tools, not the servers: a server that was launched but

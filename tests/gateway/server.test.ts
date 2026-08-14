@@ -66,6 +66,7 @@ beforeEach(async () => {
     // Ephemeral: a fixed port makes parallel test files fight each other.
     port: 0,
     log: () => {},
+    buildId: 'server-build',
   });
   port = await server.listen();
 });
@@ -493,5 +494,57 @@ describe('GatewayServer and browser origins', () => {
 
   it('allows localhost by name as well as by address', async () => {
     expect((await connectFrom(`http://localhost:${port}`)).opened).toBe(true);
+  });
+});
+
+describe('GatewayServer and stale builds', () => {
+  async function connectWithBuild(build?: string): Promise<Record<string, unknown>> {
+    const socket = await open(port);
+    openSockets.push(socket);
+    send(socket, {
+      type: 'req',
+      id: 'c',
+      method: 'connect',
+      params: { ...connectParams, build },
+    });
+    const frame = await next(socket);
+    return (frame as { result: Record<string, unknown> }).result;
+  }
+
+  // The protocol version refuses a client that cannot be understood. This is
+  // the softer, far more common case: same protocol, different code — a daemon
+  // still running yesterday's build, behaving like yesterday's build without
+  // saying so.
+  it('reports a build that does not match its own', async () => {
+    const result = await connectWithBuild('deadbeef0000');
+    expect(result.staleBuild).toBe(true);
+    expect(result.build).toBe('server-build');
+  });
+
+  it('says nothing is stale when the builds agree', async () => {
+    const result = await connectWithBuild('server-build');
+    expect(result.staleBuild).toBe(false);
+  });
+
+  // A client that cannot work out its own build must not be told it is stale:
+  // "unknown" and "different" are not the same answer.
+  it('does not call an unknown build stale', async () => {
+    const result = await connectWithBuild(undefined);
+    expect(result.staleBuild).toBe(false);
+  });
+
+  it('still lets a stale client work, because most rebuilds change nothing', async () => {
+    const socket = await open(port);
+    openSockets.push(socket);
+    send(socket, {
+      type: 'req',
+      id: 'c',
+      method: 'connect',
+      params: { ...connectParams, build: 'deadbeef0000' },
+    });
+    await next(socket);
+
+    send(socket, { type: 'req', id: '2', method: 'session.list', params: {} });
+    expect(await next(socket)).toMatchObject({ ok: true });
   });
 });

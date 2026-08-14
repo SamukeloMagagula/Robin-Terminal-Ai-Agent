@@ -12,6 +12,11 @@ export interface GatewayInfo {
   token: string;
   /** The protocol this daemon speaks — lets a client spot skew before connecting. */
   protocol: number;
+  /**
+   * The compiled output it is running. Absent from files written before this
+   * existed, and from a build whose directory could not be read.
+   */
+  build?: string;
 }
 
 export function defaultGatewayInfoPath(): string {
