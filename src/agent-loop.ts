@@ -1,4 +1,4 @@
-import type { Provider, Message, ToolCall, ToolDefinition } from './providers/types.js';
+import type { Provider, Message, ToolCall, ToolDefinition, TokenUsage } from './providers/types.js';
 import type { ConfirmFn } from './tools/execute.js';
 import { isAbortError } from './providers/chat-error.js';
 import { createAnswerUnwrapper } from './answer-wrapper.js';
@@ -11,6 +11,13 @@ export interface AgentDeps {
   onText: (text: string) => void;
   /** Reasoning summaries, where the provider streams them. Display only. */
   onThinking?: (text: string) => void;
+  /**
+   * What one request cost, where the provider says.
+   *
+   * Called once per round, so a turn that used three tool calls reports three
+   * times — each is a separate request with its own bill.
+   */
+  onUsage?: (usage: TokenUsage) => void;
   /** Cancels the in-flight request. An abort ends the turn, keeping what streamed. */
   signal?: AbortSignal;
 }
@@ -29,6 +36,7 @@ export async function runAgentTurn(
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
     let text = '';
+    let roundUsage: TokenUsage | undefined;
     const toolCalls: ToolCall[] = [];
     // Some models wrap every reply in <final_answer>…</final_answer>. Stripped
     // here rather than at render time so the history is clean too — otherwise
@@ -44,6 +52,12 @@ export async function runAgentTurn(
             text += visible;
             deps.onText(visible);
           }
+        } else if (event.type === 'usage') {
+          // Replaced, not accumulated. Gemini repeats usageMetadata on every
+          // frame with the total so far, so adding them up multiplies the
+          // count — three reports in one request became triple the tokens.
+          // One request is billed once; the last word is the true one.
+          roundUsage = event.usage;
         } else if (event.type === 'thinking') {
           // Deliberately not accumulated into `text`: reasoning is shown to
           // the user but must not become part of the assistant's message, or
@@ -60,6 +74,8 @@ export async function runAgentTurn(
       // a different model. Their next message then reads as a redirect rather
       // than a non-sequitur.
       if (!isAbortError(err)) throw err;
+      // An interrupted request was still served in part, and still billed.
+      if (roundUsage) deps.onUsage?.(roundUsage);
       const remainder = unwrap.end();
       if (remainder) {
         text += remainder;
@@ -68,6 +84,9 @@ export async function runAgentTurn(
       newMessages.push({ role: 'assistant', content: `${text}\n\n[interrupted]` });
       return newMessages;
     }
+
+    // One report per request, once the request is over.
+    if (roundUsage) deps.onUsage?.(roundUsage);
 
     // Whatever was held back waiting to see if it was part of a closing tag.
     const remainder = unwrap.end();

@@ -47,6 +47,8 @@ interface SessionRecord {
   session: Session;
   cwd: string;
   origin: SessionOrigin;
+  /** What this conversation has cost so far, summed over its turns. */
+  tokens: { input: number; output: number };
   autoApprove: boolean;
   /** Turns waiting or running. A new prompt queues behind the tail. */
   queue: Promise<void>;
@@ -113,6 +115,7 @@ export class SessionService {
       session,
       cwd: params.cwd,
       origin: params.origin ?? 'terminal',
+      tokens: { input: 0, output: 0 },
       autoApprove: params.autoApprove ?? false,
       queue: Promise.resolve(),
       pending: 0,
@@ -201,6 +204,7 @@ export class SessionService {
       toolsEnabled: session.toolsEnabled,
       autoApprove: record.autoApprove,
       turnCount: session.turnCount,
+      tokens: { ...record.tokens },
       systemPrompt: session.systemPrompt,
       busy: record.pending > 0,
       // Everything behind whichever turn is at the head of the queue.
@@ -298,6 +302,11 @@ export class SessionService {
           }),
       });
 
+      if (result.usage) {
+        record.tokens.input += result.usage.inputTokens;
+        record.tokens.output += result.usage.outputTokens;
+      }
+
       if (result.provider.id !== session.provider.id || result.model !== session.model) {
         // Fallback rescued the turn on another model. The session follows it,
         // exactly as the REPL has always done, and every attached client is
@@ -320,6 +329,9 @@ export class SessionService {
         providerName: result.provider.name,
         model: result.model,
         error: result.error?.message,
+        tokens: result.usage
+          ? { input: result.usage.inputTokens, output: result.usage.outputTokens }
+          : undefined,
       });
     } catch (err) {
       // runTurn reports failure in its result rather than throwing, so this is
@@ -376,6 +388,7 @@ export class SessionService {
         session,
         cwd: saved.cwd,
         origin: saved.origin ?? 'terminal',
+        tokens: saved.tokens ?? { input: 0, output: 0 },
         autoApprove: saved.autoApprove,
         queue: Promise.resolve(),
         // Whatever was running when the daemon stopped is not running now.
@@ -401,6 +414,7 @@ export class SessionService {
       model: session.model,
       cwd: record.cwd,
       origin: record.origin,
+      tokens: record.tokens,
       toolsEnabled: session.toolsEnabled,
       autoApprove: record.autoApprove,
       turnCount: session.turnCount,

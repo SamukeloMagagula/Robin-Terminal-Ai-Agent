@@ -160,7 +160,10 @@ const PAGE = `<!doctype html>
       name.textContent = s.label || (s.providerName + ' · ' + s.model);
       const meta = document.createElement('div');
       meta.className = 'meta';
-      meta.textContent = s.cwd;
+      const spent = s.tokens && (s.tokens.input || s.tokens.output)
+        ? '  ·  ' + (s.tokens.input + s.tokens.output).toLocaleString() + ' tokens'
+        : '';
+      meta.textContent = s.cwd + spent;
       const tags = document.createElement('div');
       const origin = document.createElement('span');
       origin.className = 'tag';

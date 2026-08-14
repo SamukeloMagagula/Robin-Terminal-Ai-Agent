@@ -10,8 +10,26 @@ export interface ToolDefinition {
   parameters: Record<string, unknown>; // JSON schema for the tool's arguments
 }
 
+/**
+ * What a request cost, in tokens.
+ *
+ * Providers all report this and Robin used to discard it. Counting is what
+ * makes a context limit something you see coming rather than something you hit,
+ * and what lets a session say what it has spent.
+ */
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export type ChatEvent =
   | { type: 'text'; text: string }
+  /**
+   * Reported once per request, where the provider says. Absent is normal:
+   * not every provider or every model returns it, and a missing count must
+   * never be mistaken for a count of zero.
+   */
+  | { type: 'usage'; usage: TokenUsage }
   /**
    * A summary of the model's reasoning, where the provider streams one.
    * Shown to the user but never added to the conversation history — the raw

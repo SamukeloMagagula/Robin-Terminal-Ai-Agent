@@ -120,7 +120,22 @@ export class OllamaProvider implements Provider {
             tool_calls?: { function: { name: string; arguments: Record<string, unknown> } }[];
           };
           done?: boolean;
+          prompt_eval_count?: number;
+          eval_count?: number;
         };
+        // Ollama puts the counts on the final line, alongside done: true.
+        if (
+          typeof parsed.prompt_eval_count === 'number' ||
+          typeof parsed.eval_count === 'number'
+        ) {
+          yield {
+            type: 'usage',
+            usage: {
+              inputTokens: parsed.prompt_eval_count ?? 0,
+              outputTokens: parsed.eval_count ?? 0,
+            },
+          };
+        }
         if (parsed.message?.content) yield { type: 'text', text: parsed.message.content };
         // Ollama emits each tool call complete within a single streamed chunk,
         // so there is nothing to accumulate across fragments.

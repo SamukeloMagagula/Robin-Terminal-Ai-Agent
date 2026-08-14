@@ -41,6 +41,8 @@ export interface SessionSnapshot {
   toolsEnabled: boolean;
   autoApprove: boolean;
   turnCount: number;
+  /** Running totals for this conversation, where providers reported them. */
+  tokens: { input: number; output: number };
   systemPrompt?: string;
   /** A turn is running right now. */
   busy: boolean;
@@ -71,6 +73,8 @@ export type GatewayEvent =
       providerName: string;
       model: string;
       error?: string;
+      /** What the turn cost, where the provider said. */
+      tokens?: { input: number; output: number };
     }
   | { kind: 'session.changed'; snapshot: SessionSnapshot };
 

@@ -120,6 +120,18 @@ export class AnthropicProvider implements Provider {
 
       const final = await stream.finalMessage();
 
+      // The final message carries the counts for the whole request, which is
+      // simpler than accumulating them across message_start and message_delta.
+      if (final.usage) {
+        yield {
+          type: 'usage',
+          usage: {
+            inputTokens: final.usage.input_tokens ?? 0,
+            outputTokens: final.usage.output_tokens ?? 0,
+          },
+        };
+      }
+
       if (final.stop_reason === 'refusal') {
         throw new ChatRequestError(
           `Anthropic declined this request${describeRefusal(final)}.`,

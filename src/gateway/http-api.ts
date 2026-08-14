@@ -196,6 +196,20 @@ export function createHttpApi(deps: HttpApiDeps) {
 
     let answer = '';
     let turnId: string | undefined;
+    // The session is created for this request alone, so whatever it has spent
+    // by the end is exactly what this request cost.
+    const spent = () => {
+      try {
+        const { tokens } = deps.sessions.snapshot(session.id);
+        return {
+          prompt_tokens: tokens.input,
+          completion_tokens: tokens.output,
+          total_tokens: tokens.input + tokens.output,
+        };
+      } catch {
+        return { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+      }
+    };
 
     const finished = new Promise<Extract<GatewayEvent, { kind: 'turn.finished' }>>((resolve) => {
       const stop = deps.subscribe((sessionId, event) => {
@@ -259,6 +273,8 @@ export function createHttpApi(deps: HttpApiDeps) {
 
     const result = await finished;
 
+    // Read before closing: the totals live on the session.
+    const usage = spent();
     // Closed however the turn went: the session existed only for this request.
     deps.sessions.close(session.id);
 
@@ -311,9 +327,9 @@ export function createHttpApi(deps: HttpApiDeps) {
           finish_reason: 'stop',
         },
       ],
-      // Robin does not count tokens. Reporting zeros is honest and keeps
-      // clients that insist on the field working; inventing numbers would not.
-      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      // What the provider actually reported. Zeros here mean the provider said
+      // nothing, which some models genuinely do not.
+      usage,
     });
   }
 

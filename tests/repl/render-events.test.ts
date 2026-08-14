@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { renderEvent } from '../../src/repl/render-events';
+import { renderEvent, grouped } from '../../src/repl/render-events';
 import type { SessionSnapshot } from '../../src/gateway/protocol';
 
 function output() {
@@ -13,6 +13,7 @@ const snapshot: SessionSnapshot = {
   model: 'llama3.1',
   cwd: '.',
   origin: 'terminal',
+  tokens: { input: 0, output: 0 },
   toolsEnabled: true,
   autoApprove: false,
   turnCount: 1,
@@ -131,4 +132,66 @@ describe('renderEvent', () => {
       expect(out.error).not.toHaveBeenCalled();
     }
   );
+});
+
+describe('renderEvent and token counts', () => {
+  it('shows what the turn cost when the provider said', () => {
+    const out = output();
+    renderEvent(
+      {
+        kind: 'turn.finished',
+        turnId: 't',
+        ok: true,
+        aborted: false,
+        providerName: 'X',
+        model: 'y',
+        tokens: { input: 1234, output: 56 },
+      },
+      out
+    );
+    expect(out.muted).toHaveBeenCalledWith(expect.stringContaining('1,234 in'));
+    expect(out.muted).toHaveBeenCalledWith(expect.stringContaining('56 out'));
+  });
+
+  // "0 tokens" is a number someone could act on; "we were not told" is not.
+  it('says nothing when the provider reported nothing', () => {
+    const out = output();
+    renderEvent(
+      { kind: 'turn.finished', turnId: 't', ok: true, aborted: false, providerName: 'X', model: 'y' },
+      out
+    );
+    expect(out.muted).not.toHaveBeenCalled();
+  });
+
+  it('does not print a cost line over an error', () => {
+    const out = output();
+    renderEvent(
+      {
+        kind: 'turn.finished',
+        turnId: 't',
+        ok: false,
+        aborted: false,
+        providerName: 'X',
+        model: 'y',
+        error: 'boom',
+        tokens: { input: 10, output: 0 },
+      },
+      out
+    );
+    expect(out.error).toHaveBeenCalled();
+    expect(out.muted).not.toHaveBeenCalled();
+  });
+});
+
+describe('grouped', () => {
+  // toLocaleString would give "1 234" on an en-ZA machine and "1,234" on a
+  // US one — the same code printing differently for two people.
+  it.each([
+    [0, '0'],
+    [42, '42'],
+    [1234, '1,234'],
+    [1234567, '1,234,567'],
+  ])('formats %i as %s regardless of locale', (value, expected) => {
+    expect(grouped(value)).toBe(expected);
+  });
 });

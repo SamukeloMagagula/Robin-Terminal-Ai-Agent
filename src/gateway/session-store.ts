@@ -22,6 +22,8 @@ export interface PersistedSession {
   cwd: string;
   /** Absent in files written before origins existed; treated as a terminal. */
   origin?: 'terminal' | 'channel' | 'http';
+  /** Absent in files written before tokens were counted. */
+  tokens?: { input: number; output: number };
   toolsEnabled: boolean;
   autoApprove: boolean;
   turnCount: number;

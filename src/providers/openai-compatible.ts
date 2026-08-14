@@ -1,4 +1,4 @@
-import type { Message, ChatEvent, ToolCall, ToolDefinition } from './types.js';
+import type { Message, ChatEvent, ToolCall, ToolDefinition, TokenUsage } from './types.js';
 import { describeChatError, extractErrorCode, extractServerMessage } from './http-error.js';
 import { ChatRequestError } from './chat-error.js';
 
@@ -75,12 +75,17 @@ export async function* streamOpenAiCompatibleChat(response: Response, errorLabel
             tool_calls?: { index: number; id?: string; function?: { name?: string; arguments?: string } }[];
           };
         }[];
+        usage?: { prompt_tokens?: number; completion_tokens?: number };
       };
       try {
         parsed = JSON.parse(payload);
       } catch {
         continue;
       }
+
+      const usage = toTokenUsage(parsed.usage);
+      if (usage) yield { type: 'usage', usage };
+
       const delta = parsed.choices?.[0]?.delta;
       if (delta?.content) yield { type: 'text', text: delta.content };
       for (const tc of delta?.tool_calls ?? []) {
@@ -93,6 +98,24 @@ export async function* streamOpenAiCompatibleChat(response: Response, errorLabel
     }
   }
   yield* emitToolCalls(toolCallsByIndex);
+}
+
+/**
+ * Reads a usage block, or decides there is nothing to report.
+ *
+ * Undefined rather than zeros when neither number is present: "we were not
+ * told" and "it cost nothing" are different answers, and only one of them is
+ * ever true. One half present is still worth having, so the other counts zero.
+ */
+export function toTokenUsage(
+  usage: { prompt_tokens?: number; completion_tokens?: number } | undefined
+): TokenUsage | undefined {
+  if (!usage) return undefined;
+  const inputTokens = typeof usage.prompt_tokens === 'number' ? usage.prompt_tokens : undefined;
+  const outputTokens =
+    typeof usage.completion_tokens === 'number' ? usage.completion_tokens : undefined;
+  if (inputTokens === undefined && outputTokens === undefined) return undefined;
+  return { inputTokens: inputTokens ?? 0, outputTokens: outputTokens ?? 0 };
 }
 
 function* emitToolCalls(toolCallsByIndex: Map<number, ToolCall>): Generator<ChatEvent> {

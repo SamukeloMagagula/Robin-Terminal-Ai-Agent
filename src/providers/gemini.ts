@@ -187,12 +187,30 @@ export class GeminiProvider implements Provider {
         if (!jsonText) continue;
         // One malformed frame must not abort the turn and discard the text
         // already streamed — skip it and keep reading.
-        let parsed: { candidates?: { content?: { parts?: GeminiPart[] } }[] };
+        let parsed: {
+          candidates?: { content?: { parts?: GeminiPart[] } }[];
+          usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+        };
         try {
           parsed = JSON.parse(jsonText);
         } catch {
           continue;
         }
+
+        // Gemini repeats usageMetadata on every frame with a running total, so
+        // the last one seen is the one that counts. Yielding each is harmless:
+        // the caller keeps the latest rather than summing.
+        const usage = parsed.usageMetadata;
+        if (usage && (usage.promptTokenCount !== undefined || usage.candidatesTokenCount !== undefined)) {
+          yield {
+            type: 'usage',
+            usage: {
+              inputTokens: usage.promptTokenCount ?? 0,
+              outputTokens: usage.candidatesTokenCount ?? 0,
+            },
+          };
+        }
+
         const parts = parsed.candidates?.[0]?.content?.parts ?? [];
         for (const part of parts) {
           if (isAnswerPart(part)) yield { type: 'text', text: part.text as string };

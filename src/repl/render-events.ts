@@ -10,6 +10,17 @@ export interface EventOutput {
 }
 
 /**
+ * Thousands separators, the same on every machine.
+ *
+ * Not `toLocaleString`: on an en-ZA machine that returns "1 234" with a
+ * non-breaking space, which is both a surprise in a terminal and a reason for
+ * the same code to print differently for two people.
+ */
+export function grouped(value: number): string {
+  return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+/**
  * Turns one gateway event into terminal output.
  *
  * Split out of run-repl so it can be tested without a socket or a TTY. The
@@ -46,6 +57,11 @@ export function renderEvent(event: GatewayEvent, out: EventOutput): void {
     case 'turn.finished':
       if (event.aborted) out.muted('Interrupted. Your next message continues from here.');
       else if (!event.ok) out.error(`\n✖ ${event.error ?? 'The turn failed.'}`);
+      // Only when the provider actually said. Printing "0 tokens" for a model
+      // that reports nothing would be a number someone could act on wrongly.
+      else if (event.tokens) {
+        out.muted(`\n  ${grouped(event.tokens.input)} in · ${grouped(event.tokens.output)} out`);
+      }
       return;
     default:
       // turn.started and the approval events are the caller's business.

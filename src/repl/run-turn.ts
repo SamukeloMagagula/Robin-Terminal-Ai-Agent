@@ -1,4 +1,4 @@
-import type { Provider, Message, ToolDefinition } from '../providers/types.js';
+import type { Provider, Message, ToolDefinition, TokenUsage } from '../providers/types.js';
 import type { ConfirmFn } from '../tools/execute.js';
 import type { Session } from './session.js';
 import { buildSystemPrompt } from './session.js';
@@ -71,6 +71,13 @@ export interface TurnOptions {
 
 export interface TurnResult {
   ok: boolean;
+  /**
+   * What the whole turn cost, summed across rounds.
+   *
+   * Absent when no provider reported anything — not every model does, and a
+   * missing count must never be shown as zero.
+   */
+  usage?: TokenUsage;
   /** May differ from the session's provider, when fallback rescued the turn. */
   provider: Provider;
   model: string;
@@ -121,6 +128,17 @@ export async function runTurn(
   // rate-limit window can reopen between messages.
   const quotaBlocked = new Set<string>();
 
+  // Summed across rounds: a turn with three tool calls made four requests, and
+  // each was billed. Reset per attempt, because a turn that fell back to
+  // another model should not report the failed attempt's tokens as well.
+  let usage: TokenUsage | undefined;
+  const addUsage = (round: TokenUsage): void => {
+    usage = {
+      inputTokens: (usage?.inputTokens ?? 0) + round.inputTokens,
+      outputTokens: (usage?.outputTokens ?? 0) + round.outputTokens,
+    };
+  };
+
   // Models whose context window has already been re-measured this turn. One
   // correction is a fix; a second would mean the trim did not work, and looping
   // on it would re-send the same oversized prompt forever.
@@ -154,6 +172,7 @@ export async function runTurn(
         {
           onText: options.onText,
           onThinking: options.onThinking,
+          onUsage: addUsage,
           executeTool: (toolCall, confirm) =>
             executeTool(toolCall, confirm, {
               onAutoApproved: options.onAutoApproved,
@@ -174,10 +193,14 @@ export async function runTurn(
         ok: true,
         provider: activeProvider,
         model: activeModel,
+        usage,
         aborted: options.signal?.aborted ?? false,
       };
     } catch (err) {
       lastError = err as Error;
+      // A failed attempt's tokens belong to the attempt, not to whatever
+      // eventually answers.
+      usage = undefined;
       // Too long is not the same as unavailable: this model will take this
       // conversation once it is shorter. Learn the window, then retry the same
       // model with the history trimmed — walking down the fallback chain would
@@ -239,5 +262,5 @@ export async function runTurn(
   }
 
   session.history.length = historyLengthBeforeTurn;
-  return { ok: false, provider: activeProvider, model: activeModel, error: lastError };
+  return { ok: false, provider: activeProvider, model: activeModel, usage, error: lastError };
 }

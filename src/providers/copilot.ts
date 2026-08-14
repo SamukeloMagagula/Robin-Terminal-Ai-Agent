@@ -179,6 +179,9 @@ export class CopilotProvider implements Provider {
         model,
         messages: messages.map(toOpenAiWireMessage),
         stream: true,
+        // Without this the stream carries no usage frame at all, and a turn's
+        // cost is simply unknowable after the fact.
+        stream_options: { include_usage: true },
         ...toOpenAiToolsPayload(tools),
       }),
     });
