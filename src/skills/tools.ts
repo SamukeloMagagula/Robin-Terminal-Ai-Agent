@@ -19,7 +19,12 @@ export const SKILL_TOOL_DEFINITIONS: ToolDefinition[] = [
     description:
       'Save a reusable instruction set learned from completing a task, so future ' +
       'sessions can apply it. Use this for a repeatable procedure worth keeping — not ' +
-      'for one-off facts, which belong in `remember`. The user is asked before it is saved.',
+      'for one-off facts, which belong in `remember`. The user is asked before it is saved.\n' +
+      'Call this at most once per reply, and only after finishing work that a later ' +
+      'session would genuinely repeat. Do not propose a skill for a question you just ' +
+      'answered, for a command you just ran, or because a topic came up: every call ' +
+      'interrupts the user with a prompt, and a stream of them teaches them to stop ' +
+      'reading the prompts that matter.',
     parameters: {
       type: 'object',
       properties: {

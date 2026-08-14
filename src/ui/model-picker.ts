@@ -49,7 +49,30 @@ export async function pickFromChoices(
   });
 }
 
+/**
+ * A readable label for a model id.
+ *
+ * Servers that load a file report that file as the id: llama.cpp hands back the
+ * full path to the weights, which for a model pulled through Ollama is a
+ * directory plus a sha256 — ninety characters of nothing anyone can read. Only
+ * ids that actually look like paths are shortened, so `anthropic/claude-5` and
+ * `openai/gpt-4o` are left exactly as they are.
+ *
+ * The value is never touched: it is what gets sent back as `model`, and it also
+ * keeps the full id searchable.
+ */
+function labelFor(value: string): string {
+  const looksLikePath = /[\\/]/.test(value) && /[\\/]([^\\/]*\.(gguf|bin|safetensors)|sha256[-:])/i.test(value);
+  if (!looksLikePath) return value;
+
+  const base = value.split(/[\\/]/).pop() ?? value;
+  const withoutExtension = base.replace(/\.(gguf|bin|safetensors)$/i, '');
+  // A bare content hash says nothing either; keep enough to tell two apart.
+  const shortened = withoutExtension.replace(/^(sha256[-:])([0-9a-f]{8})[0-9a-f]+$/i, '$2…');
+  return shortened || base;
+}
+
 /** Convenience for the common case: a list of model ids with no extra entries. */
 export function toChoices(values: string[]): PickerChoice[] {
-  return values.map((value) => ({ name: value, value }));
+  return values.map((value) => ({ name: labelFor(value), value }));
 }

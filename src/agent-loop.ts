@@ -1,6 +1,7 @@
 import type { Provider, Message, ToolCall, ToolDefinition } from './providers/types.js';
 import type { ConfirmFn } from './tools/execute.js';
 import { isAbortError } from './providers/chat-error.js';
+import { createAnswerUnwrapper } from './answer-wrapper.js';
 
 export type { ConfirmFn };
 
@@ -29,12 +30,20 @@ export async function runAgentTurn(
   for (let round = 0; round < MAX_ROUNDS; round++) {
     let text = '';
     const toolCalls: ToolCall[] = [];
+    // Some models wrap every reply in <final_answer>…</final_answer>. Stripped
+    // here rather than at render time so the history is clean too — otherwise
+    // the markup is replayed to the model on every later turn as if it were
+    // something the assistant meant to say.
+    const unwrap = createAnswerUnwrapper();
 
     try {
       for await (const event of provider.chat(model, workingHistory, tools, deps.signal)) {
         if (event.type === 'text') {
-          text += event.text;
-          deps.onText(event.text);
+          const visible = unwrap.push(event.text);
+          if (visible) {
+            text += visible;
+            deps.onText(visible);
+          }
         } else if (event.type === 'thinking') {
           // Deliberately not accumulated into `text`: reasoning is shown to
           // the user but must not become part of the assistant's message, or
@@ -51,8 +60,20 @@ export async function runAgentTurn(
       // a different model. Their next message then reads as a redirect rather
       // than a non-sequitur.
       if (!isAbortError(err)) throw err;
+      const remainder = unwrap.end();
+      if (remainder) {
+        text += remainder;
+        deps.onText(remainder);
+      }
       newMessages.push({ role: 'assistant', content: `${text}\n\n[interrupted]` });
       return newMessages;
+    }
+
+    // Whatever was held back waiting to see if it was part of a closing tag.
+    const remainder = unwrap.end();
+    if (remainder) {
+      text += remainder;
+      deps.onText(remainder);
     }
 
     const assistantMessage: Message = { role: 'assistant', content: text };

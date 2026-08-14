@@ -164,3 +164,46 @@ describe('runAgentTurn when aborted mid-stream', () => {
     ).rejects.toThrow('503');
   });
 });
+
+describe('runAgentTurn and wrapped replies', () => {
+  it('strips a <final_answer> wrapper from what the user sees and what is kept', async () => {
+    const provider = fakeProvider([
+      [
+        { type: 'text', text: '<final_answer>\n' },
+        { type: 'text', text: 'pong' },
+        { type: 'text', text: '\n</final_answer>' },
+      ],
+    ]);
+    const onText = vi.fn();
+
+    const messages = await runAgentTurn(provider, 'm', [], [], {
+      confirm: async () => true,
+      executeTool: vi.fn(),
+      onText,
+    });
+
+    // The history matters as much as the display: markup left in here is
+    // replayed to the model on every later turn.
+    expect(messages[0].content).toBe('pong');
+    expect(onText.mock.calls.flat().join('')).toBe('pong');
+  });
+
+  it('leaves an ordinary reply exactly as it arrived', async () => {
+    const provider = fakeProvider([
+      [
+        { type: 'text', text: 'Line one\n' },
+        { type: 'text', text: '\nLine two' },
+      ],
+    ]);
+    const onText = vi.fn();
+
+    const messages = await runAgentTurn(provider, 'm', [], [], {
+      confirm: async () => true,
+      executeTool: vi.fn(),
+      onText,
+    });
+
+    expect(messages[0].content).toBe('Line one\n\nLine two');
+    expect(onText.mock.calls.flat().join('')).toBe('Line one\n\nLine two');
+  });
+});
