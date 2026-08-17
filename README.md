@@ -17,21 +17,37 @@ Built by Samukelo "Batman" Magagula.
 
 ## Install
 
-**macOS / Linux:**
+**One line:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SamukeloMagagula/Robin-Terminal-Ai-Agent/main/install.sh | bash
+```
+
+```powershell
+irm https://raw.githubusercontent.com/SamukeloMagagula/Robin-Terminal-Ai-Agent/main/install.ps1 | iex
+```
+
+Both clone, install, build and link, printing each step as they go — piping a
+script from the internet into a shell is a lot of trust to ask for silently, so
+nothing either of them does is hidden.
+
+**By hand:**
 
 ```bash
 git clone https://github.com/SamukeloMagagula/Robin-Terminal-Ai-Agent.git
 cd Robin-Terminal-Ai-Agent
-npm ci && npm run build && npm link
+npm ci --ignore-scripts && npm run build && npm link
 ```
 
-**Windows (PowerShell):**
+**In Docker:**
 
-```powershell
-git clone https://github.com/SamukeloMagagula/Robin-Terminal-Ai-Agent.git
-cd Robin-Terminal-Ai-Agent
-npm ci; npm run build; npm link
+```bash
+docker build -t robin .
+docker run -it --rm -v robin-data:/home/robin/.robin robin doctor
 ```
+
+The volume matters — `~/.robin` holds credentials, memory, skills and
+conversations, so without it every run starts logged out and forgetful.
 
 Then start it:
 
@@ -62,6 +78,14 @@ in one pass.
 Use `npm ci`, not `npm install`. Dependencies are exact-pinned with no version
 ranges, so a compromised patch release can't reach you without an intentional
 bump here — `npm ci` enforces that; `npm install` can drift.
+
+**And `--ignore-scripts`**, which is doing more work than it looks like. npm
+compiles any dependency carrying a `binding.gyp`, and `better-sqlite3` carries
+one — so without the flag, installing needs a full C++ toolchain (Visual Studio
+on Windows) and fails outright on a machine that hasn't got one. That package
+also *ships* prebuilt binaries for every platform Robin runs on, so there is
+nothing to compile and nothing is lost by skipping it. Not running arbitrary
+install scripts is the smaller benefit, and a real one.
 
 `npm link` only needs to be run once (or again after pulling changes that touch
 `package.json`). After that, `robin` works from any directory. If you would

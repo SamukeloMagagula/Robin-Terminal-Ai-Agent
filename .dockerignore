@@ -1,0 +1,19 @@
+# Everything the build does not need. node_modules especially: it holds a
+# native addon compiled for the host, and copying it into the image would put
+# a Windows or macOS binary where a musl one has to be.
+node_modules
+dist
+.git
+.github
+tests
+docs
+*.md
+!README.md
+.claude
+.superpowers
+vitest.config.ts
+tsconfig.test.json
+install.sh
+install.ps1
+Dockerfile
+.dockerignore

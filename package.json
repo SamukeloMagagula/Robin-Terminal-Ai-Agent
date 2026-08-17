@@ -1,7 +1,7 @@
 {
   "name": "robin",
   "version": "0.1.0",
-  "description": "Terminal chat client for AI models (GitHub Copilot, Ollama)",
+  "description": "Terminal agent for Anthropic, Copilot, Gemini, OpenRouter, Ollama and any OpenAI-compatible server, with a local gateway, tools, memory, skills and MCP",
   "author": "Samukelo \"Batman\" Magagula",
   "type": "module",
   "bin": {
@@ -12,7 +12,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run",
     "check": "npm run typecheck && npm run test && npm run build",
-    "start": "node dist/cli.js"
+    "start": "node dist/cli.js",
+    "//prepare": "Runs on `npm install` from a git clone, so a fresh clone is runnable without anyone remembering to build. npm skips it when installing the published tarball, which already contains dist.",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run check"
   },
   "//dependencies": "Exact-pinned, no ranges. A caret range lets a compromised patch release of any dependency reach a fresh install with no review on our side. Exact pins mean the only way a new version arrives is an intentional bump here plus a regenerated package-lock.json. Install with `npm ci`, not `npm install`.",
   "dependencies": {
@@ -33,5 +36,33 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "//files": "Only the built output ships. Without this npm publishes src, tests and every config too — 374 files where 60 will do, and the tests are not something an installer should be downloading.",
+  "files": [
+    "dist",
+    "README.md",
+    "SECURITY.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "ai",
+    "cli",
+    "terminal",
+    "agent",
+    "llm",
+    "anthropic",
+    "copilot",
+    "gemini",
+    "openrouter",
+    "ollama",
+    "mcp"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SamukeloMagagula/Robin-Terminal-Ai-Agent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/SamukeloMagagula/Robin-Terminal-Ai-Agent/issues"
   }
 }
