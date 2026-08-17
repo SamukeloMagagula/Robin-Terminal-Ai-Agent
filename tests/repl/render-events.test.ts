@@ -16,6 +16,8 @@ const snapshot: SessionSnapshot = {
   tokens: { input: 0, output: 0 },
   toolsEnabled: true,
   autoApprove: false,
+  messageCount: 0,
+  updatedAt: '2026-08-17T10:00:00.000Z',
   turnCount: 1,
   busy: false,
   queued: 0,

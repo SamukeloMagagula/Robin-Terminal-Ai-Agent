@@ -13,7 +13,9 @@ function session(over: Partial<SessionSnapshot>): SessionSnapshot {
     running: false,
     toolsEnabled: true,
     autoApprove: false,
-    turnCount: 0,
+    turnCount: 1,
+    messageCount: 2,
+    updatedAt: '2026-08-17T10:00:00.000Z',
     tokens: { input: 0, output: 0 },
     ...over,
   } as SessionSnapshot;
@@ -41,6 +43,28 @@ describe('choosing which conversation to open', () => {
 
   it('does not resume a conversation from another directory', () => {
     expect(sessionToOpen([session({ cwd: 'C:/elsewhere' })], 'C:/work', true)).toBeUndefined();
+  });
+
+  it('resumes the most recently touched conversation, not the first found', () => {
+    // A directory used to hold one long-lived session, so any match was the
+    // match. Now every `robin chat` opens a new one, and picking the first
+    // meant --continue reliably resumed the oldest conversation there.
+    const older = session({ id: 1, updatedAt: '2026-08-01T09:00:00.000Z' });
+    const newer = session({ id: 2, updatedAt: '2026-08-17T09:00:00.000Z' });
+
+    expect(sessionToOpen([older, newer], 'C:/work', true)?.id).toBe(2);
+    // Order in the list must not decide it.
+    expect(sessionToOpen([newer, older], 'C:/work', true)?.id).toBe(2);
+  });
+
+  it('skips a conversation nobody said anything in', () => {
+    // `robin chat` opened and closed again leaves an empty session behind.
+    // Continuing into it is not what the word means.
+    const empty = session({ id: 3, messageCount: 0, updatedAt: '2026-08-17T12:00:00.000Z' });
+    const real = session({ id: 4, messageCount: 6, updatedAt: '2026-08-17T11:00:00.000Z' });
+
+    expect(sessionToOpen([empty, real], 'C:/work', true)?.id).toBe(4);
+    expect(sessionToOpen([empty], 'C:/work', true)).toBeUndefined();
   });
 
   it('does not join a Telegram or HTTP conversation', () => {

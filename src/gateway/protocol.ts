@@ -44,6 +44,10 @@ export interface SessionSnapshot {
   /** Running totals for this conversation, where providers reported them. */
   tokens: { input: number; output: number };
   systemPrompt?: string;
+  /** How much has been said, so an untouched session can be told from a real one. */
+  messageCount: number;
+  /** ISO timestamp of the last change, for picking the most recent of several. */
+  updatedAt: string;
   /** A turn is running right now. */
   busy: boolean;
   /** Prompts waiting behind it. */

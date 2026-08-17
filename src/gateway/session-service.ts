@@ -50,6 +50,8 @@ interface SessionRecord {
   /** What this conversation has cost so far, summed over its turns. */
   tokens: { input: number; output: number };
   autoApprove: boolean;
+  /** Last time anything about this conversation changed. */
+  updatedAt: string;
   /** Turns waiting or running. A new prompt queues behind the tail. */
   queue: Promise<void>;
   /**
@@ -117,6 +119,7 @@ export class SessionService {
       origin: params.origin ?? 'terminal',
       tokens: { input: 0, output: 0 },
       autoApprove: params.autoApprove ?? false,
+      updatedAt: new Date().toISOString(),
       queue: Promise.resolve(),
       pending: 0,
     });
@@ -212,6 +215,8 @@ export class SessionService {
       autoApprove: record.autoApprove,
       turnCount: session.turnCount,
       tokens: { ...record.tokens },
+      messageCount: session.history.length,
+      updatedAt: record.updatedAt,
       systemPrompt: session.systemPrompt,
       busy: record.pending > 0,
       // Everything behind whichever turn is at the head of the queue.
@@ -397,6 +402,7 @@ export class SessionService {
         origin: saved.origin ?? 'terminal',
         tokens: saved.tokens ?? { input: 0, output: 0 },
         autoApprove: saved.autoApprove,
+        updatedAt: saved.updatedAt ?? new Date().toISOString(),
         queue: Promise.resolve(),
         // Whatever was running when the daemon stopped is not running now.
         pending: 0,
@@ -413,6 +419,7 @@ export class SessionService {
     if (!record) return;
 
     const { session } = record;
+    record.updatedAt = new Date().toISOString();
 
     // An empty conversation is not worth keeping, and keeping it is actively
     // worse than dropping it: `robin chat` opens one every time it starts, so
@@ -441,7 +448,7 @@ export class SessionService {
       transcript: transcript
         ? { path: transcript.filePath, startedAt: transcript.startedAt.toISOString() }
         : undefined,
-      updatedAt: new Date().toISOString(),
+      updatedAt: record.updatedAt,
     };
     // Not awaited here: the user is waiting on a reply, not on a disk write.
     // Queued, though, so a shutdown — or a test — can wait for writes to settle
