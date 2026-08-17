@@ -37,6 +37,25 @@ let cachedOwn: string | undefined | 'unset' = 'unset';
  * question about staleness is more work than the answer is worth.
  */
 export async function buildFingerprint(dir?: string): Promise<string | undefined> {
+  return fingerprint(dir);
+}
+
+/**
+ * The build on disk right now, ignoring what this process started with.
+ *
+ * The cached version answers "what am I running", which cannot change. This
+ * answers "has the build moved underneath me", which is the question a daemon
+ * has to ask about itself — a browser cannot compute a fingerprint, so it
+ * cannot be the one to notice.
+ */
+export async function freshBuildFingerprint(): Promise<string | undefined> {
+  // Naming the directory means this is not treated as "our own" build, so it
+  // neither reads nor writes the cache. That is the point: the cached value
+  // must keep saying what this process is running, which has not changed.
+  return fingerprint(defaultBuildDir());
+}
+
+async function fingerprint(dir?: string): Promise<string | undefined> {
   const own = dir === undefined;
   if (own && cachedOwn !== 'unset') return cachedOwn;
 
@@ -55,9 +74,9 @@ export async function buildFingerprint(dir?: string): Promise<string | undefined
   }
 
   parts.sort();
-  const fingerprint = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
-  if (own) cachedOwn = fingerprint;
-  return fingerprint;
+  const digest = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
+  if (own) cachedOwn = digest;
+  return digest;
 }
 
 async function collect(root: string, dir: string, parts: string[]): Promise<void> {

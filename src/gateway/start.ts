@@ -17,7 +17,7 @@ import { SkillStore } from '../skills/store.js';
 import { SessionStore } from './session-store.js';
 import { createHttpApi } from './http-api.js';
 import { startTrustedMcpServers } from './mcp.js';
-import { buildFingerprint } from './build-id.js';
+import { buildFingerprint, freshBuildFingerprint } from './build-id.js';
 
 export interface StartedGateway {
   port: number;
@@ -91,6 +91,11 @@ export async function startGateway(
     port: options.port ?? defaultPort(),
     log,
     buildId,
+    isStale: async () => {
+      if (!buildId) return false;
+      const onDisk = await freshBuildFingerprint();
+      return onDisk !== undefined && onDisk !== buildId;
+    },
     providers: listProviders(),
     mcpSummary: () => ({
       servers: mcp.started.length,

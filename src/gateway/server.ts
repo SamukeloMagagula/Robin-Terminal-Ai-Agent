@@ -35,6 +35,14 @@ export interface GatewayServerDeps {
   /** Identifies the compiled output this daemon is running. */
   buildId?: string;
   /**
+   * Whether the build on disk has moved since this daemon started.
+   *
+   * Asked of the daemon rather than told to it: a browser cannot compute a
+   * fingerprint, so it can never be the one to notice that the page it was
+   * served came from yesterday's code.
+   */
+  isStale?: () => Promise<boolean>;
+  /**
    * Offered to clients that cannot read ~/.robin themselves — a browser has no
    * way to know what you are logged into, or what models it may ask for.
    */
@@ -307,6 +315,10 @@ export class GatewayServer {
         protocol: PROTOCOL_VERSION,
         mcp: this.deps.mcpSummary?.() ?? { servers: 0, tools: 0 },
         build: this.deps.buildId,
+        // True when this daemon is older than the code on disk, whoever is
+        // asking. staleBuild below is the narrower case of a client that
+        // knows its own build and finds it different.
+        daemonStale: (await this.deps.isStale?.().catch(() => false)) ?? false,
         // Reported, never enforced. Most rebuilds change nothing a running
         // daemon would get wrong, and refusing every edit would be worse than
         // the problem this exists to name.

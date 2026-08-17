@@ -534,6 +534,16 @@ const PAGE = `<!doctype html>
         resolve: async (hello) => {
           $('title').textContent = 'Connected';
           renderSessions(hello.sessions);
+          if (hello.daemonStale) {
+            // The page you are looking at was served by this daemon, so it is
+            // as old as the daemon is. Reloading will not help; the daemon has
+            // to be restarted first.
+            note(
+              'The gateway is older than the build on disk. Run "robin gateway stop" and ' +
+                'reload this page — what you are looking at came from the older build.',
+              'bad'
+            );
+          }
           void loadProviders();
           const mine = hello.sessions.find((s) => s.origin === 'terminal') || hello.sessions[0];
           if (mine) await attach(mine.id);

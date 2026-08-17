@@ -626,3 +626,44 @@ describe('GatewayServer provider methods', () => {
     expect(frame).toMatchObject({ ok: false });
   });
 });
+
+describe('GatewayServer reporting its own staleness', () => {
+  // The narrower staleBuild needs a client that knows its own build. A browser
+  // never does, so the daemon has to be able to answer for itself.
+  it('reports being older than the build on disk', async () => {
+    await server.close();
+    server = new GatewayServer({
+      sessions: sessions as never,
+      approvals: approvals as never,
+      token: 'right-token',
+      port: 0,
+      log: () => {},
+      buildId: 'server-build',
+      isStale: async () => true,
+    });
+    port = await server.listen();
+
+    const socket = await connected();
+    // connected() consumed the hello; ask again through a fresh connection.
+    socket.close();
+    const another = await open(port);
+    openSockets.push(another);
+    send(another, { type: 'req', id: 'c2', method: 'connect', params: connectParams });
+    const frame = await next(another);
+
+    expect((frame as { result: { daemonStale: boolean } }).result.daemonStale).toBe(true);
+  });
+
+  it('says false when it is current', async () => {
+    const socket = await connected();
+    send(socket, { type: 'req', id: 'x', method: 'session.list', params: {} });
+    await next(socket);
+    // The default harness has no isStale, which must not read as stale.
+    const another = await open(port);
+    openSockets.push(another);
+    send(another, { type: 'req', id: 'c3', method: 'connect', params: connectParams });
+    const frame = await next(another);
+
+    expect((frame as { result: { daemonStale: boolean } }).result.daemonStale).toBe(false);
+  });
+});

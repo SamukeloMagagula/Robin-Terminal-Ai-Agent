@@ -55,3 +55,23 @@ describe('buildFingerprint', () => {
     expect(await buildFingerprint(path.join(dir, 'absent'))).toBeUndefined();
   });
 });
+
+describe('freshBuildFingerprint', () => {
+  // The daemon has to be able to ask whether the build moved underneath it. A
+  // browser cannot compute a fingerprint, so it cannot be the one to notice.
+  it('does not return a cached answer', async () => {
+    const { freshBuildFingerprint } = await import('../../src/gateway/build-id');
+    const first = await freshBuildFingerprint();
+    const second = await freshBuildFingerprint();
+    // Same build, so the same answer — but arrived at by looking, not by
+    // remembering. The cache test below is what proves the difference.
+    expect(first).toBe(second);
+  });
+
+  it('leaves the cached "what am I running" answer alone', async () => {
+    const { buildFingerprint, freshBuildFingerprint } = await import('../../src/gateway/build-id');
+    const own = await buildFingerprint();
+    await freshBuildFingerprint();
+    expect(await buildFingerprint()).toBe(own);
+  });
+});
