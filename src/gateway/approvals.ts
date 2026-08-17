@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { ConfirmFn, ConfirmRequest } from '../tools/execute.js';
 import type { ApprovalOrigin } from './protocol.js';
+import { permits, type Manifest, type Rule } from '../autonomy/manifest.js';
+import type { AutonomyStore } from '../autonomy/grant-store.js';
+import type { AuditLog } from '../autonomy/audit.js';
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -8,9 +11,28 @@ const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
  * How far an answer reaches.
  *
  * 'once' is the default and the safe reading — a client that says nothing gets
- * it. The other two are the user widening their own answer deliberately.
+ * it. The others are the user widening their own answer deliberately.
+ *
+ * 'manifest' is narrow where 'session' is broad: it adds the one rule that was
+ * asked about to the governing manifest, on disk. It deliberately does NOT
+ * touch allowedKinds, which is keyed on the coarse `kind` — approving a single
+ * restic command must not become approval of every command for the session.
  */
-export type ApprovalScope = 'once' | 'session' | 'reply';
+export type ApprovalScope = 'once' | 'session' | 'reply' | 'manifest';
+
+/**
+ * What governs a session allowed to act with nobody attached.
+ *
+ * The manifest is a decision a human made at a moment when they were present.
+ * Consulted here it only ever grants — checkPath and the read-only allowlist
+ * have already run upstream in execute.ts, and no manifest is consulted for
+ * them at all.
+ */
+export interface Governance {
+  manifest: Manifest;
+  audit: AuditLog;
+  store: AutonomyStore;
+}
 
 export interface PendingApproval {
   id: string;
@@ -68,6 +90,12 @@ export class ApprovalRegistry {
   private readonly allowedKinds = new Map<number, Set<ConfirmRequest['kind']>>();
   /** Kinds refused for the rest of a reply, per session. Cleared by beginTurn. */
   private readonly declinedKinds = new Map<number, Set<ConfirmRequest['kind']>>();
+  /**
+   * What governs each session that has governance, recorded when a request
+   * arrives so that answer() — which is handed only an approval id — can find
+   * the manifest a 'manifest'-scoped answer belongs to.
+   */
+  private readonly governing = new Map<number, Governance>();
   private readonly timeoutMs: number;
 
   constructor(private readonly deps: ApprovalRegistryDeps) {
@@ -84,8 +112,13 @@ export class ApprovalRegistry {
     return [...this.entries.values()].map((entry) => entry.pending);
   }
 
-  confirmFor(sessionId: number, origin: ApprovalOrigin, autoApprove: boolean): ConfirmFn {
-    return (request) => this.ask(sessionId, origin, autoApprove, request);
+  confirmFor(
+    sessionId: number,
+    origin: ApprovalOrigin,
+    autoApprove: boolean,
+    governance?: Governance
+  ): ConfirmFn {
+    return (request) => this.ask(sessionId, origin, autoApprove, request, governance);
   }
 
   /**
@@ -113,6 +146,24 @@ export class ApprovalRegistry {
       allowed.add(request.kind);
       this.allowedKinds.set(sessionId, allowed);
     }
+    if (approved && scope === 'manifest') {
+      const governance = this.governing.get(sessionId);
+      if (governance) {
+        // The exact subject, not a pattern widened from it. Turning one
+        // approval into a rule that covers more is a guess about intent that
+        // nobody actually made.
+        const rule: Rule = { kind: request.kind, pattern: request.subject };
+        void governance.store.addRule(governance.manifest.id, rule);
+        // Keep the running session consistent without waiting on a re-read.
+        if (
+          !governance.manifest.rules.some(
+            (candidate) => candidate.kind === rule.kind && candidate.pattern === rule.pattern
+          )
+        ) {
+          governance.manifest.rules.push(rule);
+        }
+      }
+    }
     if (!approved && scope === 'reply') {
       const refused = this.declinedKinds.get(sessionId) ?? new Set<ConfirmRequest['kind']>();
       refused.add(request.kind);
@@ -123,25 +174,59 @@ export class ApprovalRegistry {
     return true;
   }
 
-  private ask(
+  /** The first rule of `manifest` that covers `request`, if any. */
+  private async matchingRule(
+    manifest: Manifest,
+    request: ConfirmRequest
+  ): Promise<Rule | undefined> {
+    for (const rule of manifest.rules) {
+      if (await permits({ ...manifest, rules: [rule] }, request, new Date())) return rule;
+    }
+    return undefined;
+  }
+
+  private async ask(
     sessionId: number,
     origin: ApprovalOrigin,
     autoApprove: boolean,
-    request: ConfirmRequest
+    request: ConfirmRequest,
+    governance?: Governance
   ): Promise<boolean> {
     // A session the operator marked auto-approve never reaches a human by
     // design. This is the old --allow-tools, now a property of the session
     // rather than of the process, so `/session` and `gateway status` can show
     // which conversations carry it.
-    if (autoApprove) return Promise.resolve(true);
+    if (autoApprove) return true;
+
+    // A manifest is a decision this user already made, at a moment when they
+    // were present and paying attention. Looking it up is not deciding
+    // anything now — it is declining to ask a question already answered.
+    //
+    // A request it does not cover gets no special treatment: it falls through
+    // to everything below, which already refuses when no client can answer.
+    if (governance) {
+      this.governing.set(sessionId, governance);
+      const rule = await this.matchingRule(governance.manifest, request);
+      if (rule) {
+        void governance.audit.append({
+          ts: new Date().toISOString(),
+          manifest: governance.manifest.id,
+          kind: request.kind,
+          detail: request.subject,
+          decision: 'allowed',
+          rule: rule.pattern,
+        });
+        return true;
+      }
+    }
 
     // Standing answers, widest first. Both are answers the user already gave;
     // asking again would be asking them to repeat themselves.
-    if (this.allowedKinds.get(sessionId)?.has(request.kind)) return Promise.resolve(true);
-    if (this.declinedKinds.get(sessionId)?.has(request.kind)) return Promise.resolve(false);
+    if (this.allowedKinds.get(sessionId)?.has(request.kind)) return true;
+    if (this.declinedKinds.get(sessionId)?.has(request.kind)) return false;
 
     const key = requestKey(sessionId, request);
-    if (this.declined.get(sessionId)?.has(key)) return Promise.resolve(false);
+    if (this.declined.get(sessionId)?.has(key)) return false;
 
     const pending: PendingApproval = { id: randomUUID(), sessionId, request, origin };
 
@@ -156,6 +241,19 @@ export class ApprovalRegistry {
           const refused = this.declined.get(sessionId) ?? new Set<string>();
           refused.add(key);
           this.declined.set(sessionId, refused);
+          // Refusals are recorded too. A log of only the allowed calls answers
+          // "what did it do" but not "what did it try to do", and the second
+          // question is the one that reveals a manifest that is wrong.
+          if (governance) {
+            void governance.audit.append({
+              ts: new Date().toISOString(),
+              manifest: governance.manifest.id,
+              kind: request.kind,
+              detail: request.subject,
+              decision: by === 'timeout' ? 'expired' : 'refused',
+              rule: null,
+            });
+          }
         }
         this.deps.resolved(pending, approved, by);
         resolve(approved);
