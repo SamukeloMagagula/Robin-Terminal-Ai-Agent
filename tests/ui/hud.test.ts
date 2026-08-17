@@ -1,8 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { meter, sparkline } from '../../src/ui/hud/meter';
 import { frameTop, frameBottom, sectionRule, arcCap } from '../../src/ui/hud/frame';
-import { buildReticle, buildCompactReticle } from '../../src/ui/hud/reticle';
-import { renderHud } from '../../src/ui/hud/layout';
+import {
+  buildReticle,
+  buildCompactReticle,
+  RETICLE_WIDTH,
+  COMPACT_RETICLE_WIDTH,
+} from '../../src/ui/hud/reticle';
+import { renderHud, FULL_WIDTH } from '../../src/ui/hud/layout';
 import { visibleLength } from '../../src/ui/panel';
 import type { HudStats } from '../../src/ui/hud/telemetry';
 
@@ -18,6 +23,12 @@ function stats(overrides: Partial<HudStats> = {}): HudStats {
     node: 'v20.19.4',
     ...overrides,
   };
+}
+
+/** Colours off, so a row can be measured and indexed by column. */
+function plain(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/\[[0-9;]*m/g, '');
 }
 
 function hud(width: number, overrides: Partial<HudStats> = {}): string[] {
@@ -165,5 +176,51 @@ describe('renderHud', () => {
 
   it('reports the host operating system', () => {
     expect(hud(100).join('\n')).toContain('Linux 6.1.0');
+  });
+});
+
+describe('reticle geometry', () => {
+  // Nothing checked that RETICLE_WIDTH described the rows it was supposed to
+  // describe, so it sat at 34 against a 25-wide cowl — which needs 37 — and
+  // every row through the middle ran a column wide. tsc cannot catch a
+  // constant disagreeing with the art, and no test looked. This one does.
+  it('renders every row at exactly RETICLE_WIDTH', () => {
+    for (const status of ['ONLINE', 'STANDBY', '']) {
+      for (const row of buildReticle(status)) {
+        expect(visibleLength(row)).toBe(RETICLE_WIDTH);
+      }
+    }
+  });
+
+  it('renders every compact row at exactly COMPACT_RETICLE_WIDTH', () => {
+    for (const row of buildCompactReticle('ONLINE')) {
+      expect(visibleLength(row)).toBe(COMPACT_RETICLE_WIDTH);
+    }
+  });
+
+  it('puts the inner ring bars under the ring corners', () => {
+    // The width being right is not the same as the drawing being aligned: the
+    // bars were a column left of the `╭` above them even on rows that summed
+    // correctly. Column 4 is where the inner ring opens.
+    const rows = buildReticle('ONLINE').map(plain);
+    const ringTop = rows.find((row) => row.includes('╭') && row.indexOf('╭') === 4);
+    expect(ringTop).toBeDefined();
+
+    const cowlRows = rows.filter((row) => row.includes('●') || row.includes('▀'));
+    expect(cowlRows.length).toBeGreaterThan(0);
+    for (const row of cowlRows) {
+      expect(row[4]).toBe('│');
+      expect(row[RETICLE_WIDTH - 5]).toBe('│');
+    }
+  });
+
+  it('leaves the wordmark clear of the crosshair at the narrowest full layout', () => {
+    // The reticle getting wider silently ate the gutter, and the crosshair ran
+    // into the last letter of ROBIN. Derived widths are supposed to prevent
+    // that; this checks the derivation rather than trusting it.
+    const rendered = hud(FULL_WIDTH).map(plain);
+    const crosshair = rendered.find((row) => row.includes('─┼─'));
+    expect(crosshair).toBeDefined();
+    expect(crosshair).toMatch(/█ {2,}─┼─/);
   });
 });

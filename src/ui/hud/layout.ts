@@ -7,8 +7,23 @@ import { frameTop, frameBottom, sectionRule, statRow } from './frame.js';
 import { meter } from './meter.js';
 import type { HudStats } from './telemetry.js';
 
-/** Below this the reticle does not fit beside the panels. */
-const FULL_WIDTH = 90;
+/** Columns between the left panels and the reticle. */
+const GUTTER = 4;
+
+/**
+ * The crosshair row reaches further left than the rest of the reticle, so the
+ * wordmark needs clearance the other rows do not — without it the `─┼─` runs
+ * straight into the last letter.
+ */
+const CROSSHAIR_CLEARANCE = 3;
+
+/**
+ * Below this the reticle does not fit beside the panels.
+ *
+ * Derived, because it is a statement about three other widths and was wrong
+ * the moment one of them changed.
+ */
+export const FULL_WIDTH = WORDMARK_WIDTH + CROSSHAIR_CLEARANCE + GUTTER + RETICLE_WIDTH;
 /** Below this there is no room for meters at all. */
 const MINIMAL_WIDTH = 60;
 
@@ -61,7 +76,7 @@ function systemRows(stats: HudStats): string[] {
 }
 
 function renderFull(info: HudInfo, width: number): string[] {
-  const leftWidth = width - RETICLE_WIDTH - 4;
+  const leftWidth = width - RETICLE_WIDTH - GUTTER;
   // Rules stop short of the gutter, so they never butt into the reticle.
   const ruleWidth = leftWidth - 3;
 
