@@ -245,8 +245,17 @@ conversation in the middle, and a box to type in. It is a client like the
 terminal is — attach to a session started at the keyboard and you are in the
 same conversation, streaming as it happens.
 
+Replies are rendered there too — the same rules the terminal uses, so bold is
+bold and a fenced block is a block, in either surface.
+
+You can drive it from the browser, not just watch: start a conversation by
+picking a provider and model, close one, and stop a turn that is running. The
+provider list comes from the daemon, because a page cannot read
+`~/.robin/auth.json` to find out what you are logged into.
+
 Approvals appear here too, as a dialog, with the same origin line the terminal
-shows. Answer in either place; the first answer wins and the other closes.
+shows, and the same four answers. Answer in either place; the first answer wins
+and the other closes.
 
 **The link carries the gateway token**, because a page cannot read
 `~/.robin/gateway.json`. Treat it like a password. The page takes it out of the

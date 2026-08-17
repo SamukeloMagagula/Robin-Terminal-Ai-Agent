@@ -15,6 +15,7 @@ import {
   type RequestFrame,
   type ResponseFrame,
 } from './protocol.js';
+import type { Provider } from '../providers/types.js';
 import type { SessionService } from './session-service.js';
 import type { ApprovalRegistry, PendingApproval } from './approvals.js';
 
@@ -33,6 +34,11 @@ export interface GatewayServerDeps {
   mcpSummary?: () => { servers: number; tools: number };
   /** Identifies the compiled output this daemon is running. */
   buildId?: string;
+  /**
+   * Offered to clients that cannot read ~/.robin themselves — a browser has no
+   * way to know what you are logged into, or what models it may ask for.
+   */
+  providers?: Pick<Provider, 'id' | 'name' | 'isAuthenticated' | 'listModels'>[];
 }
 
 interface Client {
@@ -311,6 +317,25 @@ export class GatewayServer {
     if (!client.connected) throw coded('not-connected', 'Send connect first.');
 
     switch (frame.method) {
+      case 'providers.list': {
+        const providers = this.deps.providers ?? [];
+        return {
+          providers: await Promise.all(
+            providers.map(async (provider) => ({
+              id: provider.id,
+              name: provider.name,
+              authenticated: await provider.isAuthenticated().catch(() => false),
+            }))
+          ),
+        };
+      }
+      case 'providers.models': {
+        // One provider at a time: a catalogue is a network call, and fetching
+        // every provider's would make opening the UI wait on all of them.
+        const provider = (this.deps.providers ?? []).find((p) => p.id === params.providerId);
+        if (!provider) throw coded('unknown-provider', `Unknown provider "${String(params.providerId)}".`);
+        return { models: await provider.listModels() };
+      }
       case 'session.list':
         return { sessions: this.deps.sessions.list() };
       case 'session.create':

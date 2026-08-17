@@ -50,6 +50,14 @@ const sessions = {
   personality: vi.fn(),
 };
 const approvals = { answer: vi.fn() };
+const providers = [
+  {
+    id: 'copilot',
+    name: 'GitHub Copilot',
+    isAuthenticated: vi.fn().mockResolvedValue(true),
+    listModels: vi.fn().mockResolvedValue(['gpt-4o']),
+  },
+];
 
 let server: GatewayServer;
 let port: number;
@@ -67,6 +75,7 @@ beforeEach(async () => {
     port: 0,
     log: () => {},
     buildId: 'server-build',
+    providers: providers as never,
   });
   port = await server.listen();
 });
@@ -569,5 +578,51 @@ describe('GatewayServer approval scopes', () => {
     await next(socket);
 
     expect(approvals.answer).toHaveBeenCalledWith('ap-1', true, expect.any(String), expected);
+  });
+});
+
+describe('GatewayServer provider methods', () => {
+  // The browser cannot read ~/.robin/auth.json, so it has to ask what it can
+  // use before it can offer to start a conversation.
+  it('lists providers with whether they are usable', async () => {
+    const socket = await connected();
+
+    send(socket, { type: 'req', id: 'p', method: 'providers.list', params: {} });
+    const frame = await next(socket);
+
+    const result = (frame as { result: { providers: { id: string; authenticated: boolean }[] } })
+      .result;
+    expect(result.providers.map((p) => p.id)).toContain('copilot');
+    expect(typeof result.providers[0].authenticated).toBe('boolean');
+  });
+
+  it('lists the models of one provider on request', async () => {
+    const socket = await connected();
+
+    send(socket, {
+      type: 'req',
+      id: 'm',
+      method: 'providers.models',
+      params: { providerId: 'copilot' },
+    });
+    const frame = await next(socket);
+
+    expect((frame as { result: { models: string[] } }).result.models).toEqual(['gpt-4o']);
+  });
+
+  // Model catalogues are a network call per provider; asking for all of them
+  // at once would make opening the UI wait on every provider you own.
+  it('reports a provider it does not know rather than guessing', async () => {
+    const socket = await connected();
+
+    send(socket, {
+      type: 'req',
+      id: 'm',
+      method: 'providers.models',
+      params: { providerId: 'nonsense' },
+    });
+    const frame = await next(socket);
+
+    expect(frame).toMatchObject({ ok: false });
   });
 });

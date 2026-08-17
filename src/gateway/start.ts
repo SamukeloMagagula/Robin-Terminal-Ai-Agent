@@ -91,6 +91,7 @@ export async function startGateway(
     port: options.port ?? defaultPort(),
     log,
     buildId,
+    providers: listProviders(),
     mcpSummary: () => ({
       servers: mcp.started.length,
       tools: mcp.registry.toolDefinitions().length,

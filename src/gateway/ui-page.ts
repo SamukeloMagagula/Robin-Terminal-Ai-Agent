@@ -65,20 +65,54 @@ const PAGE = `<!doctype html>
   dialog pre { white-space: pre-wrap; word-break: break-all; background: var(--bg); padding: 10px; border-radius: 6px; }
   dialog .from { color: var(--warn); }
   .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+  .bar { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+  .bar button { padding: 4px 10px; font-size: 12px; }
+  select {
+    background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 4px 6px; font: inherit; font-size: 12px; max-width: 100%;
+  }
+  /* Rendered markdown. The terminal styles these too; same reading either way. */
+  .msg strong { color: #fff; }
+  .msg em { color: var(--text); }
+  .msg code {
+    background: #0b0f14; color: #f0b072; padding: 1px 4px; border-radius: 4px;
+    font-size: 12.5px;
+  }
+  .msg pre {
+    background: #0b0f14; border: 1px solid var(--line); border-radius: 6px;
+    padding: 10px; overflow-x: auto; margin: 8px 0;
+  }
+  .msg pre code { background: none; padding: 0; color: #d7dde5; }
+  .msg h1, .msg h2, .msg h3 { color: var(--accent); margin: 12px 0 6px; font-size: 15px; }
+  .msg ul, .msg ol { margin: 6px 0; padding-left: 22px; }
+  .msg blockquote {
+    margin: 6px 0; padding-left: 10px; border-left: 2px solid var(--line); color: var(--muted);
+  }
+  .msg a { color: var(--accent); }
 </style>
 </head>
 <body>
 <aside>
   <h1>Sessions</h1>
-  <div id="sessions"></div>
-  <div class="row" style="justify-content:flex-start;margin-top:12px">
+  <div class="bar">
     <button class="ghost" id="refresh">Refresh</button>
+    <button class="ghost" id="close">Close</button>
+  </div>
+  <div id="sessions"></div>
+  <h1 style="margin-top:16px">New conversation</h1>
+  <div class="bar">
+    <select id="provider"></select>
+    <select id="model"></select>
+  </div>
+  <div class="bar">
+    <button id="create">Start</button>
   </div>
 </aside>
 <main>
   <header>
     <strong id="title">Not connected</strong>
     <span class="who" id="who"></span>
+    <button class="ghost" id="stop" style="margin-left:auto;display:none">Stop</button>
   </header>
   <div id="log"></div>
   <form id="ask">
@@ -114,7 +148,7 @@ const PAGE = `<!doctype html>
     history.replaceState(null, '', url.toString());
   }
 
-  let socket, nextId = 1, sessionId = null, streaming = null;
+  let socket, nextId = 1, sessionId = null, streaming = null, currentTurn = null;
   const waiting = new Map();
 
   const note = (text, cls) => {
@@ -125,16 +159,123 @@ const PAGE = `<!doctype html>
     $('log').scrollTop = $('log').scrollHeight;
   };
 
+  // The same rules the terminal renders by: markers styled away, and nothing
+  // inside code touched, because that text is source.
+  //
+  // Backticks cannot appear literally in this file — the whole page is a
+  // template literal and one would end it — so the patterns that need them are
+  // built from a character code.
+  const BT = String.fromCharCode(96);
+  const CODE_SPAN = new RegExp(BT + '([^' + BT + ']+)' + BT, 'g');
+  const FENCE_LINE = new RegExp('^\\s*' + BT + BT + BT + '(.*)$');
+  // A sentinel the model cannot type, so lifted code spans go back exactly
+  // where they came from.
+  const MARK = String.fromCharCode(1);
+  const NL = String.fromCharCode(10);
+
+  const escapeHtml = (t) =>
+    String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  function inline(text) {
+    const code = [];
+    let out = escapeHtml(text).replace(CODE_SPAN, (m, c) => {
+      code.push(c);
+      return MARK + (code.length - 1) + MARK;
+    });
+    // Only http(s). This reaches innerHTML, and a javascript: href would run
+    // in the page that holds the gateway token.
+    out = out.replace(/\\[([^\\]]+)\\]\\(([^)\\s]+)\\)/g, (m, label, href) =>
+      /^https?:\\/\\//i.test(href)
+        ? '<a href="' + href + '" target="_blank" rel="noreferrer noopener">' + label + '</a>'
+        : label + ' (' + href + ')');
+    out = out.replace(/\\*\\*(\\S(?:[^*]*\\S)?)\\*\\*/g, '<strong>$1</strong>');
+    out = out.replace(/~~(\\S(?:[^~]*\\S)?)~~/g, '<del>$1</del>');
+    out = out.replace(/\\*(\\S(?:[^*]*\\S)?)\\*/g, '<em>$1</em>');
+    // Word boundaries, or snake_case turns italic.
+    out = out.replace(/(^|[^\\w])_(\\S(?:[^_]*\\S)?)_(?![\\w])/g, '$1<em>$2</em>');
+    // Put the code spans back. Split rather than match: a pattern here has to
+    // survive a template literal and a JS string before the regex engine sees
+    // it, and one that does not fails silently, leaving the marker on screen.
+    const parts = out.split(MARK);
+    let restored = '';
+    for (let i = 0; i < parts.length; i += 1) {
+      restored += i % 2 === 1 ? '<code>' + code[Number(parts[i])] + '</code>' : parts[i];
+    }
+    return restored;
+  }
+
+  function renderMarkdown(text) {
+    const lines = String(text).split(NL);
+    let html = '';
+    let list = null;
+    let fence = null;
+    const closeList = () => {
+      if (list) { html += '</' + list + '>'; list = null; }
+    };
+    const flushFence = () => {
+      html += '<pre><code>' + escapeHtml(fence.join(NL)) + '</code></pre>';
+      fence = null;
+    };
+
+    for (const line of lines) {
+      if (FENCE_LINE.test(line)) {
+        if (fence === null) { closeList(); fence = []; } else { flushFence(); }
+        continue;
+      }
+      if (fence !== null) { fence.push(line); continue; }
+      if (!line.trim()) { closeList(); continue; }
+
+      const heading = /^(#{1,6})\\s+(.*)$/.exec(line);
+      if (heading) { closeList(); html += '<h3>' + inline(heading[2]) + '</h3>'; continue; }
+
+      if (/^\\s*([-*_])\\s*(?:\\s*){2,}$/.test(line)) { closeList(); html += '<hr>'; continue; }
+
+      const quote = /^\\s*>\\s?(.*)$/.exec(line);
+      if (quote) {
+        closeList();
+        html += '<blockquote>' + inline(quote[1]) + '</blockquote>';
+        continue;
+      }
+
+      const numbered = /^\\s*(\\d+)\\.\\s+(.*)$/.exec(line);
+      if (numbered) {
+        if (list !== 'ol') { closeList(); html += '<ol>'; list = 'ol'; }
+        html += '<li>' + inline(numbered[2]) + '</li>';
+        continue;
+      }
+
+      const bullet = /^\\s*[-*+]\\s+(.*)$/.exec(line);
+      if (bullet) {
+        if (list !== 'ul') { closeList(); html += '<ul>'; list = 'ul'; }
+        html += '<li>' + inline(bullet[1]) + '</li>';
+        continue;
+      }
+
+      closeList();
+      html += '<div>' + inline(line) + '</div>';
+    }
+    closeList();
+    // An unclosed fence is still the answer.
+    if (fence !== null) flushFence();
+    return html;
+  }
+
   const message = (role, text) => {
     const el = document.createElement('div');
     el.className = 'msg ' + role;
     const label = document.createElement('span');
     label.className = 'role';
     label.textContent = role === 'user' ? 'You' : 'Robin';
-    el.append(label, document.createTextNode(text));
+    const body = document.createElement('div');
+    if (role === 'user') body.textContent = text;
+    else body.innerHTML = renderMarkdown(text);
+    // What the model actually wrote, so a streaming reply can be re-rendered
+    // as it grows without reconstructing it from the DOM.
+    body.dataset.raw = text;
+    el.append(label, body);
     $('log').append(el);
     $('log').scrollTop = $('log').scrollHeight;
-    return el;
+    return body;
   };
 
   function request(method, params) {
@@ -220,9 +361,15 @@ const PAGE = `<!doctype html>
     }
     if (sid !== sessionId) return;
 
+    if (event.kind === 'turn.started') {
+      currentTurn = event.turnId;
+      $('stop').style.display = '';
+      return;
+    }
     if (event.kind === 'text') {
       if (!streaming) streaming = message('assistant', '');
-      streaming.append(document.createTextNode(event.delta));
+      streaming.dataset.raw += event.delta;
+      streaming.innerHTML = renderMarkdown(streaming.dataset.raw);
       $('log').scrollTop = $('log').scrollHeight;
     } else if (event.kind === 'tool.auto_approved') {
       note('$ ' + event.command);
@@ -237,6 +384,8 @@ const PAGE = `<!doctype html>
       refresh();
     } else if (event.kind === 'turn.finished') {
       streaming = null;
+      currentTurn = null;
+      $('stop').style.display = 'none';
       if (event.aborted) note('Interrupted.');
       else if (!event.ok) note('✖ ' + (event.error || 'The turn failed.'), 'bad');
       refresh();
@@ -271,6 +420,84 @@ const PAGE = `<!doctype html>
   }
 
   $('refresh').onclick = () => refresh();
+
+  // A browser cannot read ~/.robin, so it asks what it may use.
+  async function loadProviders() {
+    const { providers } = await request('providers.list');
+    const usable = providers.filter((p) => p.authenticated);
+    $('provider').replaceChildren();
+    for (const p of usable) {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.name;
+      $('provider').append(opt);
+    }
+    if (!usable.length) {
+      const opt = document.createElement('option');
+      opt.textContent = 'nothing logged in';
+      $('provider').append(opt);
+      $('create').disabled = true;
+      return;
+    }
+    await loadModels();
+  }
+
+  async function loadModels() {
+    const providerId = $('provider').value;
+    $('model').replaceChildren();
+    const loading = document.createElement('option');
+    loading.textContent = 'loading…';
+    $('model').append(loading);
+    try {
+      const { models } = await request('providers.models', { providerId });
+      $('model').replaceChildren();
+      for (const m of models) {
+        const opt = document.createElement('option');
+        opt.value = m;
+        // A local server reports the weights file it is serving, which is a
+        // path and a hash; the tail is the only readable part of it.
+        opt.textContent = m.length > 44 ? '…' + m.slice(-40) : m;
+        $('model').append(opt);
+      }
+    } catch (err) {
+      $('model').replaceChildren();
+      const failed = document.createElement('option');
+      failed.textContent = 'could not list models';
+      $('model').append(failed);
+      note('✖ ' + err.message, 'bad');
+    }
+  }
+
+  $('provider').onchange = () => loadModels();
+
+  $('create').onclick = async () => {
+    try {
+      const created = await request('session.create', {
+        providerId: $('provider').value,
+        model: $('model').value,
+        cwd: 'browser',
+      });
+      await attach(created.id);
+    } catch (err) {
+      note('✖ ' + err.message, 'bad');
+    }
+  };
+
+  $('close').onclick = async () => {
+    if (sessionId === null) return;
+    const closing = sessionId;
+    sessionId = null;
+    await request('session.close', { id: closing }).catch(() => {});
+    $('log').replaceChildren();
+    $('title').textContent = 'No session';
+    $('who').textContent = '';
+    const sessions = await refresh();
+    if (sessions.length) await attach(sessions[0].id);
+  };
+
+  $('stop').onclick = () => {
+    if (currentTurn) request('turn.interrupt', { turnId: currentTurn }).catch(() => {});
+  };
 
   $('ask').onsubmit = async (e) => {
     e.preventDefault();
@@ -307,6 +534,7 @@ const PAGE = `<!doctype html>
         resolve: async (hello) => {
           $('title').textContent = 'Connected';
           renderSessions(hello.sessions);
+          void loadProviders();
           const mine = hello.sessions.find((s) => s.origin === 'terminal') || hello.sessions[0];
           if (mine) await attach(mine.id);
           else note('No sessions open yet. Start one with "robin chat", or send a message once one exists.');
