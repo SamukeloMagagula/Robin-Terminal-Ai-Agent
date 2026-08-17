@@ -312,8 +312,8 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     // behaves like the code it started with.
     console.log(
       errorColor(
-        'The gateway is running an older build than this one. Run `robin gateway stop` ' +
-          'to pick up your changes — it restarts on the next message.'
+        'The gateway is running an older build than this one. Run `robin gateway stop`, ' +
+          'then `robin chat` again to pick it up — stopping it from here ends this session.'
       )
     );
   }

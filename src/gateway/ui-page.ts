@@ -539,8 +539,9 @@ const PAGE = `<!doctype html>
             // as old as the daemon is. Reloading will not help; the daemon has
             // to be restarted first.
             note(
-              'The gateway is older than the build on disk. Run "robin gateway stop" and ' +
-                'reload this page — what you are looking at came from the older build.',
+              'The gateway is older than the build on disk. Run "robin gateway stop", then ' +
+                '"robin ui" to start it again — this page came from the older build too, so ' +
+                'reloading it on its own will not help.',
               'bad'
             );
           }

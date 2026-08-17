@@ -287,9 +287,11 @@ conversation itself is untouched, because a `cd` is not a change of subject.
 a `npm run build`, and one running yesterday's code doesn't misbehave — it just
 behaves like yesterday's code, which is far more confusing. So it fingerprints
 the compiled output at startup and re-checks it on every connect. If they
-differ, `robin chat` and the control UI both say the gateway is older than the
-build on disk and that `robin gateway stop` is the fix. It warns rather than
-refuses, because most rebuilds change nothing a running daemon would get wrong.
+differ, `robin chat` and the control UI both say so. The fix is `robin gateway
+stop` followed by starting it again — stopping it does not restart it, and it
+ends any session attached to it, so the warning says that rather than implying
+a reload is enough. It warns rather than refuses, because most rebuilds change
+nothing a running daemon would get wrong.
 
 ### The control UI
 
