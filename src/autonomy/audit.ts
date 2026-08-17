@@ -36,10 +36,25 @@ function safeName(manifestId: string): string {
  * one that reveals a manifest that is wrong or a model behaving oddly.
  */
 export class AuditLog {
+  /**
+   * Appends are chained rather than issued concurrently.
+   *
+   * Callers fire these off without awaiting — a tool call must not wait on a
+   * disk write — and two concurrent appendFile calls have no guaranteed order.
+   * A log whose lines can arrive out of order is a poor record of a sequence of
+   * decisions, so the writes queue behind one another here instead.
+   */
+  private queue: Promise<unknown> = Promise.resolve();
+
   constructor(private readonly dir: string = defaultAuditDir()) {}
 
   private file(manifestId: string): string {
     return path.join(this.dir, `${safeName(manifestId)}.jsonl`);
+  }
+
+  /** Resolves once every append issued so far has landed. For tests and shutdown. */
+  async flush(): Promise<void> {
+    await this.queue;
   }
 
   /**
@@ -50,15 +65,21 @@ export class AuditLog {
    * this on the run report instead of either failing or swallowing it.
    */
   async append(entry: AuditEntry): Promise<Error | undefined> {
-    try {
-      await fs.mkdir(this.dir, { recursive: true, mode: 0o700 });
-      await fs.appendFile(this.file(entry.manifest), `${JSON.stringify(entry)}\n`, {
-        mode: 0o600,
-      });
-      return undefined;
-    } catch (err) {
-      return err instanceof Error ? err : new Error(String(err));
-    }
+    const write = this.queue.then(async (): Promise<Error | undefined> => {
+      try {
+        await fs.mkdir(this.dir, { recursive: true, mode: 0o700 });
+        await fs.appendFile(this.file(entry.manifest), `${JSON.stringify(entry)}\n`, {
+          mode: 0o600,
+        });
+        return undefined;
+      } catch (err) {
+        return err instanceof Error ? err : new Error(String(err));
+      }
+    });
+    // The chain must survive a failed write, or one error would stall every
+    // later append behind it.
+    this.queue = write;
+    return write;
   }
 
   async read(manifestId: string): Promise<AuditEntry[]> {

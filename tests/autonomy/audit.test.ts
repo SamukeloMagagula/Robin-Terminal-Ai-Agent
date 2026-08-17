@@ -62,6 +62,33 @@ describe('AuditLog', () => {
     expect(await log.read('nightly-backup')).toHaveLength(2);
   });
 
+  it('keeps appends in the order they were issued, without awaiting each', async () => {
+    const log = new AuditLog(await tempDir());
+
+    // Exactly how the registry calls it: fired off, never awaited.
+    void log.append(entry('allowed', 'first'));
+    void log.append(entry('refused', 'second'));
+    void log.append(entry('allowed', 'third'));
+    await log.flush();
+
+    expect((await log.read('nightly-backup')).map((e) => e.detail)).toEqual([
+      'first',
+      'second',
+      'third',
+    ]);
+  });
+
+  it('keeps writing after one append fails', async () => {
+    const dir = await tempDir();
+    const log = new AuditLog(dir);
+
+    void log.append({ ...entry('allowed', 'a'), manifest: '' });
+    void log.append(entry('allowed', 'b'));
+    await log.flush();
+
+    expect(await log.read('nightly-backup')).toHaveLength(1);
+  });
+
   it('returns nothing for a manifest with no log', async () => {
     expect(await new AuditLog(await tempDir()).read('never-run')).toEqual([]);
   });
