@@ -79,6 +79,14 @@ describe('isReadOnlyCommand — smuggling attempts', () => {
     ['git diff --output', 'git diff --output /tmp/leak.patch'],
     ['rg --pre', 'rg --pre ./evil.sh pattern'],
     ['env running a command', 'env FOO=1 rm -rf /'],
+    // A long flag takes its value after a space OR after an `=`, and only the
+    // spaced form was ever checked. Each of these was auto-approved with no
+    // prompt at all; `rg --pre=sh` is arbitrary execution.
+    ['sort writing with --output=', 'sort --output=overwritten.txt input.txt'],
+    ['git diff --output=', 'git diff --output=/tmp/leak.patch'],
+    ['rg --pre=', 'rg --pre=./evil.sh pattern'],
+    ['find -fprintf=', 'find . -fprintf=/tmp/x %p'],
+    ['an uppercased flag value', 'git diff --OUTPUT=/tmp/leak.patch'],
   ])('%s is not auto-approved', (_label, command) => {
     expect(isReadOnlyCommand(command)).toBe(false);
   });

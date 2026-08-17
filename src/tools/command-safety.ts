@@ -12,7 +12,7 @@
 // Anything that chains, pipes, redirects or substitutes lets a second command
 // ride along behind an innocent-looking first one ("ls -la; rm -rf ~"), so a
 // command containing any of these is never auto-approved regardless of its verb.
-const SHELL_CONTROL_PATTERN = /[;&|><`\n\r]|\$\(|\$\{/;
+export const SHELL_CONTROL_PATTERN = /[;&|><`\n\r]|\$\(|\$\{/;
 
 /** Commands that cannot modify anything, given the argument rules below. */
 const READ_ONLY_COMMANDS = new Set([
@@ -83,7 +83,7 @@ const READ_ONLY_GIT_SUBCOMMANDS = new Set([
  * Flags that flip one of the readers above into a writer or an executor:
  * `find -exec`/`-delete`, `rg --pre`, `sort -o`, `git diff --output`.
  */
-const EXECUTING_FLAGS = new Set([
+export const EXECUTING_FLAGS = new Set([
   '-exec',
   '-execdir',
   '-ok',
@@ -98,8 +98,20 @@ const EXECUTING_FLAGS = new Set([
   '--output',
 ]);
 
-function splitTokens(command: string): string[] {
+export function splitTokens(command: string): string[] {
   return command.trim().split(/\s+/).filter(Boolean);
+}
+
+/**
+ * The name half of a flag token, lowercased: `--output=/etc/x` -> `--output`.
+ *
+ * Long flags take their value either as the next token or after an `=`, and a
+ * set membership test against the raw token only ever catches the first form.
+ * `rg --pre=sh` runs sh as a preprocessor, and `git diff --output=…` writes a
+ * file — both were reaching the read-only allowlist intact.
+ */
+export function flagName(token: string): string {
+  return token.split('=')[0].toLowerCase();
 }
 
 function isGitReadOnly(tokens: string[]): boolean {
@@ -130,7 +142,7 @@ export function isReadOnlyCommand(command: string): boolean {
   if (SHELL_CONTROL_PATTERN.test(trimmed)) return false;
 
   const tokens = splitTokens(trimmed);
-  if (tokens.some((token) => EXECUTING_FLAGS.has(token.toLowerCase()))) return false;
+  if (tokens.some((token) => EXECUTING_FLAGS.has(flagName(token)))) return false;
 
   const head = tokens[0].toLowerCase();
 
