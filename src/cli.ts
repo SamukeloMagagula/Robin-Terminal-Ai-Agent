@@ -121,24 +121,26 @@ async function preflightOrExit(): Promise<void> {
   process.exit(1);
 }
 
-async function startChat(providerId?: string): Promise<void> {
+async function startChat(providerId?: string, continueSession = false): Promise<void> {
   requireInteractiveTerminal();
   await preflightOrExit();
 
+  const common = { pickModel, pickProviderAndModel, rollRandom, continueSession };
+
   if (providerId === 'random') {
     const { provider, model } = await rollRandom();
-    await runRepl({ provider, model, pickModel, pickProviderAndModel, rollRandom });
+    await runRepl({ provider, model, ...common });
     return;
   }
   if (providerId) {
     const provider = getProvider(providerId);
     await ensureAuthenticated(provider);
     const model = await pickModel(provider);
-    await runRepl({ provider, model, pickModel, pickProviderAndModel, rollRandom });
+    await runRepl({ provider, model, ...common });
     return;
   }
   const { provider, model } = await pickProviderAndModel();
-  await runRepl({ provider, model, pickModel, pickProviderAndModel, rollRandom });
+  await runRepl({ provider, model, ...common });
 }
 
 const program = new Command();
@@ -269,12 +271,14 @@ program
 program
   .command('chat [provider]')
   .description('Start a chat session — pass a provider id, or "random" to roll one')
-  .action(async (providerId?: string) => {
-    await startChat(providerId);
+  .option('-c, --continue', "Pick up this directory's last conversation instead of starting a new one")
+  .action(async (providerId: string | undefined, options: { continue?: boolean }) => {
+    await startChat(providerId, options.continue ?? false);
   });
 
-program.action(async () => {
-  await startChat();
+program.option('-c, --continue', "Pick up this directory's last conversation instead of starting a new one");
+program.action(async (options: { continue?: boolean }) => {
+  await startChat(undefined, options.continue ?? false);
 });
 
 installGlobalErrorHandlers();

@@ -21,6 +21,7 @@ import { UsageCache } from '../usage/openrouter-usage.js';
 import { renderUsageLine } from '../usage/render-usage.js';
 import { assistantColor, errorColor, mutedColor, divider, box } from '../ui/theme.js';
 import { ensureGateway } from '../gateway/ensure.js';
+import { resumableSession, sessionToOpen } from './resume.js';
 import { GatewayClient } from '../gateway/client.js';
 import type { ApprovalScope } from '../gateway/approvals.js';
 import type {
@@ -169,15 +170,8 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     cwd: process.cwd(),
   });
 
-  // A session this directory already owns is the one to continue. Picking it up
-  // rather than starting another is the whole point of a daemon that outlives
-  // the terminal: closing the window is no longer the end of a conversation.
-  // Terminal sessions only. The Telegram bridge and the HTTP API create theirs
-  // in the daemon's working directory, so matching on the directory alone once
-  // meant a terminal opened there silently joined a chat's conversation.
-  const here = client.sessions.find(
-    (session) => session.cwd === process.cwd() && session.origin === 'terminal'
-  );
+  const resumable = resumableSession(client.sessions, process.cwd());
+  const here = sessionToOpen(client.sessions, process.cwd(), deps.continueSession ?? false);
   let snapshot =
     here ??
     (await client.request<SessionSnapshot>('session.create', {
@@ -324,6 +318,16 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     console.log(
       mutedColor(
         `Continuing the conversation in this directory — ${attached.history.length} message(s) so far. /clear starts over.`
+      )
+    );
+  } else if (resumable) {
+    // A fresh conversation is what was asked for, but the old one is still
+    // there and is easy to want back a second later. Say so once, here, rather
+    // than leaving --continue to be discovered in --help.
+    console.log(
+      mutedColor(
+        'Started a new conversation. The previous one in this directory is still ' +
+          'there — `robin chat --continue` picks it up.'
       )
     );
   }

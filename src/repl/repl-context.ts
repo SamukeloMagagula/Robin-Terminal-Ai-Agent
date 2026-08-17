@@ -21,6 +21,11 @@ export interface ReplDeps {
   pickProviderAndModel: () => Promise<{ provider: Provider; model: string }>;
   /** Re-rolls a random provider/model pair, announcing what it landed on. */
   rollRandom: () => Promise<{ provider: Provider; model: string }>;
+  /**
+   * Pick up this directory's existing conversation instead of starting one.
+   * Off by default: `robin chat` means start a chat.
+   */
+  continueSession?: boolean;
 }
 
 /**

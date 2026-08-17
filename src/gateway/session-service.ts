@@ -413,6 +413,17 @@ export class SessionService {
     if (!record) return;
 
     const { session } = record;
+
+    // An empty conversation is not worth keeping, and keeping it is actively
+    // worse than dropping it: `robin chat` opens one every time it starts, so
+    // persisting them fills /session with blank entries that differ only by
+    // number. Removing rather than skipping matters for /clear, which empties
+    // a conversation that already has a file on disk.
+    if (session.history.length === 0) {
+      this.queueWrite(id, () => store.remove(id));
+      return;
+    }
+
     const transcript = session.chatLog.location();
     const saved: PersistedSession = {
       id,

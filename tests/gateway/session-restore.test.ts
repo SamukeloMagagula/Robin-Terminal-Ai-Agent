@@ -77,6 +77,8 @@ describe('SessionService persistence', () => {
       autoApprove: true,
     });
     first.update(created.id, { toolsEnabled: false, systemPrompt: 'be terse' });
+    // Said something, because only a conversation with content is kept.
+    first.append(created.id, { role: 'user', content: 'hello' });
 
     await first.flush();
     const restored = (await service(dir)).snapshot(created.id);
@@ -112,6 +114,10 @@ describe('SessionService persistence', () => {
     const first = await service(dir);
     const a = first.create({ providerId: 'copilot', model: 'gpt-4o', cwd: '.' });
     const b = first.create({ providerId: 'copilot', model: 'gpt-4o', cwd: '.' });
+    // Both have to say something to be restored at all, and only a restored
+    // session can have its id handed out twice.
+    first.append(a.id, { role: 'user', content: 'one' });
+    first.append(b.id, { role: 'user', content: 'two' });
 
     await first.flush();
     const second = await service(dir);
@@ -131,7 +137,11 @@ describe('SessionService persistence', () => {
     expect((await service(dir)).list()).toEqual([]);
   });
 
-  it('persists a cleared conversation as cleared', async () => {
+  it('does not bring a cleared conversation back', async () => {
+    // Clearing used to save the empty shell, so a restart handed back a
+    // session with nothing in it. Now the file goes: an empty conversation is
+    // not something to restore, and blank entries in /session are noise. What
+    // matters either way is that the cleared messages do not come back.
     const dir = await sessionsDir();
     const first = await service(dir);
     const created = first.create({ providerId: 'copilot', model: 'gpt-4o', cwd: '.' });
@@ -139,7 +149,18 @@ describe('SessionService persistence', () => {
     first.clear(created.id);
 
     await first.flush();
-    expect((await service(dir)).history(created.id)).toEqual([]);
+    expect((await service(dir)).list()).toEqual([]);
+  });
+
+  it('does not keep a conversation nobody said anything in', async () => {
+    // `robin chat` opens one every time it starts. Persisting those fills
+    // /session with blank entries that differ only by number.
+    const dir = await sessionsDir();
+    const first = await service(dir);
+    first.create({ providerId: 'copilot', model: 'gpt-4o', cwd: '.' });
+
+    await first.flush();
+    expect((await service(dir)).list()).toEqual([]);
   });
 
   it('persists a loaded conversation', async () => {

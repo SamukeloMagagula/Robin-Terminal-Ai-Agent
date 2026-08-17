@@ -273,9 +273,24 @@ the model read) after each turn rather than on shutdown, so a crash, a reboot
 or a `gateway stop` all keep them. Restarting picks them up:
 `Robin gateway listening on 127.0.0.1:18790 — 3 conversation(s) restored`.
 
-A session untouched for two weeks is dropped on the next start, so directories
-you visited once don't pile up in `/session`. Closing a session forgets it
-immediately.
+**But `robin chat` starts a new conversation.** It resumed the directory's
+last one at first, and that was wrong twice over: `robin chat` reads as *start
+a chat*, so every new chat opened onto old subject matter with the model still
+answering in terms of it — and the conversation in a directory used daily never
+ended, so it grew until it hit the context limit. Pick the old one up
+deliberately instead:
+
+```bash
+robin chat --continue    # or -c
+```
+
+Starting fresh throws nothing away — the previous conversation is still there,
+and Robin says so on the way in. `/session` lists it too.
+
+A conversation nobody said anything in is never written to disk, so opening
+Robin and closing it again leaves no trace. A session untouched for two weeks
+is dropped on the next start, so directories you visited once don't pile up in
+`/session`. Closing a session forgets it immediately.
 
 **Tools run where your terminal is.** A session records a working directory,
 and `robin chat` re-binds it on attach — so continuing a restored conversation
@@ -516,6 +531,8 @@ Each session is genuinely independent: its own history, system prompt, tool sett
 Nine is the cap so that `/session 3` stays a single unambiguous keystroke; ids are reused as sessions close.
 
 **If you never use it, nothing changes.** The prompt only grows a session number once a second session exists — `2>` instead of `>`.
+
+`robin chat` opens a new conversation each time; `robin chat --continue` picks up the last one in the current directory. See [The gateway](#the-gateway) for why that's the default.
 
 ## Skills
 
