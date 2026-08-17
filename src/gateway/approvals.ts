@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ConfirmFn, ConfirmRequest } from '../tools/execute.js';
 import type { ApprovalOrigin } from './protocol.js';
-import { permits, type Manifest, type Rule } from '../autonomy/manifest.js';
+import { permits, type Escalation, type Manifest, type Rule } from '../autonomy/manifest.js';
 import type { AutonomyStore } from '../autonomy/grant-store.js';
 import type { AuditLog } from '../autonomy/audit.js';
 
@@ -39,6 +39,12 @@ export interface PendingApproval {
   sessionId: number;
   request: ConfirmRequest;
   origin: ApprovalOrigin;
+  /**
+   * Where this approval may also be offered, when the governing manifest asks
+   * for it. Present so a client such as the channel bridge can route it; the
+   * registry itself uses only the window, to widen its own timeout.
+   */
+  escalate?: Escalation;
 }
 
 export interface ApprovalRegistryDeps {
@@ -228,7 +234,14 @@ export class ApprovalRegistry {
     const key = requestKey(sessionId, request);
     if (this.declined.get(sessionId)?.has(key)) return false;
 
-    const pending: PendingApproval = { id: randomUUID(), sessionId, request, origin };
+    const escalate = governance?.manifest.escalate;
+    const pending: PendingApproval = {
+      id: randomUUID(),
+      sessionId,
+      request,
+      origin,
+      ...(escalate ? { escalate } : {}),
+    };
 
     return new Promise<boolean>((resolve) => {
       let settled = false;
@@ -259,7 +272,11 @@ export class ApprovalRegistry {
         resolve(approved);
       };
 
-      const timer = setTimeout(() => settle(false, 'timeout'), this.timeoutMs);
+      // An escalated approval is offered to someone who is not at the keyboard,
+      // so the window is theirs to answer in rather than the few minutes a
+      // terminal prompt assumes. Expiry is still a refusal.
+      const waitMs = escalate ? escalate.windowMinutes * 60_000 : this.timeoutMs;
+      const timer = setTimeout(() => settle(false, 'timeout'), waitMs);
       // Node keeps a process alive for a pending timer. A daemon waiting on an
       // approval nobody will answer should not also be unkillable.
       timer.unref?.();
