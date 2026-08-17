@@ -529,16 +529,19 @@ A server that fails to start, or dies, is disabled with one muted line — the t
 
 **Not supported yet:** the Streamable-HTTP transport (stdio only), and MCP resources and prompts (tools only).
 
-## Remote control (Telegram, Discord)
+## Remote control (Telegram, Discord, Slack)
 
 `robin serve` runs Robin as a bridge so you can drive it from a messaging app while you're away from the terminal.
 
 ```bash
 robin serve telegram
 robin serve discord
+robin serve slack
 ```
 
-Both work today, and both connect *outward* — Telegram by long-polling, Discord over its gateway WebSocket — so neither needs a public address or an open port. That is the whole reason these two came first: they run from a laptop behind NAT exactly as they are.
+All three work today, and all three connect *outward* — Telegram by long-polling, Discord over its gateway, Slack over Socket Mode — so none needs a public address or an open port. That is the whole reason these came first: they run from a laptop behind NAT exactly as they are.
+
+**Slack needs two tokens**, issued separately: the bot token (`xoxb-`) to act, and an app-level token (`xapp-`, created under *Basic Information → App-Level Tokens* with the `connections:write` scope) to open the socket. Enable Socket Mode, subscribe to `message.im` and `message.channels`, and put both in `channels.json` as `token` and `appToken`, or in `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN`.
 
 WhatsApp and Teams are recognised channel names that explain what they still need. Both require a public webhook endpoint, so each is a transport adapter plus a listener something on the internet can reach. Everything above the transport — access control, sessions, approvals, the agent loop — is already shared, which is why Discord was one file.
 

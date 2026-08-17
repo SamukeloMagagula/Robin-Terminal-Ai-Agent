@@ -16,6 +16,14 @@ import { UserFacingError } from '../startup/bootstrap.js';
 export interface ChannelConfig {
   /** Bot credential. Read from the environment in preference to the file. */
   token: string;
+  /**
+   * A second credential, where the platform needs one.
+   *
+   * Slack is the reason this exists: its Socket Mode wants an app-level token
+   * to open the connection and a bot token to act, and they are issued
+   * separately. Absent for every other channel.
+   */
+  appToken?: string;
   /** Sender ids permitted to drive Robin. */
   allow: string[];
   /** Provider id to answer with. Falls back to the serve command's default. */
@@ -32,6 +40,11 @@ export function tokenEnvVar(channel: string): string {
   return `${channel.toUpperCase()}_BOT_TOKEN`;
 }
 
+/** e.g. SLACK_APP_TOKEN, for the platforms that issue two credentials. */
+export function appTokenEnvVar(channel: string): string {
+  return `${channel.toUpperCase()}_APP_TOKEN`;
+}
+
 export const EXAMPLE_CONFIG = `{
   "channels": {
     "telegram": {
@@ -43,6 +56,11 @@ export const EXAMPLE_CONFIG = `{
     "discord": {
       "token": "your-discord-bot-token",
       "allow": ["your-discord-user-id"]
+    },
+    "slack": {
+      "token": "xoxb-your-bot-token",
+      "appToken": "xapp-your-app-level-token",
+      "allow": ["U0123456789"]
     }
   }
 }`;
@@ -117,6 +135,10 @@ export async function loadChannelConfig(
 
   return {
     token,
+    appToken:
+      env[appTokenEnvVar(channel)]?.trim() ||
+      (typeof record.appToken === 'string' ? record.appToken.trim() : undefined) ||
+      undefined,
     allow,
     provider: typeof record.provider === 'string' ? record.provider : undefined,
     model: typeof record.model === 'string' ? record.model : undefined,
