@@ -593,7 +593,9 @@ A bot's username is public and anyone who finds it can message it. On the other 
 
 `--allow-tools` lifts that last restriction, and means exactly what it says: a chat message can then run commands and write files on your machine unattended, with nobody asked. Only worth it when you trust every id on the allowlist and the machine it's running on. It now marks the *session* rather than the process, so `/session` and `robin gateway status` show which conversations carry it.
 
-Each Telegram chat maps to a gateway session, which is why a conversation you start on your phone is waiting in your terminal when you sit down.
+Each chat maps to a gateway session, which is why a conversation you start on your phone is waiting in your terminal when you sit down.
+
+**Replies stream.** A chat client has no partial-message concept, so Robin posts a placeholder immediately and edits it as the answer arrives — the alternative being a silence long enough to look like the bot has died, followed by a wall of text. Edits are throttled to one every two seconds: both platforms rate-limit per channel, and an edit per token would hit that within a sentence and throttle the whole bridge.
 
 ## How replies are printed
 

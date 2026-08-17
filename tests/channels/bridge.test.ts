@@ -26,8 +26,15 @@ class FakeTransport implements ChannelTransport {
     // Returns immediately; the test drives delivery itself.
   }
 
-  async send(chatId: string, text: string): Promise<void> {
+  async send(chatId: string, text: string): Promise<string | undefined> {
     this.sent.push({ chatId, text });
+    return String(this.sent.length);
+  }
+
+  /** Streaming edits land here; the last one is the finished reply. */
+  async edit(chatId: string, messageId: string, text: string): Promise<void> {
+    const at = Number(messageId) - 1;
+    if (this.sent[at]) this.sent[at] = { chatId, text };
   }
 
   async deliver(message: Partial<IncomingMessage> & { text: string }): Promise<void> {

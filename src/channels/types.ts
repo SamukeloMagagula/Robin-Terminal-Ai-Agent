@@ -43,5 +43,20 @@ export interface ChannelTransport {
     signal: AbortSignal
   ): Promise<void>;
 
-  send(chatId: string, text: string): Promise<void>;
+  /**
+   * Sends a message, returning its id where the platform gives one.
+   *
+   * The id is what makes streaming possible: a reply can be posted early and
+   * edited as it arrives, rather than appearing all at once after a silence
+   * long enough to look like nothing is happening.
+   */
+  send(chatId: string, text: string): Promise<string | undefined>;
+
+  /**
+   * Replaces the text of a message already sent.
+   *
+   * Optional. A transport without it simply posts the finished reply, which is
+   * what every one of them did before streaming existed.
+   */
+  edit?(chatId: string, messageId: string, text: string): Promise<void>;
 }

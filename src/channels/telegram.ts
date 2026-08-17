@@ -117,13 +117,29 @@ export class TelegramTransport implements ChannelTransport {
     return { identity: me.username ? `@${me.username}` : (me.first_name ?? 'unknown bot') };
   }
 
-  async send(chatId: string, text: string): Promise<void> {
+  async send(chatId: string, text: string): Promise<string | undefined> {
+    let firstId: string | undefined;
     for (const chunk of chunkMessage(text)) {
       // No parse_mode: model output is arbitrary text, and Telegram rejects
       // the whole message when it contains an unbalanced Markdown entity —
       // a stray asterisk would silently drop the reply.
-      await this.call('sendMessage', { chat_id: chatId, text: chunk });
+      const sent = await this.call<{ message_id?: number }>('sendMessage', {
+        chat_id: chatId,
+        text: chunk,
+      });
+      if (firstId === undefined && typeof sent.message_id === 'number') {
+        firstId = String(sent.message_id);
+      }
     }
+    return firstId;
+  }
+
+  async edit(chatId: string, messageId: string, text: string): Promise<void> {
+    await this.call('editMessageText', {
+      chat_id: chatId,
+      message_id: Number(messageId),
+      text,
+    });
   }
 
   async receive(

@@ -11,6 +11,7 @@
 
 import type { ChannelTransport, IncomingMessage } from './types.js';
 import { checkAccess } from './access.js';
+import { createReplyStream } from './streamer.js';
 import type { GatewayClient } from '../gateway/client.js';
 import type { GatewayEvent, PromptAccepted, SessionSnapshot } from '../gateway/protocol.js';
 
@@ -111,9 +112,12 @@ export class ChannelBridge {
     this.log(`← ${message.senderName ?? message.senderId}: ${text.slice(0, 80)}`);
 
     const reply = await this.respond(message, text);
-    if (reply) await this.options.transport.send(message.chatId, reply);
+    // A model turn posts and edits its own reply as it arrives; anything else
+    // is a one-line answer with nothing to stream.
+    if (reply !== null) await this.options.transport.send(message.chatId, reply);
   }
 
+  /** Returns the text to send, or null when the reply has already been sent. */
   private async respond(message: IncomingMessage, text: string): Promise<string | null> {
     if (text === '/help' || text === '/start') return HELP;
 
@@ -159,12 +163,13 @@ export class ChannelBridge {
     return created.id;
   }
 
-  private async runModelTurn(message: IncomingMessage, text: string): Promise<string> {
+  private async runModelTurn(message: IncomingMessage, text: string): Promise<null> {
     const sessionId = await this.sessionFor(message);
 
-    // Collected rather than streamed: chat clients have no partial-message
-    // concept, and editing a message per token would burn through Telegram's
-    // rate limit within one reply.
+    // Posted immediately and edited as it arrives. A chat client has no
+    // partial-message concept, so the alternative is a long silence and then a
+    // wall of text — indistinguishable, while waiting, from a dead bot.
+    const stream = createReplyStream(this.options.transport, message.chatId);
     let answer = '';
     const refusals: string[] = [];
 
@@ -176,7 +181,10 @@ export class ChannelBridge {
     const finished = new Promise<Extract<GatewayEvent, { kind: 'turn.finished' }>>((resolve) => {
       const stop = this.options.client.on((eventSessionId, event) => {
         if (eventSessionId !== sessionId) return;
-        if (event.kind === 'text') answer += event.delta;
+        if (event.kind === 'text') {
+          answer += event.delta;
+          void stream.push(answer);
+        }
         // The bridge cannot approve — it said so at connect — so this only
         // arrives to be counted, and the count is what the reply reports.
         if (event.kind === 'approval.resolved' && !event.approved) refusals.push('tool');
@@ -196,15 +204,17 @@ export class ChannelBridge {
     turnId = accepted.turnId;
 
     const result = await finished;
-    if (!result.ok) return `✖ ${result.error ?? 'The turn failed.'}`;
-
-    const body = answer.trim() || '(no reply)';
-    if (refusals.length > 0 && !this.options.allowTools) {
-      return (
-        `${body}\n\n⚠ ${refusals.length} tool request(s) were declined — ` +
-        'nobody was at a terminal to approve them.'
-      );
+    if (!result.ok) {
+      await stream.finish(`✖ ${result.error ?? 'The turn failed.'}`);
+      return null;
     }
-    return body;
+
+    const declined =
+      refusals.length > 0 && !this.options.allowTools
+        ? `\n\n⚠ ${refusals.length} tool request(s) were declined — ` +
+          'nobody was at a terminal to approve them.'
+        : '';
+    await stream.finish(answer.trim() + declined);
+    return null;
   }
 }

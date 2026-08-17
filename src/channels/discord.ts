@@ -182,10 +182,11 @@ export class DiscordTransport implements ChannelTransport {
     });
   }
 
-  async send(chatId: string, text: string): Promise<void> {
+  async send(chatId: string, text: string): Promise<string | undefined> {
     const fetchImpl = this.options.fetchImpl ?? fetch;
+    let firstId: string | undefined;
     for (const chunk of chunkMessage(text, DISCORD_MAX_MESSAGE)) {
-      await fetchImpl(`${API_BASE}/channels/${chatId}/messages`, {
+      const res = await fetchImpl(`${API_BASE}/channels/${chatId}/messages`, {
         method: 'POST',
         headers: {
           authorization: `Bot ${this.options.token}`,
@@ -193,7 +194,24 @@ export class DiscordTransport implements ChannelTransport {
         },
         body: JSON.stringify({ content: chunk }),
       });
+      if (firstId === undefined && res.ok) {
+        const sent = (await res.json().catch(() => ({}))) as { id?: string };
+        if (sent.id) firstId = sent.id;
+      }
     }
+    return firstId;
+  }
+
+  async edit(chatId: string, messageId: string, text: string): Promise<void> {
+    const fetchImpl = this.options.fetchImpl ?? fetch;
+    await fetchImpl(`${API_BASE}/channels/${chatId}/messages/${messageId}`, {
+      method: 'PATCH',
+      headers: {
+        authorization: `Bot ${this.options.token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ content: text }),
+    });
   }
 }
 
