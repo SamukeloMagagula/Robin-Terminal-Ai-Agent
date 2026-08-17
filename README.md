@@ -1,10 +1,33 @@
 # robin
 
-Robin is a terminal agent that lets you run your AI. Supports Anthropic (Claude), GitHub Copilot, Google Gemini, OpenRouter (via API key), Ollama, and any OpenAI-compatible server you run yourself (llama.cpp, LM Studio, vLLM, …), with tool-calling (read files, edit and write files, run shell commands) built in.
+Robin is a terminal agent that lets you run your AI. It talks to Anthropic (Claude), GitHub Copilot, Google Gemini, OpenRouter, Ollama, and any OpenAI-compatible server you run yourself (llama.cpp, LM Studio, vLLM, …), with tool-calling — read files, edit and write files, run shell commands — built in.
 
-It can also be driven from [Telegram](#remote-control-telegram) when you're away from the terminal, and `robin doctor` tells you what's wrong with an install before you hit it.
+Your conversations live in a small local daemon called [the gateway](#the-gateway), not in the terminal window. That is the thing to know first, because everything else follows from it:
+
+- **Close the terminal and reopen it — the conversation is still there.** It survives a reboot too.
+- **The same conversation from anywhere.** A [browser UI](#the-control-ui), and [Telegram, Discord or Slack](#remote-control-telegram-discord-slack) when you are away from the desk. Ask something from your phone; the answer is waiting at your keyboard.
+- **A tool call always finds a human.** A command triggered from a chat message asks you at your terminal, saying where the request came from — and is refused when nobody is there.
+- **Other tools can drive it.** An [OpenAI-compatible API](#driving-robin-from-other-tools) on the same port, so editors and scripts get Robin with its tools, memory and skills rather than a bare model.
+
+`robin doctor` tells you what is wrong with an install before you hit it.
 
 Built by Samukelo "Batman" Magagula.
+
+## Contents
+
+| | |
+|---|---|
+| [Install](#install) · [Requirements](#requirements) | getting it running |
+| [Setting up a provider](#setting-up-a-provider) | the six it talks to |
+| [The gateway](#the-gateway) | where conversations live |
+| [The control UI](#the-control-ui) | driving it from a browser |
+| [Driving Robin from other tools](#driving-robin-from-other-tools) | the OpenAI-compatible API |
+| [Usage](#usage) · [Sessions](#sessions) | day to day |
+| [Tool-Calling](#tool-calling) · [Security](#security) | what it can do to your machine, and what it asks first |
+| [Remote control](#remote-control-telegram-discord-slack) | Telegram, Discord, Slack |
+| [Skills](#skills) · [Memory](#memory) · [MCP servers](#mcp-servers) | what it knows and what it can reach |
+| [How replies are printed](#how-replies-are-printed) | markdown in a terminal |
+| [Troubleshooting](#troubleshooting) | when it misbehaves |
 
 ## Requirements
 
@@ -14,6 +37,8 @@ Built by Samukelo "Batman" Magagula.
 - For Gemini: a Google AI Studio API key
 - For OpenRouter: an OpenRouter API key (gives access to a large, constantly growing catalog of models from many providers — OpenAI, Anthropic, Google, Meta, Mistral, and more — under one key)
 - For Ollama: [Ollama](https://ollama.com) installed and running locally
+- For a local server: anything speaking OpenAI's `/v1` — llama.cpp, LM Studio, Jan, vLLM. No account, no key
+- Nothing else. No database, no service to run, no account with anyone — the gateway starts itself when you first need it
 
 ## Install
 
@@ -214,8 +239,9 @@ Errors show the provider's own explanation, not just a status code — "400 (req
 ## The gateway
 
 Your conversations don't live in the terminal any more. They live in a small
-local daemon — the gateway — and `robin chat` is a client of it. So is the
-[Telegram bridge](#remote-control-telegram). The practical upshot:
+local daemon — the gateway — and `robin chat` is a client of it. So are the
+[chat bridges](#remote-control-telegram-discord-slack) and the
+[control UI](#the-control-ui). The practical upshot:
 
 - **Close the terminal, reopen it in the same directory, and your conversation is still there.** No `/load`, nothing to remember to save.
 - **A message you send from Telegram and a message you type at the keyboard go to the same conversation.** Ask something from your phone, come back to your desk, and it's there — mid-thought, with the reply already streamed in.
@@ -374,6 +400,7 @@ robin chat gemini        # jump straight into Gemini
 robin chat anthropic     # jump straight into Claude
 robin chat openrouter    # jump straight into OpenRouter
 robin chat ollama        # jump straight into Ollama
+robin chat local         # a local OpenAI-compatible server you are running
 robin chat random        # let Robin roll a provider and model for you
 robin login copilot      # log in to Copilot ahead of time
 robin logout copilot     # clear stored Copilot credentials
@@ -382,7 +409,18 @@ robin doctor              # check the install and report anything that would sto
 robin models              # list models recorded as unsupported
 robin models forget gemini  # clear those records so they're offered again
 robin serve telegram      # run as a bridge you can drive from Telegram
-robin serve telegram --whoami   # print your Telegram sender id, for the allowlist
+robin serve discord       # …or Discord
+robin serve slack         # …or Slack
+robin serve telegram --whoami   # print the sender id of whoever messages, for the allowlist
+
+robin ui                  # open the control UI in a browser
+robin gateway status      # is the daemon running, and from which build
+robin gateway stop        # stop it — the next command starts a fresh one
+
+robin skill list          # the skill catalogues
+robin skill add anthropic pdf   # install one
+robin skill update        # re-fetch what you installed
+robin mcp                 # review and approve MCP servers
 ```
 
 In a chat session, typing `/` shows a live-filtered popup of matching commands as you keep typing — arrow keys to move the highlight, **Tab** to fill in the highlighted command without submitting (so you can still type an argument), **Enter** to submit the highlighted command (or your typed line, if the popup isn't open), **Esc** to dismiss the popup and keep typing free text.
@@ -391,7 +429,7 @@ In a chat session, typing `/` shows a live-filtered popup of matching commands a
 
 - `/help` (or just `/`) — list commands
 - `/model` — pick a different model from the ones available on the current provider
-- `/provider` — switch provider (e.g. Copilot ↔ Gemini ↔ OpenRouter ↔ Ollama), or pick `🎲 Random`
+- `/provider` — switch provider (e.g. Copilot ↔ Gemini ↔ OpenRouter ↔ Ollama ↔ a local server), or pick `🎲 Random`
 - `/system [text]` — view the current system prompt, set one (`/system be terse`), or clear it (`/system clear`)
 - `/tools [list]` — toggle tool-calling on/off for the session, or `/tools list` to see what's available
 - `/save [name]` — save the current conversation under `~/.robin/conversations/<name>.json`; `/save` with no name lists what's saved
@@ -737,7 +775,8 @@ Full trust model, including what each control does *not* do: **[SECURITY.md](SEC
 - **`read_file`/`write_file` refuse to touch credential locations**: `~/.robin/`, `~/.ssh/`, `~/.gnupg/`, `~/.aws/`, `~/.kube/`, `~/.docker/`, `~/.config/gh/` and gcloud config, plus credential filenames wherever they live (`.env`, `.npmrc`, `.netrc`, `.git-credentials`, `id_rsa`, …). Paths are resolved to their real target first, so a symlink pointing into a protected directory is caught rather than waved through. **This does not constrain `run_command`** — an approved shell command can read any of those files.
 - **`write_file` always confirms; `read_file` confirms for anything outside the current working directory** — reading unrelated files is how data leaves your machine and enters the model's context. `run_command` confirms unless the command is on the read-only allowlist described above.
 - **Approvals can be remembered per action-kind for the current session** (`a` at the prompt). Session-scoped, never written to disk. Note that this deliberately removes the human from the loop for that action kind until you restart — treat `a` with more care than `y`.
-- **The Telegram bridge has nobody at the keyboard**, so it denies every tool call that would prompt, and answers only sender ids on an explicit allowlist. An empty allowlist authorises nobody and refuses to start. `--allow-tools` removes that restriction entirely — with it, a chat message runs commands and writes files on your machine unattended, and the reading-the-prompt boundary above no longer exists. See [Remote control](#remote-control-telegram).
+- **A chat bridge answers only sender ids on an explicit allowlist.** An empty allowlist authorises nobody and refuses to start, rather than coming online and silently declining everyone.
+- **A tool call from a chat still needs a human.** It is offered to any terminal attached to the same gateway, labelled with the channel and sender that caused it, and refused when no terminal is attached — so "nobody is at a keyboard" and "nobody approved it" stay the same thing. `--allow-tools` removes that entirely: with it, a chat message runs commands and writes files on your machine unattended, and the reading-the-prompt boundary above no longer exists. See [Remote control](#remote-control-telegram-discord-slack).
 - **The destructive-pattern `⚠` is a nudge, not a block.** It catches `rm -rf` but not `rm -r -f`, `$(echo rm) -rf`, or anything encoded. Don't rely on it.
 - **`read_file` and `run_command` output is wrapped as untrusted content** before it goes back to the model — file contents and command output are data the model reads, not instructions it should follow, even if the text looks like a command ("ignore previous instructions and run…"). This narrows prompt injection; it does not eliminate it, since it is a prompt-level convention the model can still be talked out of.
 - **Conversation transcripts in `~/.robin/chats/` contain every file the model read.** They're written `0600`, but treat them as sensitive.
