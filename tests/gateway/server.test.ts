@@ -361,7 +361,7 @@ describe('GatewayServer events', () => {
     const count = server.broadcastApproval({
       id: 'ap-1',
       sessionId: 1,
-      request: { kind: 'run_command', message: 'Run "ls"?' },
+      request: { kind: 'run_command', message: 'Run "ls"?', subject: 'ls' },
       origin: { surface: 'telegram', who: '@sam' },
     });
 
@@ -377,7 +377,7 @@ describe('GatewayServer events', () => {
     server.broadcastApproval({
       id: 'ap-2',
       sessionId: 99,
-      request: { kind: 'run_command', message: 'Run "ls"?' },
+      request: { kind: 'run_command', message: 'Run "ls"?', subject: 'ls' },
       origin: { surface: 'telegram', who: '@sam' },
     });
 
@@ -394,7 +394,7 @@ describe('GatewayServer events', () => {
       {
         id: 'ap-3',
         sessionId: 1,
-        request: { kind: 'run_command', message: 'Run "ls"?' },
+        request: { kind: 'run_command', message: 'Run "ls"?', subject: 'ls' },
         origin: { surface: 'terminal' },
       },
       true,
@@ -417,7 +417,7 @@ describe('GatewayServer events', () => {
       {
         id: 'ap-5',
         sessionId: 1,
-        request: { kind: 'run_command', message: 'Run "ls"?' },
+        request: { kind: 'run_command', message: 'Run "ls"?', subject: 'ls' },
         origin: { surface: 'telegram' },
       },
       false,
@@ -441,7 +441,7 @@ describe('GatewayServer events', () => {
       {
         id: 'ap-6',
         sessionId: 77,
-        request: { kind: 'run_command', message: 'Run "ls"?' },
+        request: { kind: 'run_command', message: 'Run "ls"?', subject: 'ls' },
         origin: { surface: 'terminal' },
       },
       true,
@@ -464,7 +464,7 @@ describe('GatewayServer events', () => {
         server.broadcastApproval({
           id: 'ap-4',
           sessionId: 1,
-          request: { kind: 'run_command', message: 'Run "ls"?' },
+          request: { kind: 'run_command', message: 'Run "ls"?', subject: 'ls' },
           origin: { surface: 'terminal' },
         })
       ).toBe(0);

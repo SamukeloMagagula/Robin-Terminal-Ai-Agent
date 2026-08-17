@@ -8,6 +8,7 @@ const telegram = { surface: 'telegram', who: '@sam' };
 const command = (text: string): ConfirmRequest => ({
   kind: 'run_command',
   message: `Run "${text}"?`,
+  subject: text,
 });
 
 function registry(approverCount = 1) {
@@ -211,6 +212,7 @@ describe('ApprovalRegistry scopes', () => {
   const write = (path: string): ConfirmRequest => ({
     kind: 'write_file',
     message: `Write to ${path}?`,
+    subject: path,
   });
 
   it('stops asking about a kind once approved for the session', async () => {

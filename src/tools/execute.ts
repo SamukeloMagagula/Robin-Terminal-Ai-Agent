@@ -70,6 +70,16 @@ export function wrapUntrusted(source: string, content: string): string {
 export interface ConfirmRequest {
   kind: 'run_command' | 'write_file' | 'read_file' | 'mcp_tool';
   message: string;
+  /**
+   * The thing being asked about, structured: the raw command, the canonical
+   * path, or the "server.tool" name.
+   *
+   * `message` is prose assembled for a human to read, and anything deciding
+   * *automatically* must read this field instead. Recovering the command by
+   * parsing the sentence would let a crafted filename make the message describe
+   * something other than what would actually run.
+   */
+  subject: string;
 }
 
 export type ConfirmFn = (request: ConfirmRequest) => Promise<boolean>;
@@ -198,6 +208,7 @@ async function readFileTool(
     const approved = await confirm({
       kind: 'read_file',
       message: `Read ${verdict.realPath}?\n(outside the current working directory)`,
+      subject: verdict.realPath,
     });
     if (!approved) {
       return `Reading ${filePath} was declined by the user.${DECLINE_GUIDANCE}`;
@@ -238,6 +249,7 @@ async function writeFileTool(
   const approved = await confirm({
     kind: 'write_file',
     message: `Write to ${verdict.realPath}?\n---\n${preview}\n---`,
+    subject: verdict.realPath,
   });
   if (!approved) {
     return `Write to ${filePath} was declined by the user.${DECLINE_GUIDANCE}`;
@@ -323,6 +335,7 @@ async function editFileTool(
 
   const approved = await confirm({
     kind: 'write_file',
+    subject: verdict.realPath,
     message:
       `Edit ${verdict.realPath}?\n` +
       `${occurrences > 1 ? `${occurrences} occurrences\n` : ''}` +
@@ -419,6 +432,7 @@ async function runMcpTool(
   const preview = JSON.stringify(args);
   const approved = await confirm({
     kind: 'mcp_tool',
+    subject: name,
     message:
       `Run MCP tool "${name}"?\n` +
       `with ${preview.length > MAX_PREVIEW_LENGTH ? `${preview.slice(0, MAX_PREVIEW_LENGTH)}...` : preview}\n` +
@@ -453,7 +467,11 @@ async function runCommandTool(
     const warning = isDangerousCommand(command)
       ? '⚠ This command looks potentially destructive — review it carefully.\n'
       : '';
-    const approved = await confirm({ kind: 'run_command', message: `${warning}Run "${command}"?` });
+    const approved = await confirm({
+      kind: 'run_command',
+      message: `${warning}Run "${command}"?`,
+      subject: command,
+    });
     if (!approved) {
       return `Command "${command}" was declined by the user.${DECLINE_GUIDANCE}`;
     }
