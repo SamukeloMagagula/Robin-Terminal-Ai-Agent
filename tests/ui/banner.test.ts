@@ -67,8 +67,23 @@ describe('buildBanner', () => {
   });
 
   it('keeps the cowl at the centre of the reticle', () => {
+    // This used to assert only that a `●` appeared somewhere, which stayed
+    // green while the cowl sat a column right of the rings around it. The
+    // padding either side of the art is what the name was claiming.
     atWidth(100);
-    expect(banner()).toContain('●');
+    const eyeRow = banner()
+      .split('\n')
+      .map((line) => line.replace(new RegExp(String.fromCharCode(27) + '\\[[0-9;]*m', 'g'), ''))
+      .find((line) => line.includes('●'));
+    expect(eyeRow).toBeDefined();
+
+    const inner = (eyeRow as string).slice(
+      (eyeRow as string).indexOf('│') + 1,
+      (eyeRow as string).lastIndexOf('│')
+    );
+    const left = inner.length - inner.trimStart().length;
+    const right = inner.length - inner.trimEnd().length;
+    expect(left).toBe(right);
   });
 
   it('lists commands, and says how many were not shown', () => {
