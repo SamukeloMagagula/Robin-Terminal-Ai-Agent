@@ -39,6 +39,10 @@ export const EXAMPLE_CONFIG = `{
       "allow": ["987654321"],
       "provider": "copilot",
       "model": "claude-sonnet-5"
+    },
+    "discord": {
+      "token": "your-discord-bot-token",
+      "allow": ["your-discord-user-id"]
     }
   }
 }`;

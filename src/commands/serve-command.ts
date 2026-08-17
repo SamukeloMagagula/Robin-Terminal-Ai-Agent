@@ -4,6 +4,7 @@ import { getProvider, listProviders } from '../providers/index.js';
 import { mutedColor, divider } from '../ui/theme.js';
 import { loadChannelConfig, tokenEnvVar } from '../channels/config.js';
 import { TelegramTransport } from '../channels/telegram.js';
+import { DiscordTransport } from '../channels/discord.js';
 import { ChannelBridge } from '../channels/bridge.js';
 import type { ChannelTransport } from '../channels/types.js';
 import { UserFacingError } from '../startup/bootstrap.js';
@@ -22,6 +23,7 @@ import { GatewayClient } from '../gateway/client.js';
  */
 const CHANNELS: Record<string, { build?: (token: string) => ChannelTransport; pending?: string }> = {
   telegram: { build: (token) => new TelegramTransport({ token }) },
+  discord: { build: (token) => new DiscordTransport({ token }) },
   whatsapp: {
     pending:
       'WhatsApp needs a Meta Business account, a registered phone number and a public webhook — ' +
@@ -169,10 +171,14 @@ export async function runServe(channelName: string, options: ServeOptions): Prom
 /** Surfaced in `robin serve --help` so the token variable is discoverable. */
 export function serveHelpText(): string {
   return [
-    'Channels: telegram (ready), whatsapp and teams (not yet wired up).',
+    'Channels: telegram and discord (ready), whatsapp and teams (not yet wired up).',
+    '',
+    'Discord needs the MESSAGE CONTENT intent enabled on your application at',
+    'discord.com/developers — without it every message arrives empty and the bot',
+    'looks like it is ignoring you.',
     '',
     'Config lives in ~/.robin/channels.json. The bot token may instead come from',
-    `an environment variable — ${tokenEnvVar('telegram')} for Telegram.`,
+    `an environment variable — ${tokenEnvVar('telegram')} or ${tokenEnvVar('discord')}.`,
     '',
     'Tool calls that would prompt in the REPL are offered to any terminal attached',
     'to the same gateway, and DENIED when there is none — because then there really',

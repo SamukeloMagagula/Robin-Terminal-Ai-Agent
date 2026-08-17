@@ -518,15 +518,20 @@ A server that fails to start, or dies, is disabled with one muted line — the t
 
 **Not supported yet:** the Streamable-HTTP transport (stdio only), and MCP resources and prompts (tools only).
 
-## Remote control (Telegram)
+## Remote control (Telegram, Discord)
 
 `robin serve` runs Robin as a bridge so you can drive it from a messaging app while you're away from the terminal.
 
 ```bash
 robin serve telegram
+robin serve discord
 ```
 
-Telegram works today. WhatsApp and Teams are recognised channel names that explain what they still need — both require a public webhook endpoint rather than the outbound long-poll Telegram allows, so they can't run from a laptop behind NAT the way this does. The access control, session handling and agent loop are already shared, so each is a transport adapter plus a webhook listener.
+Both work today, and both connect *outward* — Telegram by long-polling, Discord over its gateway WebSocket — so neither needs a public address or an open port. That is the whole reason these two came first: they run from a laptop behind NAT exactly as they are.
+
+WhatsApp and Teams are recognised channel names that explain what they still need. Both require a public webhook endpoint, so each is a transport adapter plus a listener something on the internet can reach. Everything above the transport — access control, sessions, approvals, the agent loop — is already shared, which is why Discord was one file.
+
+**Discord needs one thing switched on.** On your application's page at [discord.com/developers](https://discord.com/developers/applications), under *Bot*, enable the **Message Content Intent**. Without it every message arrives with empty text and the bot looks like it is ignoring you. Invite the bot to a server, or message it directly, then put your own Discord user id in the allowlist — `robin serve discord --whoami` prints the id of anyone who messages it.
 
 ### Setting it up
 
