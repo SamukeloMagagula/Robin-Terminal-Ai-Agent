@@ -1,6 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { McpServerConfig } from './config.js';
+import { robinVersion } from '../version.js';
 
 export interface McpToolInfo {
   name: string;
@@ -43,7 +44,7 @@ export class McpConnection {
       stderr: 'ignore',
     });
 
-    const client = new Client({ name: 'robin', version: '0.1.0' }, { capabilities: {} });
+    const client = new Client({ name: 'robin', version: robinVersion() }, { capabilities: {} });
 
     await withTimeout(
       client.connect(transport),

@@ -1,8 +1,8 @@
-import { createRequire } from 'node:module';
 import { mutedColor, ruleWidth } from './theme.js';
 import { SLASH_COMMANDS } from '../repl/slash-prompt.js';
 import { renderHud } from './hud/layout.js';
 import type { HudStats } from './hud/telemetry.js';
+import { robinVersion } from '../version.js';
 
 const DEFAULT_WIDTH = 80;
 const INDENT = '  ';
@@ -23,15 +23,7 @@ export interface BannerInfo {
   stats?: HudStats;
 }
 
-function readVersion(): string {
-  try {
-    const require = createRequire(import.meta.url);
-    const pkg = require('../../package.json') as { version?: string };
-    return pkg.version ?? '0.0.0';
-  } catch {
-    return '0.0.0';
-  }
-}
+const readVersion = robinVersion;
 
 /** Zeroed telemetry, for a caller that did not gather any. */
 function emptyStats(): HudStats {

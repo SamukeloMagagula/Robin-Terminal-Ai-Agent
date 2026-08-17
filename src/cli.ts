@@ -18,6 +18,7 @@ import { runUi } from './commands/ui-command.js';
 import { runSkillList, runSkillAdd, runSkillUpdate } from './commands/skill-command.js';
 import { runServe, serveHelpText, type ServeOptions } from './commands/serve-command.js';
 import { pickRandomProviderAndModel } from './random-pick.js';
+import { robinVersion } from './version.js';
 import { pickFromChoices, toChoices } from './ui/model-picker.js';
 import { mutedColor, errorColor } from './ui/theme.js';
 import {
@@ -144,7 +145,12 @@ async function startChat(providerId?: string, continueSession = false): Promise<
 }
 
 const program = new Command();
-program.name('robin').description('Chat with AI models from your terminal');
+program
+  .name('robin')
+  .description('Chat with AI models from your terminal')
+  // `robin --version` answered "unknown option" until there were releases to
+  // tell apart. It is the first thing anyone is asked for in a bug report.
+  .version(robinVersion(), '-v, --version');
 
 program
   .command('login <provider>')
