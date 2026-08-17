@@ -191,6 +191,14 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       patch: { personality },
     });
   }
+  // A session found by directory already matches, but one restored from disk
+  // may have been created elsewhere — and the terminal knows where it is now.
+  if (snapshot.cwd !== process.cwd()) {
+    snapshot = await client.request<SessionSnapshot>('session.update', {
+      id: snapshot.id,
+      patch: { cwd: process.cwd() },
+    });
+  }
   const attached = await client.request<AttachResult>('session.attach', { id: snapshot.id });
 
   const ctx: ReplContext = {

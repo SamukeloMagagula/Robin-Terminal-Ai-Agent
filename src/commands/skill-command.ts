@@ -15,6 +15,79 @@ function describeSources(): string {
     .join('\n');
 }
 
+/**
+ * Re-fetches every installed catalogue skill.
+ *
+ * An installed skill is a copy taken on the day you installed it; upstream
+ * moves on and nothing here would ever notice. Skills you wrote yourself are
+ * left alone — there is nowhere to refresh them from, and overwriting them
+ * would destroy your own work.
+ */
+export async function runSkillUpdate(): Promise<void> {
+  const store = new SkillStore();
+  const installed = await store.list();
+
+  const fromCatalogue: { name: string; source: string; sourcePath: string }[] = [];
+  for (const meta of installed) {
+    const skill = await store.read(meta.name);
+    if (skill?.source && skill.sourcePath) {
+      fromCatalogue.push({ name: skill.name, source: skill.source, sourcePath: skill.sourcePath });
+    }
+  }
+
+  console.log(assistantColor('Updating installed skills'));
+  console.log(divider());
+
+  if (fromCatalogue.length === 0) {
+    console.log(
+      mutedColor(
+        installed.length === 0
+          ? 'None installed. Add some with `robin skill add <source> <name>`.'
+          : `${installed.length} skill(s), none from a catalogue — nothing to refresh.`
+      )
+    );
+    return;
+  }
+
+  let changed = 0;
+  let same = 0;
+  for (const entry of fromCatalogue) {
+    try {
+      const raw = await fetchSkillBody(entry.source, entry.sourcePath);
+      const parsed = parseFrontmatter(raw);
+      const body = (parsed?.body ?? raw).trim();
+      const before = await store.read(entry.name);
+
+      if (before?.body === body) {
+        same += 1;
+        continue;
+      }
+      await store.write({
+        name: entry.name,
+        description: parsed?.fields.description?.trim() || before?.description || entry.name,
+        body,
+        source: entry.source,
+        sourcePath: entry.sourcePath,
+      });
+      console.log(`  ${assistantColor('↻')} ${entry.name}`);
+      changed += 1;
+    } catch (err) {
+      // One skill that cannot be fetched must not abandon the rest.
+      console.log(`  ${errorColor('✖')} ${entry.name} — ${(err as Error).message}`);
+    }
+  }
+
+  console.log(
+    mutedColor(
+      changed > 0
+        ? `
+Updated ${changed}, ${same} already current.`
+        : `
+All ${same} already current.`
+    )
+  );
+}
+
 /** Lists what a catalogue offers, optionally narrowed by a substring. */
 export async function runSkillList(source?: string, filter?: string): Promise<void> {
   if (!source) {
@@ -101,6 +174,9 @@ export async function runSkillAdd(source: string, names: string[]): Promise<void
         name,
         description: parsed?.fields.description?.trim() || entry.name,
         body: (parsed?.body ?? raw).trim(),
+        // Recorded so `robin skill update` knows where to look again.
+        source,
+        sourcePath: entry.path,
       });
       console.log(`  ${assistantColor('✓')} ${name}`);
       installed += 1;

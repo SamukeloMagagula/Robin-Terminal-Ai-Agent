@@ -129,3 +129,43 @@ describe('fetchSkillBody', () => {
     );
   });
 });
+
+describe('installed skills remember where they came from', () => {
+  it('round-trips the source through the store', async () => {
+    const { SkillStore } = await import('../../src/skills/store');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { promises: fs } = await import('node:fs');
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'robin-skillsrc-'));
+    const store = new SkillStore(dir);
+
+    await store.write({
+      name: 'hermes-aegis-brainstorming',
+      description: 'd',
+      body: 'b',
+      source: 'hermes',
+      sourcePath: 'skills/aegis/brainstorming/SKILL.md',
+    });
+
+    const read = await store.read('hermes-aegis-brainstorming');
+    expect(read?.source).toBe('hermes');
+    expect(read?.sourcePath).toBe('skills/aegis/brainstorming/SKILL.md');
+  });
+
+  // Without this, `skill update` would overwrite something you wrote with
+  // whatever a catalogue happens to have under a similar name.
+  it('leaves a hand-written skill with no source', async () => {
+    const { SkillStore } = await import('../../src/skills/store');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { promises: fs } = await import('node:fs');
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'robin-skillmine-'));
+    const store = new SkillStore(dir);
+
+    await store.write({ name: 'mine', description: 'd', body: 'b' });
+
+    const read = await store.read('mine');
+    expect(read?.source).toBeUndefined();
+    expect(read?.sourcePath).toBeUndefined();
+  });
+});

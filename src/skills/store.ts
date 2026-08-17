@@ -9,6 +9,14 @@ export interface Skill {
   description: string;
   /** The instructions themselves. Becomes the system prompt when applied. */
   body: string;
+  /**
+   * Where an installed skill came from, so it can be refreshed later.
+   *
+   * Absent for anything you wrote yourself with /skill save — there is nowhere
+   * to refresh that from, and overwriting it would destroy your own work.
+   */
+  source?: string;
+  sourcePath?: string;
 }
 
 export type SkillMeta = Omit<Skill, 'body'>;
@@ -84,6 +92,8 @@ export class SkillStore {
           name,
           description: parsed.fields.description ?? '',
           body: parsed.body,
+          source: parsed.fields.source || undefined,
+          sourcePath: parsed.fields.sourcePath || undefined,
         };
       }
     } catch {
@@ -114,7 +124,15 @@ export class SkillStore {
     await fs.mkdir(dir, { recursive: true, mode: 0o700 });
     await fs.writeFile(
       path.join(dir, SKILL_FILE),
-      renderFrontmatter({ name: skill.name, description: skill.description }, skill.body),
+      renderFrontmatter(
+        {
+          name: skill.name,
+          description: skill.description,
+          ...(skill.source ? { source: skill.source } : {}),
+          ...(skill.sourcePath ? { sourcePath: skill.sourcePath } : {}),
+        },
+        skill.body
+      ),
       { mode: 0o600 }
     );
   }

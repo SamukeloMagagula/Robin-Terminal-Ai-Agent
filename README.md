@@ -227,12 +227,11 @@ A session untouched for two weeks is dropped on the next start, so directories
 you visited once don't pile up in `/session`. Closing a session forgets it
 immediately.
 
-**One honest limitation:**
-
-- **A session's working directory is fixed when it's created.** Tools run
-  there. Move your terminal elsewhere and continue an old session, and commands
-  still run in the original directory. `/session new` starts one bound to where
-  you are now.
+**Tools run where your terminal is.** A session records a working directory,
+and `robin chat` re-binds it on attach — so continuing a restored conversation
+from a different directory runs commands where you actually are, not where the
+conversation started. `/session cwd` moves an open one by hand; the
+conversation itself is untouched, because a `cd` is not a change of subject.
 
 ### The control UI
 
@@ -460,6 +459,7 @@ Skills are installed from published catalogues, not written by the model. Three 
 robin skill list                      # the catalogues
 robin skill list hermes review        # what's in one, filtered
 robin skill add anthropic pdf docx    # install by name
+robin skill update                    # re-fetch what you installed
 ```
 
 | Source | Repository | Skills |
@@ -467,6 +467,8 @@ robin skill add anthropic pdf docx    # install by name
 | `anthropic` | [anthropics/skills](https://github.com/anthropics/skills) | 17 |
 | `openclaw` | [openclaw/openclaw](https://github.com/openclaw/openclaw) | 45 |
 | `hermes` | [Undermybelt/hermes-skills](https://github.com/Undermybelt/hermes-skills) | 1400+ |
+
+An installed skill is a copy taken the day you installed it, so it records where it came from and `robin skill update` re-fetches the lot. Skills you wrote yourself with `/skill save` have no source and are never touched — there is nowhere to refresh them from, and overwriting them would destroy your own work.
 
 Installed skills keep their source in the name — `hermes-aegis-brainstorming` — because the catalogues overlap, and more than one publishes a "brainstorming". Installing asks first: a skill is a standing instruction set that shapes every later session, these come from public repositories, and nobody reviewed them on the way in.
 

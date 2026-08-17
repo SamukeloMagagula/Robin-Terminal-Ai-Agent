@@ -63,6 +63,16 @@ export async function handleSession(ctx: ReplContext, arg?: string): Promise<voi
     return;
   }
 
+  if (sub === 'cwd') {
+    const where = rest.join(' ') || process.cwd();
+    ctx.snapshot = await ctx.client.request<SessionSnapshot>('session.update', {
+      id: ctx.sessionId,
+      patch: { cwd: where },
+    });
+    console.log(chalk.gray(`Tools now run in ${ctx.snapshot.cwd}.`));
+    return;
+  }
+
   if (sub === 'name') {
     const label = rest.join(' ');
     if (!label) {
@@ -124,6 +134,8 @@ export async function handleSession(ctx: ReplContext, arg?: string): Promise<voi
   }
 
   console.log(
-    errorColor(`✖ Unknown /session subcommand "${sub}". Usage: /session [list|new|name|close|<n>]`)
+    errorColor(
+      `✖ Unknown /session subcommand "${sub}". Usage: /session [list|new|name|cwd|close|<n>]`
+    )
   );
 }

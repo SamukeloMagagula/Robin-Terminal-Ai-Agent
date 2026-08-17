@@ -15,7 +15,7 @@ import {
 } from './commands/gateway-command.js';
 import { runMcp } from './commands/mcp-command.js';
 import { runUi } from './commands/ui-command.js';
-import { runSkillList, runSkillAdd } from './commands/skill-command.js';
+import { runSkillList, runSkillAdd, runSkillUpdate } from './commands/skill-command.js';
 import { runServe, serveHelpText, type ServeOptions } from './commands/serve-command.js';
 import { pickRandomProviderAndModel } from './random-pick.js';
 import { pickFromChoices, toChoices } from './ui/model-picker.js';
@@ -229,6 +229,13 @@ skill
   .description('List a catalogue, or the catalogues themselves')
   .action(async (source?: string, filter?: string) => {
     await runSkillList(source, filter);
+  });
+
+skill
+  .command('update')
+  .description('Re-fetch installed catalogue skills')
+  .action(async () => {
+    await runSkillUpdate();
   });
 
 skill

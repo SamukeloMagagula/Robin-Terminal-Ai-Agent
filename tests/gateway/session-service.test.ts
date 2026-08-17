@@ -274,3 +274,24 @@ describe('SessionService origins', () => {
     ).toBe('http');
   });
 });
+
+describe('SessionService working directory', () => {
+  it('re-binds where tools run', () => {
+    const { svc } = service();
+    const created = svc.create({ providerId: 'copilot', model: 'gpt-4o', cwd: 'C:/old' });
+
+    expect(svc.update(created.id, { cwd: 'C:/new' }).cwd).toBe('C:/new');
+  });
+
+  // A cd is not a change of model. Clearing the conversation for it would be a
+  // surprising price to pay for moving directory.
+  it('keeps the conversation when only the directory moves', () => {
+    const { svc } = service();
+    const created = svc.create({ providerId: 'copilot', model: 'gpt-4o', cwd: 'C:/old' });
+    svc.append(created.id, { role: 'user', content: 'said earlier' });
+
+    svc.update(created.id, { cwd: 'C:/new' });
+
+    expect(svc.history(created.id)).toHaveLength(1);
+  });
+});

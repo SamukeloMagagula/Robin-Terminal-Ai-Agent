@@ -139,9 +139,12 @@ export class SessionService {
       personality?: string | null;
       toolsEnabled?: boolean;
       label?: string;
+      /** Where tools run. Changing it does not touch the conversation. */
+      cwd?: string;
     }
   ): SessionSnapshot {
-    const { session } = this.record(id);
+    const record = this.record(id);
+    const { session } = record;
 
     // A connection switch resets the conversation: the model on the other side
     // has not seen any of it, and replaying it would present someone else's
@@ -156,6 +159,10 @@ export class SessionService {
     if (patch.label !== undefined) session.label = patch.label;
     if (patch.systemPrompt !== undefined) session.systemPrompt = patch.systemPrompt ?? undefined;
     if (patch.personality !== undefined) session.personality = patch.personality ?? undefined;
+    // Deliberately not a connection change: moving where commands run says
+    // nothing about what was said, and clearing the history would be a
+    // surprising price for a `cd`.
+    if (patch.cwd !== undefined) record.cwd = patch.cwd;
 
     if (switchingConnection) {
       session.history = [];
