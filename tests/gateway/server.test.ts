@@ -267,7 +267,8 @@ describe('GatewayServer methods', () => {
     });
     await next(socket);
 
-    expect(approvals.answer).toHaveBeenCalledWith('ap-1', true, expect.any(String));
+    // A client that says nothing about scope means this once.
+    expect(approvals.answer).toHaveBeenCalledWith('ap-1', true, expect.any(String), 'once');
   });
 
   it('interrupts a turn', async () => {
@@ -546,5 +547,27 @@ describe('GatewayServer and stale builds', () => {
 
     send(socket, { type: 'req', id: '2', method: 'session.list', params: {} });
     expect(await next(socket)).toMatchObject({ ok: true });
+  });
+});
+
+describe('GatewayServer approval scopes', () => {
+  it.each([
+    ['session', 'session'],
+    ['reply', 'reply'],
+    ['once', 'once'],
+    ['nonsense', 'once'],
+    [undefined, 'once'],
+  ])('passes scope %s through as %s', async (sent, expected) => {
+    const socket = await connected();
+
+    send(socket, {
+      type: 'req',
+      id: 's',
+      method: 'approval.answer',
+      params: { approvalId: 'ap-1', approved: true, scope: sent },
+    });
+    await next(socket);
+
+    expect(approvals.answer).toHaveBeenCalledWith('ap-1', true, expect.any(String), expected);
   });
 });

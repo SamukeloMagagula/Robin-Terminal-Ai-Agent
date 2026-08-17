@@ -206,3 +206,97 @@ describe('ApprovalRegistry timeout', () => {
     expect(resolved).toHaveBeenCalledWith(expect.anything(), false, 'timeout');
   });
 });
+
+describe('ApprovalRegistry scopes', () => {
+  const write = (path: string): ConfirmRequest => ({
+    kind: 'write_file',
+    message: `Write to ${path}?`,
+  });
+
+  it('stops asking about a kind once approved for the session', async () => {
+    const { reg, seen } = registry();
+    const confirm = reg.confirmFor(1, terminal, false);
+
+    const first = confirm(command('ls'));
+    await vi.waitFor(() => expect(seen).toHaveLength(1));
+    reg.answer(seen[0].id, true, 'terminal-1', 'session');
+    expect(await first).toBe(true);
+
+    // A different command of the same kind, and a new reply: still allowed.
+    reg.beginTurn(1);
+    expect(await confirm(command('cat x'))).toBe(true);
+    expect(seen).toHaveLength(1);
+  });
+
+  it('keeps a session grant to the kind it was given for', async () => {
+    const { reg, seen } = registry();
+    const confirm = reg.confirmFor(1, terminal, false);
+
+    const first = confirm(command('ls'));
+    await vi.waitFor(() => expect(seen).toHaveLength(1));
+    reg.answer(seen[0].id, true, 'terminal-1', 'session');
+    await first;
+
+    void confirm(write('a.txt'));
+    await vi.waitFor(() => expect(seen).toHaveLength(2));
+  });
+
+  // A grant is to one conversation. Approving commands in the repo you are
+  // working in must not silence the gate for a Telegram chat.
+  it('keeps a session grant out of other sessions', async () => {
+    const { reg, seen } = registry();
+    const one = reg.confirmFor(1, terminal, false);
+    const two = reg.confirmFor(2, terminal, false);
+
+    const first = one(command('ls'));
+    await vi.waitFor(() => expect(seen).toHaveLength(1));
+    reg.answer(seen[0].id, true, 'terminal-1', 'session');
+    await first;
+
+    void two(command('ls'));
+    await vi.waitFor(() => expect(seen).toHaveLength(2));
+  });
+
+  it('stops asking about a kind once refused for the reply', async () => {
+    const { reg, seen } = registry();
+    const confirm = reg.confirmFor(1, terminal, false);
+
+    const first = confirm(command('google this'));
+    await vi.waitFor(() => expect(seen).toHaveLength(1));
+    reg.answer(seen[0].id, false, 'terminal-1', 'reply');
+    expect(await first).toBe(false);
+
+    // A different command, which the plain "no" would have asked about again.
+    expect(await confirm(command('google that'))).toBe(false);
+    expect(seen).toHaveLength(1);
+  });
+
+  it('asks again about that kind on the next reply', async () => {
+    const { reg, seen } = registry();
+    const confirm = reg.confirmFor(1, terminal, false);
+
+    const first = confirm(command('ls'));
+    await vi.waitFor(() => expect(seen).toHaveLength(1));
+    reg.answer(seen[0].id, false, 'terminal-1', 'reply');
+    await first;
+
+    reg.beginTurn(1);
+    void confirm(command('ls'));
+    await vi.waitFor(() => expect(seen).toHaveLength(2));
+  });
+
+  // The session grant is the dangerous one, so it must not outlive a restart
+  // by being confused with anything persisted.
+  it('treats a missing scope as this once', async () => {
+    const { reg, seen } = registry();
+    const confirm = reg.confirmFor(1, terminal, false);
+
+    const first = confirm(command('ls'));
+    await vi.waitFor(() => expect(seen).toHaveLength(1));
+    reg.answer(seen[0].id, true, 'terminal-1');
+    await first;
+
+    void confirm(command('ls'));
+    await vi.waitFor(() => expect(seen).toHaveLength(2));
+  });
+});

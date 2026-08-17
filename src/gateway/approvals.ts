@@ -4,6 +4,14 @@ import type { ApprovalOrigin } from './protocol.js';
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 
+/**
+ * How far an answer reaches.
+ *
+ * 'once' is the default and the safe reading — a client that says nothing gets
+ * it. The other two are the user widening their own answer deliberately.
+ */
+export type ApprovalScope = 'once' | 'session' | 'reply';
+
 export interface PendingApproval {
   id: string;
   sessionId: number;
@@ -50,15 +58,26 @@ function requestKey(sessionId: number, request: ConfirmRequest): string {
 export class ApprovalRegistry {
   private readonly entries = new Map<string, Entry>();
   private readonly declined = new Map<number, Set<string>>();
+  /**
+   * Kinds granted for the rest of a session, per session.
+   *
+   * Per session rather than per daemon on purpose: approving commands in the
+   * repository you are working in must not silence the gate for a Telegram
+   * chat that happens to share the daemon.
+   */
+  private readonly allowedKinds = new Map<number, Set<ConfirmRequest['kind']>>();
+  /** Kinds refused for the rest of a reply, per session. Cleared by beginTurn. */
+  private readonly declinedKinds = new Map<number, Set<ConfirmRequest['kind']>>();
   private readonly timeoutMs: number;
 
   constructor(private readonly deps: ApprovalRegistryDeps) {
     this.timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
-  /** Clears the per-reply refusals for one session. */
+  /** Clears the per-reply refusals for one session. Session grants survive. */
   beginTurn(sessionId: number): void {
     this.declined.delete(sessionId);
+    this.declinedKinds.delete(sessionId);
   }
 
   pending(): PendingApproval[] {
@@ -69,10 +88,37 @@ export class ApprovalRegistry {
     return (request) => this.ask(sessionId, origin, autoApprove, request);
   }
 
-  /** Returns false when the approval is unknown or already settled. */
-  answer(approvalId: string, approved: boolean, by: string): boolean {
+  /**
+   * Settles one approval.
+   *
+   * `scope` widens the answer beyond this single request: 'session' stops
+   * asking about that kind until the daemon stops, 'reply' stops asking about
+   * it until the user speaks again. Anything else — including a client that
+   * sends nothing — means this once, which is the safe reading.
+   *
+   * Returns false when the approval is unknown or already settled.
+   */
+  answer(
+    approvalId: string,
+    approved: boolean,
+    by: string,
+    scope: ApprovalScope = 'once'
+  ): boolean {
     const entry = this.entries.get(approvalId);
     if (!entry) return false;
+
+    const { sessionId, request } = entry.pending;
+    if (approved && scope === 'session') {
+      const allowed = this.allowedKinds.get(sessionId) ?? new Set<ConfirmRequest['kind']>();
+      allowed.add(request.kind);
+      this.allowedKinds.set(sessionId, allowed);
+    }
+    if (!approved && scope === 'reply') {
+      const refused = this.declinedKinds.get(sessionId) ?? new Set<ConfirmRequest['kind']>();
+      refused.add(request.kind);
+      this.declinedKinds.set(sessionId, refused);
+    }
+
     entry.settle(approved, by);
     return true;
   }
@@ -88,6 +134,11 @@ export class ApprovalRegistry {
     // rather than of the process, so `/session` and `gateway status` can show
     // which conversations carry it.
     if (autoApprove) return Promise.resolve(true);
+
+    // Standing answers, widest first. Both are answers the user already gave;
+    // asking again would be asking them to repeat themselves.
+    if (this.allowedKinds.get(sessionId)?.has(request.kind)) return Promise.resolve(true);
+    if (this.declinedKinds.get(sessionId)?.has(request.kind)) return Promise.resolve(false);
 
     const key = requestKey(sessionId, request);
     if (this.declined.get(sessionId)?.has(key)) return Promise.resolve(false);

@@ -92,8 +92,10 @@ const PAGE = `<!doctype html>
   <div class="from" id="approvalFrom"></div>
   <pre id="approvalWhat"></pre>
   <div class="row">
-    <button class="ghost" value="no" id="deny">No</button>
-    <button value="yes" id="allow">Yes</button>
+    <button class="ghost" id="denyAll">No, stop asking</button>
+    <button class="ghost" id="deny">No</button>
+    <button id="allow">Yes</button>
+    <button id="allowAll">Yes, stop asking</button>
   </div>
 </dialog>
 
@@ -252,11 +254,19 @@ const PAGE = `<!doctype html>
     dialog.showModal();
   }
 
-  for (const [id, approved] of [['allow', true], ['deny', false]]) {
+  // The two wide answers are the user saying once what they would otherwise
+  // say to every near-identical request in a row.
+  const answers = [
+    ['allow', true, 'once'],
+    ['deny', false, 'once'],
+    ['allowAll', true, 'session'],
+    ['denyAll', false, 'reply'],
+  ];
+  for (const [id, approved, scope] of answers) {
     $(id).onclick = () => {
       const approvalId = $('approval').dataset.id;
       $('approval').close();
-      request('approval.answer', { approvalId, approved }).catch(() => {});
+      request('approval.answer', { approvalId, approved, scope }).catch(() => {});
     };
   }
 

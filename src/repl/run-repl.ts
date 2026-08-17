@@ -22,6 +22,7 @@ import { renderUsageLine } from '../usage/render-usage.js';
 import { assistantColor, errorColor, mutedColor, divider, box } from '../ui/theme.js';
 import { ensureGateway } from '../gateway/ensure.js';
 import { GatewayClient } from '../gateway/client.js';
+import type { ApprovalScope } from '../gateway/approvals.js';
 import type {
   AttachResult,
   GatewayEvent,
@@ -82,24 +83,25 @@ const HANDLERS: Partial<Record<ParsedCommand['type'], CommandHandler>> = {
   workflow: handleWorkflow,
 };
 
-const APPROVAL_WORDING: Record<ConfirmRequest['kind'], string> = {
-  run_command: 'Run it?',
-  write_file: 'Write it?',
-  read_file: 'Read it?',
-  mcp_tool: 'Run it?',
+const APPROVAL_WORDING: Record<ConfirmRequest['kind'], { question: string; scope: string }> = {
+  run_command: { question: 'Run it?', scope: 'commands' },
+  write_file: { question: 'Write it?', scope: 'file writes' },
+  read_file: { question: 'Read it?', scope: 'reads outside this directory' },
+  mcp_tool: { question: 'Run it?', scope: 'MCP tools' },
 };
 
 /**
  * Puts one approval in front of the user.
  *
- * The choices are yes and no. "Stop asking this session" is the gateway's
- * memory now, not the REPL's — it already refuses an identical repeat without
- * asking, and offering choices here that the protocol cannot yet carry would
- * be two buttons that quietly do nothing.
+ * Four choices, because a model exploring a project issues a stream of
+ * near-identical requests and answering each one individually is what teaches
+ * people to approve without reading. The two wide answers are the user saying
+ * so once instead of twenty times; both are remembered by the gateway, which
+ * owns the session they apply to.
  */
 function askApproval(
   event: Extract<GatewayEvent, { kind: 'approval.request' }>
-): { answer: Promise<boolean>; cancel: () => void } {
+): { answer: Promise<{ approved: boolean; scope: ApprovalScope }>; cancel: () => void } {
   const origin =
     event.origin.surface === 'terminal'
       ? []
@@ -111,19 +113,27 @@ function askApproval(
         ];
   console.log(`\n${box([...origin, ...event.request.message.split('\n')])}`);
 
-  const prompt = expand<'yes' | 'no'>({
-    message: APPROVAL_WORDING[event.request.kind],
+  const { question, scope } = APPROVAL_WORDING[event.request.kind];
+  const prompt = expand<'yes' | 'no' | 'always' | 'never'>({
+    message: question,
     default: 'n',
     choices: [
       { key: 'y', name: 'yes, this once', value: 'yes' },
       { key: 'n', name: 'no', value: 'no' },
+      { key: 'a', name: `yes, and stop asking about ${scope} in this conversation`, value: 'always' },
+      { key: 'x', name: `no, and stop asking about ${scope} for this reply`, value: 'never' },
     ],
   });
 
   return {
     // A cancelled prompt rejects; another client answering first is not an
     // error, so it settles as a plain "no" that is never sent.
-    answer: prompt.then((answer) => answer === 'yes').catch(() => false),
+    answer: prompt
+      .then((answer) => ({
+        approved: answer === 'yes' || answer === 'always',
+        scope: (answer === 'always' ? 'session' : answer === 'never' ? 'reply' : 'once') as ApprovalScope,
+      }))
+      .catch(() => ({ approved: false, scope: 'once' as ApprovalScope })),
     cancel: () => prompt.cancel(),
   };
 }
@@ -217,10 +227,10 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     if (event.kind === 'approval.request') {
       const { answer, cancel } = askApproval(event);
       openApprovals.set(event.approvalId, cancel);
-      void answer.then(async (approved) => {
+      void answer.then(async ({ approved, scope }) => {
         if (!openApprovals.delete(event.approvalId)) return;
         await client
-          .request('approval.answer', { approvalId: event.approvalId, approved })
+          .request('approval.answer', { approvalId: event.approvalId, approved, scope })
           .catch(() => {});
       });
       return;

@@ -103,7 +103,10 @@ describe('MemoryStore', () => {
     // ...but every memory is still on disk.
     expect(await s.list()).toHaveLength(40);
     expect(await s.read('m0')).toBeDefined();
-  });
+    // Forty sequential file writes on Windows, alongside every other suite
+    // running at once, occasionally passes five seconds. The default timeout
+    // was reporting slow IO as a failure, which costs more than it catches.
+  }, 20000);
 
   it('forget removes the memory and drops it from the index', async () => {
     const { store: s } = await store();

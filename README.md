@@ -625,11 +625,20 @@ When the model wants to write a file or run a command that needs approval, you'l
 ? Run it? (ynax)
   y) yes, this once
   n) no
-  a) yes, and stop asking about commands this session
+  a) yes, and stop asking about commands in this conversation
   x) no, and stop asking about commands for this reply
 ```
 
-`a` remembers your answer for that *kind* of action — commands, file writes, or outside-directory reads — until you restart `robin`. Declined actions are reported back to the model so it can adjust instead of silently failing.
+`a` and `x` answer for that whole *kind* of action — commands, file writes, or
+outside-directory reads — so you say once what you would otherwise say to
+twenty near-identical requests in a row. Both are held by the gateway, and both
+are scoped to **that conversation**: approving commands in the repository you
+are working in does not silence the gate for a Telegram chat sharing the same
+daemon. `a` lasts until the gateway stops; `x` until your next message.
+
+The same four answers appear as buttons in the [control UI](#the-control-ui).
+Declined actions are reported back to the model so it can adjust instead of
+silently failing.
 
 **No is remembered too, for the rest of the reply.** A refusal reads to a model as a failed attempt, and the reflex after a failed attempt is another attempt: one session put the same skill proposal up four times and seven variants of the same search command, each a fresh box to answer. So an *identical* request that comes back is refused silently, `x` refuses that whole kind for the rest of the reply, and the refusal the model receives says outright not to retry it in another form. All of it is scoped to the one reply — the next thing you type may be exactly a request to do the thing you just refused.
 

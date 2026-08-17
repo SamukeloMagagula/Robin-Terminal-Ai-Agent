@@ -380,7 +380,10 @@ export class GatewayServer {
           accepted: this.deps.approvals.answer(
             String(params.approvalId),
             params.approved === true,
-            client.id
+            client.id,
+            // Anything unrecognised means this once, which is the safe reading
+            // of a client that did not say.
+            params.scope === 'session' || params.scope === 'reply' ? params.scope : 'once'
           ),
         };
       default:
