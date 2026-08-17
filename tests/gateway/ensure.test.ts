@@ -6,6 +6,11 @@ import { startGateway } from '../../src/gateway/start';
 import { writeGatewayInfo } from '../../src/gateway/discovery';
 import { PROTOCOL_VERSION } from '../../src/gateway/protocol';
 
+/** A sessions directory of its own, so the suite never reads the real one. */
+function throwawaySessions(): string {
+  return path.join(os.tmpdir(), `robin-sessions-${Date.now()}-${Math.random()}`);
+}
+
 function throwawayInfo(): string {
   return path.join(os.tmpdir(), `robin-ensure-${Date.now()}-${Math.random()}.json`);
 }
@@ -23,7 +28,7 @@ afterEach(async () => {
 describe('ensureGateway', () => {
   it('uses a gateway that is already running, without spawning', async () => {
     const infoPath = throwawayInfo();
-    const gateway = await startGateway({ port: 0, infoPath, log: () => {} });
+    const gateway = await startGateway({ port: 0, infoPath, log: () => {}, sessionsDir: throwawaySessions() });
     stop = gateway.stop;
     const spawn = vi.fn();
 
@@ -36,7 +41,7 @@ describe('ensureGateway', () => {
   it('spawns when nothing is running, and waits for the file to appear', async () => {
     const infoPath = throwawayInfo();
     const spawn = vi.fn(async () => {
-      const gateway = await startGateway({ port: 0, infoPath, log: () => {} });
+      const gateway = await startGateway({ port: 0, infoPath, log: () => {}, sessionsDir: throwawaySessions() });
       stop = gateway.stop;
     });
 
@@ -55,7 +60,7 @@ describe('ensureGateway', () => {
       infoPath
     );
     const spawn = vi.fn(async () => {
-      const gateway = await startGateway({ port: 0, infoPath, log: () => {} });
+      const gateway = await startGateway({ port: 0, infoPath, log: () => {}, sessionsDir: throwawaySessions() });
       stop = gateway.stop;
     });
 
@@ -77,12 +82,12 @@ describe('ensureGateway', () => {
   // fails to bind and exits; polling for the file is what makes that harmless.
   it('picks up the winner when its own spawn loses the race', async () => {
     const infoPath = throwawayInfo();
-    const winner = await startGateway({ port: 0, infoPath, log: () => {} });
+    const winner = await startGateway({ port: 0, infoPath, log: () => {}, sessionsDir: throwawaySessions() });
     stop = winner.stop;
 
     const spawn = vi.fn(async () => {
       await expect(
-        startGateway({ port: winner.port, infoPath: throwawayInfo(), log: () => {} })
+        startGateway({ port: winner.port, infoPath: throwawayInfo(), log: () => {}, sessionsDir: throwawaySessions() })
       ).rejects.toThrow();
     });
 

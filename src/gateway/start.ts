@@ -29,6 +29,11 @@ export interface StartGatewayOptions {
   port?: number;
   infoPath?: string;
   log?: (line: string) => void;
+  /**
+   * Where conversations are persisted. Overridable so a test never restores —
+   * or overwrites — the real ones sitting in the user's home directory.
+   */
+  sessionsDir?: string;
 }
 
 /**
@@ -70,7 +75,7 @@ export async function startGateway(
       contextLimits: new ContextLimitStore(),
       memory: new MemoryStore(),
       skills: new SkillStore(),
-      sessions: new SessionStore(),
+      sessions: new SessionStore(options.sessionsDir),
     },
   });
 

@@ -6,6 +6,11 @@ import { GatewayClient } from '../../src/gateway/client';
 import { readGatewayInfo } from '../../src/gateway/discovery';
 import { PROTOCOL_VERSION } from '../../src/gateway/protocol';
 
+/** A sessions directory of its own, so the suite never reads the real one. */
+function throwawaySessions(): string {
+  return path.join(os.tmpdir(), `robin-sessions-${Date.now()}-${Math.random()}`);
+}
+
 function throwawayInfo(): string {
   return path.join(os.tmpdir(), `robin-gw-info-${Date.now()}-${Math.random()}.json`);
 }
@@ -20,7 +25,7 @@ afterEach(async () => {
 describe('startGateway', () => {
   it('listens, and records where it is listening', async () => {
     const infoPath = throwawayInfo();
-    const gateway = await startGateway({ port: 0, infoPath, log: () => {} });
+    const gateway = await startGateway({ port: 0, infoPath, log: () => {}, sessionsDir: throwawaySessions() });
     stop = gateway.stop;
 
     const info = await readGatewayInfo(infoPath);
@@ -33,7 +38,7 @@ describe('startGateway', () => {
 
   it('mints a token nobody could guess', async () => {
     const infoPath = throwawayInfo();
-    const gateway = await startGateway({ port: 0, infoPath, log: () => {} });
+    const gateway = await startGateway({ port: 0, infoPath, log: () => {}, sessionsDir: throwawaySessions() });
     stop = gateway.stop;
 
     // Anything that can open this socket can run commands as this user.
@@ -42,7 +47,7 @@ describe('startGateway', () => {
 
   it('serves a client end to end', async () => {
     const infoPath = throwawayInfo();
-    const gateway = await startGateway({ port: 0, infoPath, log: () => {} });
+    const gateway = await startGateway({ port: 0, infoPath, log: () => {}, sessionsDir: throwawaySessions() });
     stop = gateway.stop;
 
     const client = await GatewayClient.connect({
@@ -59,7 +64,7 @@ describe('startGateway', () => {
 
   it('removes its info file on stop, so nothing chases a dead daemon', async () => {
     const infoPath = throwawayInfo();
-    const gateway = await startGateway({ port: 0, infoPath, log: () => {} });
+    const gateway = await startGateway({ port: 0, infoPath, log: () => {}, sessionsDir: throwawaySessions() });
     await gateway.stop();
     stop = undefined;
 
@@ -73,7 +78,7 @@ describe('startGateway', () => {
     // The loser of an auto-start race must fail loudly rather than sit there
     // having bound nothing.
     await expect(
-      startGateway({ port: first.port, infoPath: throwawayInfo(), log: () => {} })
+      startGateway({ port: first.port, infoPath: throwawayInfo(), log: () => {}, sessionsDir: throwawaySessions() })
     ).rejects.toThrow(/EADDRINUSE|address already in use/i);
   });
 });

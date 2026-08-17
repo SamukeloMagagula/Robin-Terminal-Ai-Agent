@@ -584,6 +584,38 @@ A bot's username is public and anyone who finds it can message it. On the other 
 
 Each Telegram chat maps to a gateway session, which is why a conversation you start on your phone is waiting in your terminal when you sit down.
 
+## How replies are printed
+
+Models write markdown whether or not anyone asked them to. Printed raw, that
+means reading `**important**` with the asterisks in the way — the markup
+competing with the words it is meant to emphasise. Robin renders it instead:
+
+| Written | Shown |
+|---|---|
+| `**bold**`, `__bold__` | **bold**, no asterisks |
+| `*italic*`, `_italic_` | *italic* |
+| `` `code` `` | coloured, no backticks |
+| `# Heading` | bold and coloured, no hashes |
+| `- item` | a coloured bullet |
+| `> quote` | a left bar, dimmed |
+| `[text](url)` | the text, underlined, with the target dimmed after it |
+| ```` ```lang ```` | the language as a label, the block coloured and left alone |
+
+**Nothing inside a code span or a fence is styled.** That text is source, and a
+`**` in there is two asterisks someone meant to write. For the same reason the
+emphasis rules require a non-space next to the marker, so `2 * 3 * 4` stays
+arithmetic and `read_file` keeps its underscore — mangling those is worse than
+not rendering emphasis at all.
+
+**Replies arrive a line at a time rather than a token at a time.** Styling
+cannot be decided from half a line — a `**` might open a bold span or might be
+two asterisks — and text already written to a terminal cannot be taken back.
+For prose the difference is barely visible; for code blocks it is an
+improvement.
+
+Colour follows the terminal. Piping to a file, or setting `NO_COLOR`, drops the
+escapes and keeps the text — the markers are still removed either way.
+
 ## Chat History
 
 Every conversation is automatically written to a readable markdown transcript in `~/.robin/chats/robin-chat-<timestamp>.md`, updated after every reply — nothing to remember to do. A new file starts whenever the conversation resets (`/clear`, `/model`, `/provider`, `/load`), so each distinct conversation gets its own file you can browse, search, or share later.

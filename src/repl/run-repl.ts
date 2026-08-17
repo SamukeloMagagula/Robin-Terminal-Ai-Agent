@@ -30,6 +30,7 @@ import type {
   SessionSnapshot,
 } from '../gateway/protocol.js';
 import { renderEvent, type EventOutput } from './render-events.js';
+import { createMarkdownStream } from '../ui/markdown.js';
 import {
   type ReplContext,
   type CommandHandler,
@@ -210,8 +211,12 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     deps,
   };
 
+  // One renderer per turn: it holds an incomplete line and a fence state, and
+  // neither should carry over into the next reply.
+  let markdown = createMarkdownStream((text) => process.stdout.write(text));
+
   const output: EventOutput = {
-    text: (chunk) => process.stdout.write(chunk),
+    text: (chunk) => markdown.push(chunk),
     muted: (line) => process.stdout.write(mutedColor(line)),
     error: (line) => console.log(errorColor(line)),
     connectionChanged: (providerName, model) => printConnectionLine(providerName, model),
@@ -246,6 +251,13 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     }
     if (event.kind === 'session.changed') {
       ctx.snapshot = event.snapshot;
+    }
+    // The last line of a reply has no trailing newline, so it is still held
+    // when the turn ends. Flush before anything else is written, or the token
+    // line and the answer's final words arrive in the wrong order.
+    if (event.kind === 'turn.finished') {
+      markdown.end();
+      markdown = createMarkdownStream((text) => process.stdout.write(text));
     }
     renderEvent(event, output);
   });
