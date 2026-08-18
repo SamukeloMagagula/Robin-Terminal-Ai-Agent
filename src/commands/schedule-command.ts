@@ -14,6 +14,7 @@ import { ScheduleStore, isValidJobName, type Job } from '../schedule/store.js';
 import { describeCron, nextRun, parseCron } from '../schedule/cron.js';
 import { AutonomyStore } from '../autonomy/grant-store.js';
 import { CHANNELS } from '../channels/registry.js';
+import { EMAIL_TARGET, isEmailAddress } from '../channels/email.js';
 
 type Out = (line: string) => void;
 
@@ -26,7 +27,13 @@ export interface AddOptions {
   model?: string;
 }
 
-/** Reads `telegram:12345` — which chat a job's answer is sent to. */
+/**
+ * Reads `telegram:12345` or `email:you@example.com` — where an answer goes.
+ *
+ * Email is a destination but not a channel: Robin can send to it and cannot be
+ * driven from it, so it is checked on its own branch rather than being added
+ * to the transport table it does not belong in.
+ */
 export function parseDelivery(value: string): { channel: string; chatId: string } {
   const separator = value.indexOf(':');
   const channel = separator === -1 ? '' : value.slice(0, separator);
@@ -34,15 +41,23 @@ export function parseDelivery(value: string): { channel: string; chatId: string 
 
   if (!channel || !chatId) {
     throw new UserFacingError(
-      `Cannot read "${value}" as a destination. Use channel:chat-id, e.g. telegram:123456789.`
+      `Cannot read "${value}" as a destination. Use channel:chat-id, e.g. telegram:123456789, or email:you@example.com.`
     );
   }
+
+  if (channel === EMAIL_TARGET) {
+    if (!isEmailAddress(chatId)) {
+      throw new UserFacingError(`"${chatId}" is not an email address.`);
+    }
+    return { channel, chatId };
+  }
+
   const entry = CHANNELS[channel];
   if (!entry?.build) {
     throw new UserFacingError(
       entry
         ? `${channel} is not wired up yet, so nothing can be delivered there.`
-        : `There is no channel called "${channel}". Available: ${Object.keys(CHANNELS).join(', ')}.`
+        : `There is nowhere called "${channel}". Available: ${Object.keys(CHANNELS).join(', ')}, email.`
     );
   }
   return { channel, chatId };

@@ -20,7 +20,7 @@ import { AuditLog } from '../autonomy/audit.js';
 import { ScheduleStore } from '../schedule/store.js';
 import { Scheduler } from '../schedule/scheduler.js';
 import { createJobRunner } from '../schedule/run-job.js';
-import { deliverToChannel } from '../schedule/deliver.js';
+import { deliverJobAnswer } from '../schedule/deliver.js';
 import { SettingsStore } from '../settings/store.js';
 import { createHttpApi } from './http-api.js';
 import { startTrustedMcpServers } from './mcp.js';
@@ -111,7 +111,7 @@ export async function startGateway(
       },
       cwd: process.cwd(),
     }),
-    deliver: deliverToChannel,
+    deliver: deliverJobAnswer,
     log,
   });
 

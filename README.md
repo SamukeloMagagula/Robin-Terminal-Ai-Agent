@@ -683,6 +683,11 @@ A server that fails to start, or dies, is disabled with one muted line — the t
 
 `robin serve` runs Robin as a bridge so you can drive it from a messaging app while you're away from the terminal.
 
+Three channels can drive Robin: Telegram, Discord and Slack. Email is
+send-only — see [Scheduled jobs](#scheduled-jobs) — because an allowlist built
+on a forgeable `From` header would be a much weaker gate than the
+platform-authenticated ids these three provide.
+
 ```bash
 robin serve telegram
 robin serve discord
@@ -939,6 +944,37 @@ robin schedule show standup
 robin schedule disable standup      # stop it running without forgetting it
 robin schedule remove standup
 ```
+
+**Answers can go to a chat or to your inbox.** `--deliver telegram:123456789`
+sends to a chat; `--deliver email:you@example.com` sends mail. Leave it off and
+the answer is only recorded, which `robin schedule show` will tell you.
+
+Email needs an `email` section in `~/.robin/channels.json`:
+
+```json
+{
+  "email": {
+    "host": "smtp.gmail.com",
+    "port": 587,
+    "user": "you@gmail.com",
+    "from": "Robin <you@gmail.com>"
+  }
+}
+```
+
+The password comes from `SMTP_PASSWORD`, which is the better habit —
+`channels.json` travels with your dotfiles. It can go in the file as
+`"password"` if you would rather, and the environment wins when both are set.
+Port 465 is treated as implicit TLS and 587 as STARTTLS unless you say
+otherwise with `"secure"`.
+
+**Email is one-way: Robin can mail you, you cannot mail Robin.** That is a
+deliberate limit rather than unfinished work. Every other channel's allowlist
+checks an identity the platform authenticated — a Telegram user id, a Slack
+member id — but a `From` header is whatever the sender typed. Accepting
+instructions on that basis, on a surface that can trigger tool calls, would be
+a real downgrade dressed up as a feature. So there is no inbox polling and no
+`robin serve email`.
 
 **The schedule is cron, minus the parts that surprise people.** Five fields —
 minute, hour, day-of-month, month, day-of-week — with numbers, `*`, ranges

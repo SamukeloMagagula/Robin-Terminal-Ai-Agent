@@ -56,6 +56,21 @@ describe('parseDelivery', () => {
   it('refuses a channel that exists but is not implemented', () => {
     expect(() => parseDelivery('whatsapp:123')).toThrow(/not wired up/i);
   });
+
+  it('reads an email address as a destination', () => {
+    expect(parseDelivery('email:you@example.com')).toEqual({
+      channel: 'email',
+      chatId: 'you@example.com',
+    });
+  });
+
+  it('refuses an email destination that is not an address', () => {
+    expect(() => parseDelivery('email:not-an-address')).toThrow(/not-an-address/);
+  });
+
+  it('names both channels and email when the destination makes no sense', () => {
+    expect(() => parseDelivery('nosuch:1')).toThrow(/email/);
+  });
 });
 
 describe('robin schedule add', () => {
