@@ -29,7 +29,17 @@ export type ApprovalScope = 'once' | 'session' | 'reply' | 'manifest';
  * them at all.
  */
 export interface Governance {
-  manifest: Manifest;
+  /**
+   * The manifest's id, not the manifest.
+   *
+   * Sessions here outlive the moment they were created — they persist across
+   * gateway restarts — so a copy taken at creation would keep granting after
+   * `robin autonomy revoke` had taken it away, for as long as the session
+   * lived. Holding the id means every request re-reads the current grant, and
+   * a revoked manifest stops granting at once. Expiry was already checked per
+   * request; this closes the same gap for revocation.
+   */
+  manifestId: string;
   audit: AuditLog;
   store: AutonomyStore;
 }
@@ -159,15 +169,9 @@ export class ApprovalRegistry {
         // approval into a rule that covers more is a guess about intent that
         // nobody actually made.
         const rule: Rule = { kind: request.kind, pattern: request.subject };
-        void governance.store.addRule(governance.manifest.id, rule);
-        // Keep the running session consistent without waiting on a re-read.
-        if (
-          !governance.manifest.rules.some(
-            (candidate) => candidate.kind === rule.kind && candidate.pattern === rule.pattern
-          )
-        ) {
-          governance.manifest.rules.push(rule);
-        }
+        // The store serialises this against later reads, so the next request
+        // sees the rule rather than asking about it again.
+        void governance.store.addRule(governance.manifestId, rule);
       }
     }
     if (!approved && scope === 'reply') {
@@ -210,13 +214,20 @@ export class ApprovalRegistry {
     //
     // A request it does not cover gets no special treatment: it falls through
     // to everything below, which already refuses when no client can answer.
+    let manifest: Manifest | undefined;
     if (governance) {
       this.governing.set(sessionId, governance);
-      const rule = await this.matchingRule(governance.manifest, request);
+      // Read now, not at session creation: a manifest revoked a second ago
+      // must not still be granting.
+      manifest = await governance.store.get(governance.manifestId);
+    }
+
+    if (governance && manifest) {
+      const rule = await this.matchingRule(manifest, request);
       if (rule) {
         void governance.audit.append({
           ts: new Date().toISOString(),
-          manifest: governance.manifest.id,
+          manifest: governance.manifestId,
           kind: request.kind,
           detail: request.subject,
           decision: 'allowed',
@@ -234,7 +245,7 @@ export class ApprovalRegistry {
     const key = requestKey(sessionId, request);
     if (this.declined.get(sessionId)?.has(key)) return false;
 
-    const escalate = governance?.manifest.escalate;
+    const escalate = manifest?.escalate;
     const pending: PendingApproval = {
       id: randomUUID(),
       sessionId,
@@ -260,7 +271,7 @@ export class ApprovalRegistry {
           if (governance) {
             void governance.audit.append({
               ts: new Date().toISOString(),
-              manifest: governance.manifest.id,
+              manifest: governance.manifestId,
               kind: request.kind,
               detail: request.subject,
               decision: by === 'timeout' ? 'expired' : 'refused',

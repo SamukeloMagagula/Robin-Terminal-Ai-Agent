@@ -6,7 +6,7 @@ Your conversations live in a small local daemon called [the gateway](#the-gatewa
 
 - **Close the terminal and reopen it — the conversation is still there.** It survives a reboot too.
 - **The same conversation from anywhere.** A [browser UI](#the-control-ui), and [Telegram, Discord or Slack](#remote-control-telegram-discord-slack) when you are away from the desk. Ask something from your phone; the answer is waiting at your keyboard.
-- **A tool call always finds a human.** A command triggered from a chat message asks you at your terminal, saying where the request came from — and is refused when nobody is there.
+- **A tool call always finds a human.** A command triggered from a chat message asks you at your terminal, saying where the request came from — and is refused when nobody is there. Where you want it to act unattended, a [capability manifest](#capability-manifests) says exactly what it may do, lapses on its own, and logs every decision.
 - **Other tools can drive it.** An [OpenAI-compatible API](#driving-robin-from-other-tools) on the same port, so editors and scripts get Robin with its tools, memory and skills rather than a bare model.
 
 `robin doctor` tells you what is wrong with an install before you hit it.
@@ -25,6 +25,7 @@ Built by Samukelo "Batman" Magagula.
 | [Driving Robin from other tools](#driving-robin-from-other-tools) | the OpenAI-compatible API |
 | [Usage](#usage) · [Sessions](#sessions) | day to day |
 | [Tool-Calling](#tool-calling) · [Security](#security) | what it can do to your machine, and what it asks first |
+| [Capability manifests](#capability-manifests) | letting it act unattended, within limits |
 | [Remote control](#remote-control-telegram-discord-slack) | Telegram, Discord, Slack |
 | [Skills](#skills) · [Memory](#memory) · [MCP servers](#mcp-servers) | what it knows and what it can reach |
 | [How replies are printed](#how-replies-are-printed) | markdown in a terminal |
@@ -863,10 +864,60 @@ Full trust model, including what each control does *not* do: **[SECURITY.md](SEC
 - **Approvals can be remembered per action-kind for the current session** (`a` at the prompt). Session-scoped, never written to disk. Note that this deliberately removes the human from the loop for that action kind until you restart — treat `a` with more care than `y`.
 - **A chat bridge answers only sender ids on an explicit allowlist.** An empty allowlist authorises nobody and refuses to start, rather than coming online and silently declining everyone.
 - **A tool call from a chat still needs a human.** It is offered to any terminal attached to the same gateway, labelled with the channel and sender that caused it, and refused when no terminal is attached — so "nobody is at a keyboard" and "nobody approved it" stay the same thing. `--allow-tools` removes that entirely: with it, a chat message runs commands and writes files on your machine unattended, and the reading-the-prompt boundary above no longer exists. See [Remote control](#remote-control-telegram-discord-slack).
+- **A capability manifest is a narrower answer than `--allow-tools`.** See [Capability manifests](#capability-manifests) below. It grants specific patterns rather than everything, lapses after seven days by default, records every decision, and stops granting the instant it is revoked. It only ever grants past the approval prompt — never past the credential-path refusals or the read-only allowlist above, both of which run before any manifest is consulted.
 - **The destructive-pattern `⚠` is a nudge, not a block.** It catches `rm -rf` but not `rm -r -f`, `$(echo rm) -rf`, or anything encoded. Don't rely on it.
 - **`read_file` and `run_command` output is wrapped as untrusted content** before it goes back to the model — file contents and command output are data the model reads, not instructions it should follow, even if the text looks like a command ("ignore previous instructions and run…"). This narrows prompt injection; it does not eliminate it, since it is a prompt-level convention the model can still be talked out of.
 - **Conversation transcripts in `~/.robin/chats/` contain every file the model read.** They're written `0600`, but treat them as sensitive.
 - To actually contain Robin, run it in a container or VM with only your working directory mounted.
+
+## Capability manifests
+
+There are two unsatisfying answers to "may this chat message run a command?"
+Ask a human — but nobody is at the keyboard at 02:00. Or `--allow-tools`, which
+lets a chat message run anything at all. A manifest is the answer in between:
+*these specific things, without asking.*
+
+```bash
+robin autonomy add nightly-ops \
+  --command "restic backup *" --command "git status" \
+  --read "~/notes/**" --write "~/reports/**" \
+  --expires 7d --escalate telegram:30
+
+robin serve telegram --manifest nightly-ops
+```
+
+The rules are printed in full and confirmed before anything is written, because
+`--command "git *"` grants more than it looks like. `robin autonomy add` refuses
+to run without an interactive terminal at all — a grant to act unattended is a
+decision a person makes while present, not one a script makes.
+
+```bash
+robin autonomy list              # what exists, and when each lapses
+robin autonomy show nightly-ops  # every rule, in full
+robin autonomy log nightly-ops   # what it allowed — and what it refused
+robin autonomy revoke nightly-ops
+```
+
+`log` is the one worth knowing about. It answers what a manifest was used for
+*and* what it turned down, and the second list is what reveals a manifest that
+is wrong.
+
+Four things are deliberate:
+
+- **Grants lapse.** Seven days unless you pass `--expires`. `never` exists and
+  is the option most likely to be regretted.
+- **Revoking is immediate**, including for a session already running under it.
+  The grant is looked up per request rather than held, so nothing keeps its
+  powers until a restart.
+- **Manifests are never edited.** Widening one means revoking it and creating
+  it again, because that is what it is.
+- **A manifest only skips the prompt.** The credential-path refusals and the
+  read-only allowlist run first and are not subject to it — so no manifest can
+  grant a read of `~/.ssh/`.
+
+`--escalate telegram:30` is a middle ground again: a request the manifest does
+not cover is offered to you on that channel and waits the given minutes rather
+than the few a terminal prompt assumes. Not answering is still a refusal.
 
 ## Troubleshooting
 

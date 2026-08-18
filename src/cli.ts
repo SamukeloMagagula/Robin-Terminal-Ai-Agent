@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { select } from '@inquirer/prompts';
+import { select, confirm } from '@inquirer/prompts';
 import type { Provider } from './providers/types.js';
 import { listProviders, getProvider } from './providers/index.js';
 import { runLogin, runLogout } from './commands/auth-commands.js';
@@ -22,6 +22,16 @@ import {
   runConfigUnset,
 } from './commands/config-command.js';
 import { runSetupCommand } from './commands/setup-command.js';
+import {
+  runAutonomyAdd,
+  runAutonomyList,
+  runAutonomyLog,
+  runAutonomyRevoke,
+  runAutonomyShow,
+  type RuleFlags,
+} from './commands/autonomy-command.js';
+import { AutonomyStore } from './autonomy/grant-store.js';
+import { AuditLog } from './autonomy/audit.js';
 import { SettingsStore } from './settings/store.js';
 import { storedChatDefault } from './settings/defaults.js';
 import { hydrateEnv } from './settings/hydrate.js';
@@ -218,6 +228,7 @@ program
   .option('-p, --provider <id>', 'provider to answer with (default: first logged in)')
   .option('-m, --model <model>', 'model to answer with')
   .option('--allow-tools', 'let tool calls run without approval — see the warning below', false)
+  .option('--manifest <id>', 'let it act unattended within a capability manifest (see `robin autonomy`)')
   .option('--whoami', 'print the sender id of anyone who messages the bot, then exit', false)
   .addHelpText('after', `\n${serveHelpText()}`)
   .action(async (channel: string, options: ServeOptions) => {
@@ -333,6 +344,58 @@ config
   .description('Forget one setting, reverting it to its default')
   .action(async (key: string) => {
     await runConfigUnset(new SettingsStore(), key);
+  });
+
+const autonomy = program
+  .command('autonomy')
+  .description('Capability manifests — what Robin may do with nobody watching');
+
+autonomy
+  .command('list', { isDefault: true })
+  .description('List every manifest and when it lapses')
+  .action(async () => {
+    await runAutonomyList(new AutonomyStore());
+  });
+
+autonomy
+  .command('show <id>')
+  .description('Show one manifest in full')
+  .action(async (id: string) => {
+    await runAutonomyShow(new AutonomyStore(), id);
+  });
+
+autonomy
+  .command('add <id>')
+  .description('Create a manifest, after showing you exactly what it would allow')
+  .option('--command <pattern...>', 'a command it may run, e.g. "git *"')
+  .option('--read <glob...>', 'a path it may read')
+  .option('--write <glob...>', 'a path it may write')
+  .option('--mcp <name...>', 'an MCP tool it may call, e.g. "github.list_issues"')
+  .option('--expires <duration>', 'how long the grant lasts: 7d, 24h, or never', '7d')
+  .option('--escalate <surface:minutes>', 'also offer approvals here, e.g. telegram:30')
+  .action(async (id: string, flags: RuleFlags) => {
+    // A manifest is a decision made by someone who is present. Creating one
+    // from a script would be exactly the thing it exists to prevent.
+    requireInteractiveTerminal();
+    await runAutonomyAdd(new AutonomyStore(), id, flags, {
+      confirm: () => confirm({ message: 'Create this manifest?', default: false }),
+      now: new Date(),
+      out: console.log,
+    });
+  });
+
+autonomy
+  .command('revoke <id>')
+  .description('Delete a manifest — running sessions lose it at once')
+  .action(async (id: string) => {
+    await runAutonomyRevoke(new AutonomyStore(), id);
+  });
+
+autonomy
+  .command('log <id>')
+  .description('What this manifest allowed, and what it refused')
+  .action(async (id: string) => {
+    await runAutonomyLog(new AuditLog(), id);
   });
 
 program

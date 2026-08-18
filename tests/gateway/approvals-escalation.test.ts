@@ -28,7 +28,7 @@ async function governance(manifest: Manifest) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'robin-esc-'));
   const store = new AutonomyStore(path.join(dir, 'autonomy.json'));
   await store.put(manifest);
-  return { manifest: structuredClone(manifest), audit: new AuditLog(dir), store };
+  return { manifestId: manifest.id, audit: new AuditLog(dir), store };
 }
 
 function registry(approverCount: number, timeoutMs?: number) {

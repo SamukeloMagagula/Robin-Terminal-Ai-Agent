@@ -86,7 +86,7 @@ afterEach(async () => {
  */
 async function makeBridge(
   transport: FakeTransport,
-  overrides: { allowlist?: string[]; allowTools?: boolean; provider?: Provider } = {}
+  overrides: { allowlist?: string[]; allowTools?: boolean; provider?: Provider; manifestId?: string } = {}
 ): Promise<ChannelBridge> {
   const provider = overrides.provider ?? fakeProvider('hello from the model');
   harness = await startHarness({ providers: [provider] });
@@ -99,6 +99,7 @@ async function makeBridge(
     model: 'fake-model',
     allowlist: overrides.allowlist ?? ['123'],
     allowTools: overrides.allowTools,
+    manifestId: overrides.manifestId,
     log: () => {},
   });
 }
@@ -310,5 +311,26 @@ describe('ChannelBridge serialisation', () => {
     await transport.deliver({ text: '/status' });
     expect(transport.sent.at(-1)?.text).toContain('Turns:  2');
     expect(harness!.sessions.list()).toHaveLength(2);
+  });
+});
+
+describe('ChannelBridge under a manifest', () => {
+  it('creates its session governed by the manifest it was given', async () => {
+    const transport = new FakeTransport();
+    await started(transport, await makeBridge(transport, { manifestId: 'nightly-ops' }));
+
+    await transport.deliver({ senderId: '123', text: 'hi' });
+
+    const session = harness!.sessions.list().at(-1);
+    expect(session?.manifestId).toBe('nightly-ops');
+  });
+
+  it('creates an ungoverned session when given none', async () => {
+    const transport = new FakeTransport();
+    await started(transport, await makeBridge(transport));
+
+    await transport.deliver({ senderId: '123', text: 'hi' });
+
+    expect(harness!.sessions.list().at(-1)?.manifestId).toBeUndefined();
   });
 });

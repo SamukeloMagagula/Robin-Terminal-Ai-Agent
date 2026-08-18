@@ -40,6 +40,13 @@ export interface SessionSnapshot {
   cwd: string;
   toolsEnabled: boolean;
   autoApprove: boolean;
+  /**
+   * The capability manifest governing this session, when it has one.
+   *
+   * Present so a client can show that a conversation is allowed to act
+   * unattended, and which grant it is acting under.
+   */
+  manifestId?: string;
   turnCount: number;
   /** Running totals for this conversation, where providers reported them. */
   tokens: { input: number; output: number };

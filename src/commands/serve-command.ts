@@ -7,6 +7,7 @@ import { TelegramTransport } from '../channels/telegram.js';
 import { DiscordTransport } from '../channels/discord.js';
 import { SlackTransport } from '../channels/slack.js';
 import { ChannelBridge } from '../channels/bridge.js';
+import { AutonomyStore } from '../autonomy/grant-store.js';
 import type { ChannelTransport } from '../channels/types.js';
 import { UserFacingError } from '../startup/bootstrap.js';
 import { ensureGateway } from '../gateway/ensure.js';
@@ -59,6 +60,8 @@ export interface ServeOptions {
   model?: string;
   allowTools?: boolean;
   whoami?: boolean;
+  /** A capability manifest the chat may act under. See `robin autonomy`. */
+  manifest?: string;
 }
 
 async function resolveProvider(id: string | undefined): Promise<Provider> {
@@ -147,6 +150,17 @@ export async function runServe(channelName: string, options: ServeOptions): Prom
     return;
   }
 
+  // Checked before anything connects: naming a manifest that does not exist
+  // grants nothing, so the bridge would run quietly weaker than asked for.
+  if (options.manifest) {
+    const known = await new AutonomyStore().get(options.manifest);
+    if (!known) {
+      throw new UserFacingError(
+        `No manifest called "${options.manifest}". Run \`robin autonomy list\` to see what there is.`
+      );
+    }
+  }
+
   const provider = await resolveProvider(options.provider ?? config.provider);
   const model = await resolveModel(provider, options.model ?? config.model);
 
@@ -173,6 +187,7 @@ export async function runServe(channelName: string, options: ServeOptions): Prom
     model,
     allowlist: config.allow,
     allowTools: options.allowTools,
+    manifestId: options.manifest,
   });
 
   try {

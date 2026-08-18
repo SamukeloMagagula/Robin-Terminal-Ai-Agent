@@ -15,6 +15,8 @@ import { ContextLimitStore } from '../providers/context-limits.js';
 import { MemoryStore } from '../memory/store.js';
 import { SkillStore } from '../skills/store.js';
 import { SessionStore } from './session-store.js';
+import { AutonomyStore } from '../autonomy/grant-store.js';
+import { AuditLog } from '../autonomy/audit.js';
 import { createHttpApi } from './http-api.js';
 import { startTrustedMcpServers } from './mcp.js';
 import { buildFingerprint, freshBuildFingerprint } from './build-id.js';
@@ -61,6 +63,10 @@ export async function startGateway(
     resolved: (pending, approved, by) => server.resolvedApproval(pending, approved, by),
   });
 
+  // Held rather than constructed inline: shutdown has to flush it, because a
+  // governed session's decisions are appended without being awaited.
+  const audit = new AuditLog();
+
   // Before the service, because a session created on the first connect should
   // already be able to see the MCP tools.
   const mcp = await startTrustedMcpServers({ log });
@@ -76,6 +82,11 @@ export async function startGateway(
       memory: new MemoryStore(),
       skills: new SkillStore(),
       sessions: new SessionStore(options.sessionsDir),
+      // One store and one log for the whole daemon. The audit log serialises
+      // its appends internally, and that only orders what a single instance
+      // is given — a second one would interleave with the first.
+      autonomy: new AutonomyStore(),
+      audit,
     },
   });
 
@@ -138,6 +149,8 @@ export async function startGateway(
       // Belt-and-braces only: conversations are written as they happen,
       // precisely because on Windows this never runs.
       await sessions.flush();
+      // What an unattended session did is exactly the record worth not losing.
+      await audit.flush();
       // Leaving the file behind would point the next client at a dead port.
       await removeGatewayInfo(infoPath);
     },

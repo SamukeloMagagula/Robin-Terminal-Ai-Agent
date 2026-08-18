@@ -27,7 +27,7 @@ async function governance(manifest: Manifest = nightly) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'robin-gov-'));
   const store = new AutonomyStore(path.join(dir, 'autonomy.json'));
   await store.put(manifest);
-  return { manifest: structuredClone(manifest), audit: new AuditLog(dir), store };
+  return { manifestId: manifest.id, audit: new AuditLog(dir), store };
 }
 
 function registry(approverCount: number) {
@@ -50,6 +50,17 @@ describe('manifest-governed approvals', () => {
     expect(await reg.confirmFor(1, terminal, false, gov)(command('git push'))).toBe(true);
     // Never even offered to a human — the decision was already made.
     expect(seen).toHaveLength(0);
+  });
+
+  it('stops granting the moment the manifest is revoked, mid-session', async () => {
+    const { reg } = registry(0);
+    const gov = await governance();
+
+    expect(await reg.confirmFor(1, terminal, false, gov)(command('git push'))).toBe(true);
+    await gov.store.remove('nightly-backup');
+    // A different command, so this is the manifest being gone rather than the
+    // per-request refusal cache answering.
+    expect(await reg.confirmFor(1, terminal, false, gov)(command('git status'))).toBe(false);
   });
 
   it('refuses an out-of-manifest call with nobody attached', async () => {

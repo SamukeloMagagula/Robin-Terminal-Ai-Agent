@@ -34,6 +34,15 @@ export interface BridgeOptions {
    * my desk" rather than "refuse outright".
    */
   allowTools?: boolean;
+  /**
+   * A capability manifest the chat's sessions act under.
+   *
+   * This is the middle setting between the two the bridge had: without it a
+   * tool call waits for a human at a terminal and is refused if none is
+   * there, and with --allow-tools anything runs unattended. A manifest is the
+   * answer to "these specific things, without asking".
+   */
+  manifestId?: string;
   log?: (line: string) => void;
 }
 
@@ -85,7 +94,9 @@ export class ChannelBridge {
     this.log(
       this.options.allowTools
         ? 'Tool approvals: AUTO-APPROVED — commands and writes will run unattended.'
-        : 'Tool approvals: asked at any attached terminal, and refused if none is. Pass --allow-tools to change this.'
+        : this.options.manifestId
+          ? `Tool approvals: granted by manifest "${this.options.manifestId}", otherwise asked at a terminal.`
+          : 'Tool approvals: asked at any attached terminal, and refused if none is. Pass --allow-tools to change this.'
     );
 
     await this.options.transport.receive((message) => this.enqueue(message), signal);
@@ -157,6 +168,7 @@ export class ChannelBridge {
       cwd: process.cwd(),
       label: `${this.options.transport.id} ${message.chatId}`,
       autoApprove: this.options.allowTools ?? false,
+      manifestId: this.options.manifestId,
     });
     this.sessions.set(message.chatId, created.id);
     await this.options.client.request('session.attach', { id: created.id });

@@ -26,6 +26,8 @@ export interface PersistedSession {
   tokens?: { input: number; output: number };
   toolsEnabled: boolean;
   autoApprove: boolean;
+  /** The manifest governing it, so a restart does not silently ungovern it. */
+  manifestId?: string;
   turnCount: number;
   systemPrompt?: string;
   history: Message[];

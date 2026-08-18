@@ -41,7 +41,28 @@ function isStoredManifest(value: unknown): value is StoredManifest {
  * The `version` discriminator is explicit rather than inferred from shape.
  */
 export class AutonomyStore {
+  /**
+   * Writes in flight, chained, with reads queued behind them.
+   *
+   * An approval answered with 'manifest' scope adds a rule and returns without
+   * waiting; the next tool request then reads the manifest back. Left
+   * unordered, that read can overtake the write and re-ask about the very
+   * thing just approved. Ordering it here rather than in the caller is what
+   * makes it hold across two readers of the same file — and it is the same
+   * reason AuditLog serialises its appends.
+   *
+   * Rejections are swallowed on the chain only, so one failed write cannot
+   * poison every operation after it; the caller still sees its own error.
+   */
+  private queue: Promise<unknown> = Promise.resolve();
+
   constructor(private readonly filePath: string = defaultAutonomyPath()) {}
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.queue.then(operation, operation);
+    this.queue = next.catch(() => undefined);
+    return next;
+  }
 
   private async read(): Promise<Record<string, StoredManifest>> {
     try {
@@ -73,33 +94,56 @@ export class AutonomyStore {
   }
 
   async get(id: string): Promise<Manifest | undefined> {
+    await this.queue.catch(() => undefined);
     const found = (await this.read())[id];
     return found ? { id, ...found } : undefined;
   }
 
   async list(): Promise<Manifest[]> {
+    await this.queue.catch(() => undefined);
     return Object.entries(await this.read()).map(([id, manifest]) => ({ id, ...manifest }));
   }
 
   async put(manifest: Manifest): Promise<void> {
-    const { id, ...rest } = manifest;
-    const manifests = await this.read();
-    manifests[id] = rest;
-    await this.write(manifests);
+    return this.enqueue(async () => {
+      const { id, ...rest } = manifest;
+      const manifests = await this.read();
+      manifests[id] = rest;
+      await this.write(manifests);
+    });
+  }
+
+  /**
+   * Revokes a manifest. Returns false when there was nothing to revoke.
+   *
+   * Sessions consult the store on every request rather than holding a copy,
+   * so this takes effect immediately — including for a session already
+   * running unattended, which is the case revocation exists for.
+   */
+  async remove(id: string): Promise<boolean> {
+    return this.enqueue(async () => {
+      const manifests = await this.read();
+      if (!(id in manifests)) return false;
+      delete manifests[id];
+      await this.write(manifests);
+      return true;
+    });
   }
 
   /** Returns false when the manifest does not exist. An identical rule is a no-op. */
   async addRule(id: string, rule: Rule): Promise<boolean> {
-    const manifests = await this.read();
-    const existing = manifests[id];
-    if (!existing) return false;
-    const duplicate = existing.rules.some(
-      (candidate) => candidate.kind === rule.kind && candidate.pattern === rule.pattern
-    );
-    if (!duplicate) {
-      manifests[id] = { ...existing, rules: [...existing.rules, rule] };
-      await this.write(manifests);
-    }
-    return true;
+    return this.enqueue(async () => {
+      const manifests = await this.read();
+      const existing = manifests[id];
+      if (!existing) return false;
+      const duplicate = existing.rules.some(
+        (candidate) => candidate.kind === rule.kind && candidate.pattern === rule.pattern
+      );
+      if (!duplicate) {
+        manifests[id] = { ...existing, rules: [...existing.rules, rule] };
+        await this.write(manifests);
+      }
+      return true;
+    });
   }
 }

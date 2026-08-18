@@ -132,3 +132,25 @@ describe('AutonomyStore', () => {
     expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
   });
 });
+
+describe('AutonomyStore.remove', () => {
+  it('deletes a manifest, so nothing it granted survives', async () => {
+    const store = new AutonomyStore(await tempFile());
+    await store.put(nightly);
+    expect(await store.remove('nightly-backup')).toBe(true);
+    expect(await store.get('nightly-backup')).toBeUndefined();
+  });
+
+  it('leaves the other manifests alone', async () => {
+    const store = new AutonomyStore(await tempFile());
+    await store.put(nightly);
+    await store.put({ ...nightly, id: 'weekly-audit' });
+    await store.remove('nightly-backup');
+    expect((await store.list()).map((m) => m.id)).toEqual(['weekly-audit']);
+  });
+
+  it('reports false for a manifest that was never there', async () => {
+    const store = new AutonomyStore(await tempFile());
+    expect(await store.remove('never-existed')).toBe(false);
+  });
+});
