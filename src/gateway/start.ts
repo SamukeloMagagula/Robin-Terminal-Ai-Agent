@@ -17,6 +17,11 @@ import { SkillStore } from '../skills/store.js';
 import { SessionStore } from './session-store.js';
 import { AutonomyStore } from '../autonomy/grant-store.js';
 import { AuditLog } from '../autonomy/audit.js';
+import { ScheduleStore } from '../schedule/store.js';
+import { Scheduler } from '../schedule/scheduler.js';
+import { createJobRunner } from '../schedule/run-job.js';
+import { deliverToChannel } from '../schedule/deliver.js';
+import { SettingsStore } from '../settings/store.js';
 import { createHttpApi } from './http-api.js';
 import { startTrustedMcpServers } from './mcp.js';
 import { buildFingerprint, freshBuildFingerprint } from './build-id.js';
@@ -90,6 +95,26 @@ export async function startGateway(
     },
   });
 
+  // The gateway is the only long-lived process Robin has, so it is where a
+  // timer belongs. Jobs are prompts it sends itself.
+  const scheduler = new Scheduler({
+    store: new ScheduleStore(),
+    runJob: createJobRunner({
+      sessions,
+      // A job with no provider of its own uses the one `robin setup` chose.
+      defaults: async () => {
+        const settings = new SettingsStore();
+        return {
+          providerId: String(await settings.get('default.provider')),
+          model: String(await settings.get('default.model')),
+        };
+      },
+      cwd: process.cwd(),
+    }),
+    deliver: deliverToChannel,
+    log,
+  });
+
   // Before the port opens: a client that connects must never see an empty
   // session list that is about to fill in.
   await sessions.restore();
@@ -120,6 +145,11 @@ export async function startGateway(
     }),
   });
 
+  // After restore, so a job cannot fire into a half-built session list, and
+  // before the port opens, so it is already ticking by the time anyone asks.
+  const jobs = await new ScheduleStore().list();
+  scheduler.start();
+
   const port = await server.listen();
   await writeGatewayInfo(
     { port, pid: process.pid, token, protocol: PROTOCOL_VERSION, build: buildId },
@@ -127,6 +157,9 @@ export async function startGateway(
   );
   const notes = [
     restored > 0 ? `${restored} conversation(s) restored` : undefined,
+    jobs.filter((job) => job.enabled).length > 0
+      ? `${jobs.filter((job) => job.enabled).length} scheduled job(s)`
+      : undefined,
     // Counted from the tools, not the servers: a server that was launched but
     // never answered would otherwise be announced as though it had worked.
     mcp.registry.toolDefinitions().length > 0
@@ -148,6 +181,7 @@ export async function startGateway(
       await mcp.registry.closeAll();
       // Belt-and-braces only: conversations are written as they happen,
       // precisely because on Windows this never runs.
+      scheduler.stop();
       await sessions.flush();
       // What an unattended session did is exactly the record worth not losing.
       await audit.flush();

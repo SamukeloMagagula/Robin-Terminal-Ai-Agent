@@ -106,10 +106,7 @@ export async function runAgentTurn(
       // as-is leaves the user staring at a bare prompt with no way to tell a
       // silent answer from a crash, so say which of the two it was.
       if (text.trim() === '') {
-        const note =
-          round === 0
-            ? `[${model} returned an empty reply — ask again, or /model to switch.]`
-            : `[${model} ran its tools but produced no answer — ask again, or /model to switch.]`;
+        const note = emptyReplyNote(model, round > 0);
         assistantMessage.content = note;
         deps.onText(note);
       }
@@ -130,4 +127,31 @@ export async function runAgentTurn(
   };
   newMessages.push(limitMessage);
   return newMessages;
+}
+
+/**
+ * The advice appended to both empty-reply notes.
+ *
+ * Shared by the note and the check below so the two cannot drift apart: an
+ * unattended caller has to be able to tell this apart from a real answer, and
+ * matching on prose written somewhere else would break the first time it was
+ * reworded.
+ */
+const EMPTY_REPLY_ADVICE = '— ask again, or /model to switch.]';
+
+/** What stands in for an answer when the model produced none. */
+export function emptyReplyNote(model: string, ranTools: boolean): string {
+  const what = ranTools ? 'ran its tools but produced no answer' : 'returned an empty reply';
+  return `[${model} ${what} ${EMPTY_REPLY_ADVICE}`;
+}
+
+/**
+ * Whether a reply is really a note saying there was no reply.
+ *
+ * A person reading it in a terminal understands immediately. Something acting
+ * on the answer — a scheduled job about to send it somewhere — has to be able
+ * to tell, so that "the model said nothing" is not delivered as a report.
+ */
+export function isEmptyReplyNote(text: string): boolean {
+  return text.trimEnd().endsWith(EMPTY_REPLY_ADVICE);
 }

@@ -26,6 +26,7 @@ Built by Samukelo "Batman" Magagula.
 | [Usage](#usage) · [Sessions](#sessions) | day to day |
 | [Tool-Calling](#tool-calling) · [Security](#security) | what it can do to your machine, and what it asks first |
 | [Capability manifests](#capability-manifests) | letting it act unattended, within limits |
+| [Scheduled jobs](#scheduled-jobs) | prompts on a timer, answers where you want them |
 | [Remote control](#remote-control-telegram-discord-slack) | Telegram, Discord, Slack |
 | [Skills](#skills) · [Memory](#memory) · [MCP servers](#mcp-servers) | what it knows and what it can reach |
 | [How replies are printed](#how-replies-are-printed) | markdown in a terminal |
@@ -918,6 +919,56 @@ Four things are deliberate:
 `--escalate telegram:30` is a middle ground again: a request the manifest does
 not cover is offered to you on that channel and waits the given minutes rather
 than the few a terminal prompt assumes. Not answering is still a refusal.
+
+## Scheduled jobs
+
+A job is a prompt the gateway sends itself on a timer, and an answer sent
+wherever you want it.
+
+```bash
+robin schedule add standup \
+  --at "0 9 * * 1-5" \
+  --prompt "Summarise yesterday's commits in this repo." \
+  --manifest read-only-repo \
+  --deliver telegram:123456789
+```
+
+```bash
+robin schedule list                 # when each next runs, and how the last run went
+robin schedule show standup
+robin schedule disable standup      # stop it running without forgetting it
+robin schedule remove standup
+```
+
+**The schedule is cron, minus the parts that surprise people.** Five fields —
+minute, hour, day-of-month, month, day-of-week — with numbers, `*`, ranges
+(`1-5`), lists (`8,12,18`) and steps (`*/30`). No `@daily`, no month or day
+names, no seconds. Anything it does not understand is refused when you add the
+job, rather than at 02:00 when nothing happens. Times are local.
+
+The one genuine cron trap is kept, because changing it would make familiar
+expressions mean something new: when *both* day fields are restricted they are
+OR-ed, so `0 0 1 * 1` means the 1st of the month **or** any Monday.
+
+**Jobs fire only while the gateway is running**, so `robin schedule add` starts
+it for you and tells you it has. It is the same daemon `robin chat` uses, and
+`robin gateway stop` stops it.
+
+**A missed run is skipped, not made up.** If your laptop was asleep at 02:00,
+the backup report does not arrive at 09:14 when it wakes — the value of that
+run was in its timing. `robin schedule list` shows when each job last ran,
+which is where a missed run becomes visible.
+
+**A job has no human to ask.** Without `--manifest` its tool calls are refused,
+so it can still think and summarise but cannot read a file or run a command —
+`robin schedule add` says so when you leave the flag off. With one, it may do
+exactly what that [manifest](#capability-manifests) allows, and every decision
+lands in `robin autonomy log`.
+
+Delivery failures count as failed runs: a report nobody received did not
+happen. The reason is kept and shown in `robin schedule list`, and the job
+stays enabled — a provider that was down at 02:00 is usually up tomorrow, and
+quietly switching a job off would be worse than a run that fails visibly.
 
 ## Troubleshooting
 

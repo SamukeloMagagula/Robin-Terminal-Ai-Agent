@@ -31,6 +31,16 @@ import {
   type RuleFlags,
 } from './commands/autonomy-command.js';
 import { AutonomyStore } from './autonomy/grant-store.js';
+import {
+  runScheduleAdd,
+  runScheduleEnable,
+  runScheduleList,
+  runScheduleRemove,
+  runScheduleShow,
+  type AddOptions,
+} from './commands/schedule-command.js';
+import { ScheduleStore } from './schedule/store.js';
+import { ensureGateway } from './gateway/ensure.js';
 import { AuditLog } from './autonomy/audit.js';
 import { SettingsStore } from './settings/store.js';
 import { storedChatDefault } from './settings/defaults.js';
@@ -396,6 +406,64 @@ autonomy
   .description('What this manifest allowed, and what it refused')
   .action(async (id: string) => {
     await runAutonomyLog(new AuditLog(), id);
+  });
+
+const schedule = program
+  .command('schedule')
+  .description('Jobs the gateway runs on a timer, and where their answers go');
+
+schedule
+  .command('list', { isDefault: true })
+  .description('List every job, when it next runs, and how the last run went')
+  .action(async () => {
+    await runScheduleList(new ScheduleStore());
+  });
+
+schedule
+  .command('show <name>')
+  .description('Show one job in full')
+  .action(async (name: string) => {
+    await runScheduleShow(new ScheduleStore(), name);
+  });
+
+schedule
+  .command('add <name>')
+  .description('Add a job — starts the gateway, since jobs only fire while it runs')
+  .requiredOption('--at <cron>', 'when to run it, e.g. "0 9 * * 1-5"')
+  .requiredOption('--prompt <text>', 'what to ask Robin when it fires')
+  .option('--manifest <id>', 'the capability manifest it may act under (see `robin autonomy`)')
+  .option('--deliver <channel:chat>', 'where to send the answer, e.g. telegram:123456789')
+  .option('--provider <id>', 'provider to answer with (default: your configured default)')
+  .option('--model <model>', 'model to answer with')
+  .action(async (name: string, options: AddOptions) => {
+    await runScheduleAdd(name, options, {
+      store: new ScheduleStore(),
+      autonomy: new AutonomyStore(),
+      ensure: ensureGateway,
+      now: new Date(),
+      out: console.log,
+    });
+  });
+
+schedule
+  .command('remove <name>')
+  .description('Forget a job')
+  .action(async (name: string) => {
+    await runScheduleRemove(new ScheduleStore(), name);
+  });
+
+schedule
+  .command('enable <name>')
+  .description('Let a job run again')
+  .action(async (name: string) => {
+    await runScheduleEnable(new ScheduleStore(), name, true);
+  });
+
+schedule
+  .command('disable <name>')
+  .description('Stop a job running, without forgetting it')
+  .action(async (name: string) => {
+    await runScheduleEnable(new ScheduleStore(), name, false);
   });
 
 program

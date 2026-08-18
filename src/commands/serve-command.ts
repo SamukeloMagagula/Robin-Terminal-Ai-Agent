@@ -3,57 +3,14 @@ import type { Provider } from '../providers/types.js';
 import { getProvider, listProviders } from '../providers/index.js';
 import { mutedColor, divider } from '../ui/theme.js';
 import { loadChannelConfig, tokenEnvVar, appTokenEnvVar } from '../channels/config.js';
-import { TelegramTransport } from '../channels/telegram.js';
-import { DiscordTransport } from '../channels/discord.js';
-import { SlackTransport } from '../channels/slack.js';
 import { ChannelBridge } from '../channels/bridge.js';
+import { CHANNELS } from '../channels/registry.js';
 import { AutonomyStore } from '../autonomy/grant-store.js';
 import type { ChannelTransport } from '../channels/types.js';
 import { UserFacingError } from '../startup/bootstrap.js';
 import { ensureGateway } from '../gateway/ensure.js';
 import { GatewayClient } from '../gateway/client.js';
 
-/**
- * Channels Robin can be driven from.
- *
- * Telegram is implemented. WhatsApp and Teams are named here rather than
- * omitted so `robin serve whatsapp` explains where the work stands instead of
- * reporting an unknown command — both need a different kind of plumbing than
- * a bot token (a Business API number and a verified webhook; an Azure app
- * registration and a Bot Framework endpoint), and neither can long-poll from
- * a laptop the way Telegram does.
- */
-const CHANNELS: Record<
-  string,
-  { build?: (config: { token: string; appToken?: string }) => ChannelTransport; pending?: string }
-> = {
-  telegram: { build: ({ token }) => new TelegramTransport({ token }) },
-  discord: { build: ({ token }) => new DiscordTransport({ token }) },
-  slack: {
-    build: ({ token, appToken }) => {
-      if (!appToken) {
-        throw new UserFacingError(
-          'Slack needs an app-level token as well as a bot token. Set SLACK_APP_TOKEN, ' +
-            'or add "appToken" to the slack entry in ~/.robin/channels.json.\n\n' +
-            'The app-level token starts xapp- and is created under Basic Information → ' +
-            'App-Level Tokens with the connections:write scope.'
-        );
-      }
-      return new SlackTransport({ token, appToken });
-    },
-  },
-  whatsapp: {
-    pending:
-      'WhatsApp needs a Meta Business account, a registered phone number and a public webhook — ' +
-      'it cannot long-poll from this machine. The bridge and access layer are already shared, ' +
-      'so it is a transport adapter plus a webhook listener.',
-  },
-  teams: {
-    pending:
-      'Teams needs an Azure app registration and a Bot Framework messaging endpoint reachable from ' +
-      'Microsoft’s cloud. Same shape as WhatsApp: a transport adapter plus a webhook listener.',
-  },
-};
 
 export interface ServeOptions {
   provider?: string;

@@ -22,7 +22,12 @@ export interface ApprovalOrigin {
 }
 
 /** Which kind of surface opened a session. */
-export type SessionOrigin = 'terminal' | 'channel' | 'http';
+/**
+ * What opened a session. 'schedule' is a job the gateway ran on a timer, and
+ * is named rather than folded into 'channel' so `/session` does not report a
+ * conversation nobody started as though someone had messaged it.
+ */
+export type SessionOrigin = 'terminal' | 'channel' | 'http' | 'schedule';
 
 /** A session as clients see it. Never carries history — that comes from attach. */
 export interface SessionSnapshot {
