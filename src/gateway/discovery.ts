@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import { PROTOCOL_VERSION } from './protocol.js';
 
 /** 18789 is OpenClaw's. A machine may reasonably run both. */
-const DEFAULT_PORT = 18790;
+export const DEFAULT_PORT = 18790;
 
 export interface GatewayInfo {
   port: number;

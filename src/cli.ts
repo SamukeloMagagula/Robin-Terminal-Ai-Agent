@@ -15,6 +15,17 @@ import {
 } from './commands/gateway-command.js';
 import { runMcp } from './commands/mcp-command.js';
 import { runUi } from './commands/ui-command.js';
+import {
+  runConfigList,
+  runConfigGet,
+  runConfigSet,
+  runConfigUnset,
+} from './commands/config-command.js';
+import { runSetupCommand } from './commands/setup-command.js';
+import { SettingsStore } from './settings/store.js';
+import { storedChatDefault } from './settings/defaults.js';
+import { hydrateEnv } from './settings/hydrate.js';
+import { capturePristineEnv } from './settings/env.js';
 import { runSkillList, runSkillAdd, runSkillUpdate } from './commands/skill-command.js';
 import { runServe, serveHelpText, type ServeOptions } from './commands/serve-command.js';
 import { pickRandomProviderAndModel } from './random-pick.js';
@@ -140,6 +151,16 @@ async function startChat(providerId?: string, continueSession = false): Promise<
     await runRepl({ provider, model, ...common });
     return;
   }
+  // No provider named: honour the pair `robin setup` stored, and only fall
+  // back to the menu when there is nothing usable to honour.
+  const stored = await storedChatDefault(new SettingsStore(), listProviders());
+  if (stored) {
+    await ensureAuthenticated(stored.provider);
+    console.log(mutedColor(`${stored.provider.name} · ${stored.model} — your default. Change it with \`robin setup\`.`));
+    await runRepl({ provider: stored.provider, model: stored.model, ...common });
+    return;
+  }
+
   const { provider, model } = await pickProviderAndModel();
   await runRepl({ provider, model, ...common });
 }
@@ -275,6 +296,46 @@ program
   });
 
 program
+  .command('setup')
+  .description('First-run wizard: pick a provider, log in, and save a default model')
+  .action(async () => {
+    requireInteractiveTerminal();
+    await runSetupCommand();
+  });
+
+const config = program
+  .command('config')
+  .description('Read and change stored settings (~/.robin/settings.json)');
+
+config
+  .command('list', { isDefault: true })
+  .description('Show every setting, its value, and where that value came from')
+  .action(async () => {
+    await runConfigList(new SettingsStore());
+  });
+
+config
+  .command('get <key>')
+  .description('Show one setting')
+  .action(async (key: string) => {
+    await runConfigGet(new SettingsStore(), key);
+  });
+
+config
+  .command('set <key> <value>')
+  .description('Change one setting')
+  .action(async (key: string, value: string) => {
+    await runConfigSet(new SettingsStore(), key, value);
+  });
+
+config
+  .command('unset <key>')
+  .description('Forget one setting, reverting it to its default')
+  .action(async (key: string) => {
+    await runConfigUnset(new SettingsStore(), key);
+  });
+
+program
   .command('chat [provider]')
   .description('Start a chat session — pass a provider id, or "random" to roll one')
   .option('-c, --continue', "Pick up this directory's last conversation instead of starting a new one")
@@ -289,4 +350,11 @@ program.action(async (options: { continue?: boolean }) => {
 
 installGlobalErrorHandlers();
 
-program.parseAsync(process.argv).catch(reportFatal);
+// Stored settings become the environment the rest of the process reads, before
+// any command runs. Variables already exported are left alone, so the shell
+// still outranks the file — and the snapshot taken first is what keeps a
+// hydrated value from later being mistaken for one the user exported.
+capturePristineEnv();
+hydrateEnv(new SettingsStore())
+  .then(() => program.parseAsync(process.argv))
+  .catch(reportFatal);

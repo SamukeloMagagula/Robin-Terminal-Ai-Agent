@@ -18,6 +18,7 @@ Built by Samukelo "Batman" Magagula.
 | | |
 |---|---|
 | [Install](#install) · [Requirements](#requirements) | getting it running |
+| [First run](#first-run) · [Settings](#settings) | `robin setup`, and `robin config` |
 | [Setting up a provider](#setting-up-a-provider) | the six it talks to |
 | [The gateway](#the-gateway) | where conversations live |
 | [The control UI](#the-control-ui) | driving it from a browser |
@@ -78,7 +79,7 @@ Then start it:
 
 ```bash
 robin chat ollama      # local, no API key needed
-robin chat             # pick a provider from a menu
+robin chat             # your default, or a menu if you have not run `robin setup`
 robin chat random      # roll a random provider and model
 ```
 
@@ -125,6 +126,64 @@ git pull && npm ci && npm run build
 **Uninstalling:** `npm unlink -g robin`, then delete the clone. Robin's data
 lives in `~/.robin/` — conversations, transcripts, credentials, input history —
 so remove that directory too if you want it gone.
+
+## First run
+
+```bash
+robin setup
+```
+
+Picks a provider, logs you in, picks a model, and checks the pair actually
+answers before saving it as your default. After that `robin chat` starts
+talking immediately instead of asking you two questions every time.
+
+Providers needing no account come first in the list, so the fastest route
+through is Ollama or a local server. Nothing is saved unless every step
+succeeds — a default pointing at a provider you never finished logging into
+would fail on every later `robin chat` with no hint that setup was the cause.
+
+Re-running is safe. It shows your current choices and lets you keep them.
+
+## Settings
+
+`robin config` is the one place that answers what Robin is set to do.
+
+```bash
+robin config list                          # every setting, its value, where it came from
+robin config get gateway.port
+robin config set default.model claude-sonnet-5
+robin config unset gateway.port            # back to the default
+```
+
+Settings live in `~/.robin/settings.json`. Seven keys, and `config list`
+describes each one, so that is the reference rather than this table:
+
+| Key | What it does |
+|---|---|
+| `default.provider` · `default.model` | what `robin chat` starts with |
+| `gateway.port` | port the gateway listens on |
+| `browser` | browser command used to open login pages |
+| `debug` | print full stack traces on error |
+| `history.enabled` | keep REPL input history between sessions |
+| `local.baseUrl` | OpenAI-compatible endpoint for the local provider |
+
+Values are checked when you set them, so `robin config set gateway.port 99999`
+is refused there and then rather than at gateway startup days later.
+
+**Environment variables still win.** Most of these keys correspond to a
+`ROBIN_*` variable that worked before this file existed, and those keep
+working — an exported variable outranks the file. That is the one genuinely
+confusing case, so Robin says it outright rather than letting you wonder why
+a setting had no effect:
+
+```
+$ robin config get gateway.port
+  gateway.port     8080     from ROBIN_GATEWAY_PORT, overriding 7777 in settings.json
+```
+
+Credentials are deliberately not settings. Tokens and API keys live in
+`~/.robin/auth.json` and in the channel config, so there is exactly one
+answer to where a secret is kept.
 
 ### Setting up a provider
 
