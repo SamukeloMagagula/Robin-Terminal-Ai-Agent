@@ -7,6 +7,8 @@ import { gatherTelemetry } from '../ui/hud/telemetry.js';
 import { TOOL_DEFINITIONS } from '../tools/definitions.js';
 import { MEMORY_TOOL_DEFINITIONS } from '../memory/tools.js';
 import { SKILL_TOOL_DEFINITIONS } from '../skills/tools.js';
+import { MEDIA_TOOL_DEFINITIONS } from '../media/tools.js';
+import { mediaIfAvailable } from '../media/available.js';
 import { newSessionId } from '../session-id.js';
 import { ConversationStore } from '../conversation-store.js';
 import { SkillStore } from '../skills/store.js';
@@ -276,6 +278,11 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   const startupUsage = await usageCache.get();
   // Local reads only — gatherTelemetry never touches the network, so the
   // banner does not wait on a socket to draw.
+  // The gateway decides whether the media tools exist, but it decides it from
+  // the same auth.json this process can read, so asking locally agrees with it
+  // and costs no round trip.
+  const mediaTools = (await mediaIfAvailable()) ? MEDIA_TOOL_DEFINITIONS.length : 0;
+
   const hudStats = await gatherTelemetry({
     memory: memoryStore,
     skills: skillStore,
@@ -286,6 +293,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       TOOL_DEFINITIONS.length +
       MEMORY_TOOL_DEFINITIONS.length +
       SKILL_TOOL_DEFINITIONS.length +
+      mediaTools +
       client.mcp.tools,
     mcpServerCount: client.mcp.servers,
   });

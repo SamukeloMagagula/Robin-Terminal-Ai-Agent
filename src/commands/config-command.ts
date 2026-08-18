@@ -10,12 +10,21 @@
 import chalk from 'chalk';
 import { mutedColor } from '../ui/theme.js';
 import type { SettingsStore, ResolvedSetting } from '../settings/store.js';
-import type { SettingDefinition, SettingValue } from '../settings/registry.js';
+import { SETTINGS, type SettingDefinition, type SettingValue } from '../settings/registry.js';
 
 type Out = (line: string) => void;
 
-const KEY_WIDTH = 18;
-const VALUE_WIDTH = 26;
+/**
+ * Column widths, computed from the registry rather than fixed.
+ *
+ * A hard-coded width silently breaks the moment a longer key is added, and
+ * the misalignment is the kind of thing nobody notices in review.
+ */
+const KEY_WIDTH = Math.max(...SETTINGS.map((s) => s.key.length));
+const VALUE_WIDTH = Math.max(
+  ...SETTINGS.map((s) => String(s.fallback).length),
+  'unset'.length + 2
+);
 
 /**
  * An empty free-text setting reads as "(unset)" rather than as nothing at all,

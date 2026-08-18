@@ -27,6 +27,7 @@ Built by Samukelo "Batman" Magagula.
 | [Tool-Calling](#tool-calling) · [Security](#security) | what it can do to your machine, and what it asks first |
 | [Capability manifests](#capability-manifests) | letting it act unattended, within limits |
 | [Scheduled jobs](#scheduled-jobs) | prompts on a timer, answers where you want them |
+| [Images, speech and transcription](#images-speech-and-transcription) | the media tools |
 | [Remote control](#remote-control-telegram-discord-slack) | Telegram, Discord, Slack |
 | [Skills](#skills) · [Memory](#memory) · [MCP servers](#mcp-servers) | what it knows and what it can reach |
 | [How replies are printed](#how-replies-are-printed) | markdown in a terminal |
@@ -1005,6 +1006,51 @@ Delivery failures count as failed runs: a report nobody received did not
 happen. The reason is kept and shown in `robin schedule list`, and the job
 stays enabled — a provider that was down at 02:00 is usually up tomorrow, and
 quietly switching a job off would be worse than a run that fails visibly.
+
+## Images, speech and transcription
+
+Three extra tools appear once you are logged in to Gemini:
+
+| Tool | What it does |
+|---|---|
+| `generate_image` | writes an image from a prompt |
+| `speak` | writes spoken audio from text |
+| `transcribe` | reads an audio file and returns what is said |
+
+```bash
+robin login gemini     # the only credential these need
+```
+
+They use the Gemini key you already have, so there is no second account to
+open. When Gemini is not logged in the tools are not offered at all — a tool
+the model can see but never use is one it keeps reaching for.
+
+**They are gated exactly like any other file access, because that is literally
+what they are.** Generating an image is a write, so it asks with the same
+prompt `write_file` uses and is refused in the same protected directories.
+Transcribing is a read, so it asks as a read. Nothing here has its own path
+handling, which is why no media tool can write into `~/.ssh/` and why a
+[manifest](#capability-manifests) rule like `--write "~/reports/**"` governs
+generated files without knowing anything about media.
+
+You are asked *before* the API call, not after, so a picture you decline costs
+nothing.
+
+**The model ids are settings**, because Google renames these models often:
+
+```bash
+robin config set media.imageModel gemini-2.5-flash-image
+robin config set media.speechModel gemini-2.5-flash-preview-tts
+robin config set media.transcribeModel gemini-2.5-flash
+```
+
+If a call fails saying the model does not exist, that is a rename and the fix
+is one `robin config set` rather than a new release.
+
+Speech comes back as raw PCM, which no player will open, so Robin wraps it in
+a WAV container before writing — the file you get actually plays. Transcription
+holds the audio in memory to send it, so files over 20 MB are refused with a
+message rather than failing obscurely.
 
 ## Troubleshooting
 

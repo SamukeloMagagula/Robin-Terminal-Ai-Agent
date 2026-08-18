@@ -22,6 +22,7 @@ import { Scheduler } from '../schedule/scheduler.js';
 import { createJobRunner } from '../schedule/run-job.js';
 import { deliverJobAnswer } from '../schedule/deliver.js';
 import { SettingsStore } from '../settings/store.js';
+import { mediaIfAvailable } from '../media/available.js';
 import { createHttpApi } from './http-api.js';
 import { startTrustedMcpServers } from './mcp.js';
 import { buildFingerprint, freshBuildFingerprint } from './build-id.js';
@@ -76,9 +77,14 @@ export async function startGateway(
   // already be able to see the MCP tools.
   const mcp = await startTrustedMcpServers({ log });
 
+  // Resolved once at startup: logging in to Gemini later means restarting the
+  // gateway, which is the same deal every other credential here has.
+  const media = await mediaIfAvailable();
+
   const sessions = new SessionService({
     providers: listProviders(),
     approvals,
+    media,
     mcp: mcp.registry,
     emit: (sessionId, event) => server.emit(sessionId, event),
     stores: {

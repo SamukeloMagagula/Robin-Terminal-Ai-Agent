@@ -17,6 +17,9 @@ describe('the settings registry', () => {
       'gateway.port',
       'history.enabled',
       'local.baseUrl',
+      'media.imageModel',
+      'media.speechModel',
+      'media.transcribeModel',
     ]);
   });
 

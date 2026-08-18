@@ -3,6 +3,11 @@ import * as path from 'node:path';
 import { spawn } from 'node:child_process';
 import type { ToolCall } from '../providers/types.js';
 import { checkPath, defaultSensitiveDirs } from './sensitive-paths.js';
+import type { MediaClient } from '../media/client.js';
+import { generateImageTool, speakTool, transcribeTool } from '../media/tools.js';
+
+const MEDIA_UNAVAILABLE =
+  'Error: the media tools need a Gemini API key. Run `robin login gemini` first.';
 import { isReadOnlyCommand } from './command-safety.js';
 import type { MemoryStore, MemoryType } from '../memory/store.js';
 import type { SkillStore } from '../skills/store.js';
@@ -120,6 +125,14 @@ export interface ExecuteOptions {
   memory?: MemoryStore;
   /** Enables the `use_skill` tool when present. */
   skills?: SkillStore;
+  /**
+   * Enables generate_image, speak and transcribe when present.
+   *
+   * Absent whenever Gemini is not logged in, which is also why the tools are
+   * not offered then: a tool the model can see but never use is a tool it will
+   * keep trying.
+   */
+  media?: MediaClient;
 }
 
 export async function executeTool(
@@ -173,6 +186,15 @@ export async function executeTool(
       case 'use_skill':
         if (!options.skills) return 'Error: skills are not available in this session.';
         return await useSkillTool(args, options.skills);
+      case 'generate_image':
+        if (!options.media) return MEDIA_UNAVAILABLE;
+        return await generateImageTool(args, confirm, options.media, options.cwd);
+      case 'speak':
+        if (!options.media) return MEDIA_UNAVAILABLE;
+        return await speakTool(args, confirm, options.media, options.cwd);
+      case 'transcribe':
+        if (!options.media) return MEDIA_UNAVAILABLE;
+        return await transcribeTool(args, confirm, options.media, options.cwd);
       case 'run_command':
         return await runCommandTool(
           requireString(args.command, 'command'),

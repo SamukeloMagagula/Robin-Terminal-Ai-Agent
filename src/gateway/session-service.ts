@@ -18,6 +18,7 @@ import type { SkillStore } from '../skills/store.js';
 import type { SessionStore, PersistedSession } from './session-store.js';
 import type { AutonomyStore } from '../autonomy/grant-store.js';
 import type { AuditLog } from '../autonomy/audit.js';
+import type { MediaClient } from '../media/client.js';
 import { ChatLog } from '../chat-log.js';
 
 export interface SessionServiceDeps {
@@ -41,6 +42,8 @@ export interface SessionServiceDeps {
     /** Where a governed session's decisions are recorded. */
     audit?: AuditLog;
   };
+  /** Enables the media tools. Absent when Gemini is not logged in. */
+  media?: MediaClient;
   /** PERSONALITY.md, already loaded and approved by the caller. */
   personality?: string;
   /** Tools contributed by approved MCP servers, offered alongside the built-ins. */
@@ -322,6 +325,7 @@ export class SessionService {
         contextLimits: this.deps.stores.contextLimits,
         memory: this.deps.stores.memory,
         skills: this.deps.stores.skills,
+        media: this.deps.media,
         mcp: this.deps.mcp,
         onText: (delta) => this.deps.emit(id, { kind: 'text', turnId, delta }),
         onThinking: (delta) => this.deps.emit(id, { kind: 'thinking', turnId, delta }),

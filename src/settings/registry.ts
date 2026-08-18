@@ -115,6 +115,26 @@ export const SETTINGS: readonly SettingDefinition[] = [
     fallback: '',
     check: checkUrl,
   },
+  {
+    key: 'media.imageModel',
+    type: 'string',
+    description: 'Gemini model used by the generate_image tool',
+    // A setting rather than a constant because Google renames these often
+    // enough that a rename should not need a release.
+    fallback: 'gemini-2.5-flash-image',
+  },
+  {
+    key: 'media.speechModel',
+    type: 'string',
+    description: 'Gemini model used by the speak tool',
+    fallback: 'gemini-2.5-flash-preview-tts',
+  },
+  {
+    key: 'media.transcribeModel',
+    type: 'string',
+    description: 'Gemini model used by the transcribe tool',
+    fallback: 'gemini-2.5-flash',
+  },
 ];
 
 export function settingKeys(): string[] {
