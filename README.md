@@ -6,7 +6,7 @@ Your conversations live in a small local daemon called [the gateway](#the-gatewa
 
 - **Close the terminal and reopen it — the conversation is still there.** It survives a reboot too.
 - **The same conversation from anywhere.** A [browser UI](#the-control-ui), and [Telegram, Discord or Slack](#remote-control-telegram-discord-slack) when you are away from the desk. Ask something from your phone; the answer is waiting at your keyboard.
-- **A tool call always finds a human.** A command triggered from a chat message asks you at your terminal, saying where the request came from — and is refused when nobody is there.
+- **A tool call always finds a human.** A command triggered from a chat message asks you at your terminal, saying where the request came from — and is refused when nobody is there. Where you want it to act unattended, a [capability manifest](#capability-manifests) says exactly what it may do, lapses on its own, and logs every decision.
 - **Other tools can drive it.** An [OpenAI-compatible API](#driving-robin-from-other-tools) on the same port, so editors and scripts get Robin with its tools, memory and skills rather than a bare model.
 
 `robin doctor` tells you what is wrong with an install before you hit it.
@@ -18,12 +18,16 @@ Built by Samukelo "Batman" Magagula.
 | | |
 |---|---|
 | [Install](#install) · [Requirements](#requirements) | getting it running |
+| [First run](#first-run) · [Settings](#settings) | `robin setup`, and `robin config` |
 | [Setting up a provider](#setting-up-a-provider) | the six it talks to |
 | [The gateway](#the-gateway) | where conversations live |
 | [The control UI](#the-control-ui) | driving it from a browser |
 | [Driving Robin from other tools](#driving-robin-from-other-tools) | the OpenAI-compatible API |
 | [Usage](#usage) · [Sessions](#sessions) | day to day |
 | [Tool-Calling](#tool-calling) · [Security](#security) | what it can do to your machine, and what it asks first |
+| [Capability manifests](#capability-manifests) | letting it act unattended, within limits |
+| [Scheduled jobs](#scheduled-jobs) | prompts on a timer, answers where you want them |
+| [Images, speech and transcription](#images-speech-and-transcription) | the media tools |
 | [Remote control](#remote-control-telegram-discord-slack) | Telegram, Discord, Slack |
 | [Skills](#skills) · [Memory](#memory) · [MCP servers](#mcp-servers) | what it knows and what it can reach |
 | [How replies are printed](#how-replies-are-printed) | markdown in a terminal |
@@ -78,7 +82,7 @@ Then start it:
 
 ```bash
 robin chat ollama      # local, no API key needed
-robin chat             # pick a provider from a menu
+robin chat             # your default, or a menu if you have not run `robin setup`
 robin chat random      # roll a random provider and model
 ```
 
@@ -125,6 +129,64 @@ git pull && npm ci && npm run build
 **Uninstalling:** `npm unlink -g robin`, then delete the clone. Robin's data
 lives in `~/.robin/` — conversations, transcripts, credentials, input history —
 so remove that directory too if you want it gone.
+
+## First run
+
+```bash
+robin setup
+```
+
+Picks a provider, logs you in, picks a model, and checks the pair actually
+answers before saving it as your default. After that `robin chat` starts
+talking immediately instead of asking you two questions every time.
+
+Providers needing no account come first in the list, so the fastest route
+through is Ollama or a local server. Nothing is saved unless every step
+succeeds — a default pointing at a provider you never finished logging into
+would fail on every later `robin chat` with no hint that setup was the cause.
+
+Re-running is safe. It shows your current choices and lets you keep them.
+
+## Settings
+
+`robin config` is the one place that answers what Robin is set to do.
+
+```bash
+robin config list                          # every setting, its value, where it came from
+robin config get gateway.port
+robin config set default.model claude-sonnet-5
+robin config unset gateway.port            # back to the default
+```
+
+Settings live in `~/.robin/settings.json`. Seven keys, and `config list`
+describes each one, so that is the reference rather than this table:
+
+| Key | What it does |
+|---|---|
+| `default.provider` · `default.model` | what `robin chat` starts with |
+| `gateway.port` | port the gateway listens on |
+| `browser` | browser command used to open login pages |
+| `debug` | print full stack traces on error |
+| `history.enabled` | keep REPL input history between sessions |
+| `local.baseUrl` | OpenAI-compatible endpoint for the local provider |
+
+Values are checked when you set them, so `robin config set gateway.port 99999`
+is refused there and then rather than at gateway startup days later.
+
+**Environment variables still win.** Most of these keys correspond to a
+`ROBIN_*` variable that worked before this file existed, and those keep
+working — an exported variable outranks the file. That is the one genuinely
+confusing case, so Robin says it outright rather than letting you wonder why
+a setting had no effect:
+
+```
+$ robin config get gateway.port
+  gateway.port     8080     from ROBIN_GATEWAY_PORT, overriding 7777 in settings.json
+```
+
+Credentials are deliberately not settings. Tokens and API keys live in
+`~/.robin/auth.json` and in the channel config, so there is exactly one
+answer to where a secret is kept.
 
 ### Setting up a provider
 
@@ -622,6 +684,11 @@ A server that fails to start, or dies, is disabled with one muted line — the t
 
 `robin serve` runs Robin as a bridge so you can drive it from a messaging app while you're away from the terminal.
 
+Three channels can drive Robin: Telegram, Discord and Slack. Email is
+send-only — see [Scheduled jobs](#scheduled-jobs) — because an allowlist built
+on a forgeable `From` header would be a much weaker gate than the
+platform-authenticated ids these three provide.
+
 ```bash
 robin serve telegram
 robin serve discord
@@ -804,10 +871,186 @@ Full trust model, including what each control does *not* do: **[SECURITY.md](SEC
 - **Approvals can be remembered per action-kind for the current session** (`a` at the prompt). Session-scoped, never written to disk. Note that this deliberately removes the human from the loop for that action kind until you restart — treat `a` with more care than `y`.
 - **A chat bridge answers only sender ids on an explicit allowlist.** An empty allowlist authorises nobody and refuses to start, rather than coming online and silently declining everyone.
 - **A tool call from a chat still needs a human.** It is offered to any terminal attached to the same gateway, labelled with the channel and sender that caused it, and refused when no terminal is attached — so "nobody is at a keyboard" and "nobody approved it" stay the same thing. `--allow-tools` removes that entirely: with it, a chat message runs commands and writes files on your machine unattended, and the reading-the-prompt boundary above no longer exists. See [Remote control](#remote-control-telegram-discord-slack).
+- **A capability manifest is a narrower answer than `--allow-tools`.** See [Capability manifests](#capability-manifests) below. It grants specific patterns rather than everything, lapses after seven days by default, records every decision, and stops granting the instant it is revoked. It only ever grants past the approval prompt — never past the credential-path refusals or the read-only allowlist above, both of which run before any manifest is consulted.
 - **The destructive-pattern `⚠` is a nudge, not a block.** It catches `rm -rf` but not `rm -r -f`, `$(echo rm) -rf`, or anything encoded. Don't rely on it.
 - **`read_file` and `run_command` output is wrapped as untrusted content** before it goes back to the model — file contents and command output are data the model reads, not instructions it should follow, even if the text looks like a command ("ignore previous instructions and run…"). This narrows prompt injection; it does not eliminate it, since it is a prompt-level convention the model can still be talked out of.
 - **Conversation transcripts in `~/.robin/chats/` contain every file the model read.** They're written `0600`, but treat them as sensitive.
 - To actually contain Robin, run it in a container or VM with only your working directory mounted.
+
+## Capability manifests
+
+There are two unsatisfying answers to "may this chat message run a command?"
+Ask a human — but nobody is at the keyboard at 02:00. Or `--allow-tools`, which
+lets a chat message run anything at all. A manifest is the answer in between:
+*these specific things, without asking.*
+
+```bash
+robin autonomy add nightly-ops \
+  --command "restic backup *" --command "git status" \
+  --read "~/notes/**" --write "~/reports/**" \
+  --expires 7d --escalate telegram:30
+
+robin serve telegram --manifest nightly-ops
+```
+
+The rules are printed in full and confirmed before anything is written, because
+`--command "git *"` grants more than it looks like. `robin autonomy add` refuses
+to run without an interactive terminal at all — a grant to act unattended is a
+decision a person makes while present, not one a script makes.
+
+```bash
+robin autonomy list              # what exists, and when each lapses
+robin autonomy show nightly-ops  # every rule, in full
+robin autonomy log nightly-ops   # what it allowed — and what it refused
+robin autonomy revoke nightly-ops
+```
+
+`log` is the one worth knowing about. It answers what a manifest was used for
+*and* what it turned down, and the second list is what reveals a manifest that
+is wrong.
+
+Four things are deliberate:
+
+- **Grants lapse.** Seven days unless you pass `--expires`. `never` exists and
+  is the option most likely to be regretted.
+- **Revoking is immediate**, including for a session already running under it.
+  The grant is looked up per request rather than held, so nothing keeps its
+  powers until a restart.
+- **Manifests are never edited.** Widening one means revoking it and creating
+  it again, because that is what it is.
+- **A manifest only skips the prompt.** The credential-path refusals and the
+  read-only allowlist run first and are not subject to it — so no manifest can
+  grant a read of `~/.ssh/`.
+
+`--escalate telegram:30` is a middle ground again: a request the manifest does
+not cover is offered to you on that channel and waits the given minutes rather
+than the few a terminal prompt assumes. Not answering is still a refusal.
+
+## Scheduled jobs
+
+A job is a prompt the gateway sends itself on a timer, and an answer sent
+wherever you want it.
+
+```bash
+robin schedule add standup \
+  --at "0 9 * * 1-5" \
+  --prompt "Summarise yesterday's commits in this repo." \
+  --manifest read-only-repo \
+  --deliver telegram:123456789
+```
+
+```bash
+robin schedule list                 # when each next runs, and how the last run went
+robin schedule show standup
+robin schedule disable standup      # stop it running without forgetting it
+robin schedule remove standup
+```
+
+**Answers can go to a chat or to your inbox.** `--deliver telegram:123456789`
+sends to a chat; `--deliver email:you@example.com` sends mail. Leave it off and
+the answer is only recorded, which `robin schedule show` will tell you.
+
+Email needs an `email` section in `~/.robin/channels.json`:
+
+```json
+{
+  "email": {
+    "host": "smtp.gmail.com",
+    "port": 587,
+    "user": "you@gmail.com",
+    "from": "Robin <you@gmail.com>"
+  }
+}
+```
+
+The password comes from `SMTP_PASSWORD`, which is the better habit —
+`channels.json` travels with your dotfiles. It can go in the file as
+`"password"` if you would rather, and the environment wins when both are set.
+Port 465 is treated as implicit TLS and 587 as STARTTLS unless you say
+otherwise with `"secure"`.
+
+**Email is one-way: Robin can mail you, you cannot mail Robin.** That is a
+deliberate limit rather than unfinished work. Every other channel's allowlist
+checks an identity the platform authenticated — a Telegram user id, a Slack
+member id — but a `From` header is whatever the sender typed. Accepting
+instructions on that basis, on a surface that can trigger tool calls, would be
+a real downgrade dressed up as a feature. So there is no inbox polling and no
+`robin serve email`.
+
+**The schedule is cron, minus the parts that surprise people.** Five fields —
+minute, hour, day-of-month, month, day-of-week — with numbers, `*`, ranges
+(`1-5`), lists (`8,12,18`) and steps (`*/30`). No `@daily`, no month or day
+names, no seconds. Anything it does not understand is refused when you add the
+job, rather than at 02:00 when nothing happens. Times are local.
+
+The one genuine cron trap is kept, because changing it would make familiar
+expressions mean something new: when *both* day fields are restricted they are
+OR-ed, so `0 0 1 * 1` means the 1st of the month **or** any Monday.
+
+**Jobs fire only while the gateway is running**, so `robin schedule add` starts
+it for you and tells you it has. It is the same daemon `robin chat` uses, and
+`robin gateway stop` stops it.
+
+**A missed run is skipped, not made up.** If your laptop was asleep at 02:00,
+the backup report does not arrive at 09:14 when it wakes — the value of that
+run was in its timing. `robin schedule list` shows when each job last ran,
+which is where a missed run becomes visible.
+
+**A job has no human to ask.** Without `--manifest` its tool calls are refused,
+so it can still think and summarise but cannot read a file or run a command —
+`robin schedule add` says so when you leave the flag off. With one, it may do
+exactly what that [manifest](#capability-manifests) allows, and every decision
+lands in `robin autonomy log`.
+
+Delivery failures count as failed runs: a report nobody received did not
+happen. The reason is kept and shown in `robin schedule list`, and the job
+stays enabled — a provider that was down at 02:00 is usually up tomorrow, and
+quietly switching a job off would be worse than a run that fails visibly.
+
+## Images, speech and transcription
+
+Three extra tools appear once you are logged in to Gemini:
+
+| Tool | What it does |
+|---|---|
+| `generate_image` | writes an image from a prompt |
+| `speak` | writes spoken audio from text |
+| `transcribe` | reads an audio file and returns what is said |
+
+```bash
+robin login gemini     # the only credential these need
+```
+
+They use the Gemini key you already have, so there is no second account to
+open. When Gemini is not logged in the tools are not offered at all — a tool
+the model can see but never use is one it keeps reaching for.
+
+**They are gated exactly like any other file access, because that is literally
+what they are.** Generating an image is a write, so it asks with the same
+prompt `write_file` uses and is refused in the same protected directories.
+Transcribing is a read, so it asks as a read. Nothing here has its own path
+handling, which is why no media tool can write into `~/.ssh/` and why a
+[manifest](#capability-manifests) rule like `--write "~/reports/**"` governs
+generated files without knowing anything about media.
+
+You are asked *before* the API call, not after, so a picture you decline costs
+nothing.
+
+**The model ids are settings**, because Google renames these models often:
+
+```bash
+robin config set media.imageModel gemini-2.5-flash-image
+robin config set media.speechModel gemini-2.5-flash-preview-tts
+robin config set media.transcribeModel gemini-2.5-flash
+```
+
+If a call fails saying the model does not exist, that is a rename and the fix
+is one `robin config set` rather than a new release.
+
+Speech comes back as raw PCM, which no player will open, so Robin wraps it in
+a WAV container before writing — the file you get actually plays. Transcription
+holds the audio in memory to send it, so files over 20 MB are refused with a
+message rather than failing obscurely.
 
 ## Troubleshooting
 

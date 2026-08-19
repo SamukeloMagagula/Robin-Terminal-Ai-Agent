@@ -9,13 +9,16 @@ import type {
   SessionSnapshot,
 } from './protocol.js';
 import { runTurn } from '../repl/run-turn.js';
-import type { ApprovalRegistry } from './approvals.js';
+import type { ApprovalRegistry, Governance } from './approvals.js';
 import { createSession, type Session } from '../repl/session.js';
 import type { UnsupportedModelStore } from '../providers/unsupported-models.js';
 import type { ContextLimitStore } from '../providers/context-limits.js';
 import type { MemoryStore } from '../memory/store.js';
 import type { SkillStore } from '../skills/store.js';
 import type { SessionStore, PersistedSession } from './session-store.js';
+import type { AutonomyStore } from '../autonomy/grant-store.js';
+import type { AuditLog } from '../autonomy/audit.js';
+import type { MediaClient } from '../media/client.js';
 import { ChatLog } from '../chat-log.js';
 
 export interface SessionServiceDeps {
@@ -31,7 +34,16 @@ export interface SessionServiceDeps {
     skills?: SkillStore;
     /** Absent means conversations do not survive a restart. */
     sessions?: SessionStore;
+    /**
+     * Approved capability manifests. Absent leaves every session ungoverned,
+     * which is the safe direction: no manifest can then grant anything.
+     */
+    autonomy?: AutonomyStore;
+    /** Where a governed session's decisions are recorded. */
+    audit?: AuditLog;
   };
+  /** Enables the media tools. Absent when Gemini is not logged in. */
+  media?: MediaClient;
   /** PERSONALITY.md, already loaded and approved by the caller. */
   personality?: string;
   /** Tools contributed by approved MCP servers, offered alongside the built-ins. */
@@ -50,6 +62,8 @@ interface SessionRecord {
   /** What this conversation has cost so far, summed over its turns. */
   tokens: { input: number; output: number };
   autoApprove: boolean;
+  /** The manifest governing it, if any. Held as an id — see Governance. */
+  manifestId?: string;
   /** Last time anything about this conversation changed. */
   updatedAt: string;
   /** Turns waiting or running. A new prompt queues behind the tail. */
@@ -105,6 +119,14 @@ export class SessionService {
     label?: string;
     autoApprove?: boolean;
     origin?: SessionOrigin;
+    /**
+     * The manifest this session may act under with nobody attached.
+     *
+     * Not validated here on purpose: an id naming no manifest grants nothing,
+     * because the grant is looked up per request and a missing one simply
+     * fails closed. Callers validate to give a good error, not for safety.
+     */
+    manifestId?: string;
   }): SessionSnapshot {
     const provider = this.provider(params.providerId);
     // Ids are never reused: a client still holding a closed session's id would
@@ -119,6 +141,7 @@ export class SessionService {
       origin: params.origin ?? 'terminal',
       tokens: { input: 0, output: 0 },
       autoApprove: params.autoApprove ?? false,
+      manifestId: params.manifestId,
       updatedAt: new Date().toISOString(),
       queue: Promise.resolve(),
       pending: 0,
@@ -213,6 +236,7 @@ export class SessionService {
       origin: record.origin,
       toolsEnabled: session.toolsEnabled,
       autoApprove: record.autoApprove,
+      manifestId: record.manifestId,
       turnCount: session.turnCount,
       tokens: { ...record.tokens },
       messageCount: session.history.length,
@@ -291,11 +315,17 @@ export class SessionService {
         // daemon built with a restricted set of providers would quietly reach
         // past it — and a test would make live network calls.
         providers: this.deps.providers,
-        confirm: this.deps.approvals.confirmFor(id, origin, record.autoApprove),
+        confirm: this.deps.approvals.confirmFor(
+          id,
+          origin,
+          record.autoApprove,
+          this.governanceFor(record)
+        ),
         unsupportedStore: this.deps.stores.unsupported,
         contextLimits: this.deps.stores.contextLimits,
         memory: this.deps.stores.memory,
         skills: this.deps.stores.skills,
+        media: this.deps.media,
         mcp: this.deps.mcp,
         onText: (delta) => this.deps.emit(id, { kind: 'text', turnId, delta }),
         onThinking: (delta) => this.deps.emit(id, { kind: 'thinking', turnId, delta }),
@@ -402,6 +432,7 @@ export class SessionService {
         origin: saved.origin ?? 'terminal',
         tokens: saved.tokens ?? { input: 0, output: 0 },
         autoApprove: saved.autoApprove,
+        manifestId: saved.manifestId,
         updatedAt: saved.updatedAt ?? new Date().toISOString(),
         queue: Promise.resolve(),
         // Whatever was running when the daemon stopped is not running now.
@@ -409,6 +440,19 @@ export class SessionService {
       });
       this.nextId = Math.max(this.nextId, saved.id + 1);
     }
+  }
+
+  /**
+   * What governs this session, if anything does.
+   *
+   * All three parts are required: a manifest id with no store behind it, or a
+   * store with nowhere to record decisions, would be a grant nobody could
+   * audit. Missing any of them means no governance, which grants nothing.
+   */
+  private governanceFor(record: SessionRecord): Governance | undefined {
+    const { autonomy, audit } = this.deps.stores;
+    if (!record.manifestId || !autonomy || !audit) return undefined;
+    return { manifestId: record.manifestId, store: autonomy, audit };
   }
 
   /** Writes one conversation out. Called after anything that changes it. */
@@ -442,6 +486,7 @@ export class SessionService {
       tokens: record.tokens,
       toolsEnabled: session.toolsEnabled,
       autoApprove: record.autoApprove,
+      manifestId: record.manifestId,
       turnCount: session.turnCount,
       systemPrompt: session.systemPrompt,
       history: session.history,

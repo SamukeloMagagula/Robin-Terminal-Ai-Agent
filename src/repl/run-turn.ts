@@ -5,6 +5,8 @@ import { buildSystemPrompt } from './session.js';
 import type { MemoryStore } from '../memory/store.js';
 import type { SkillStore } from '../skills/store.js';
 import { SKILL_TOOL_DEFINITIONS, composeSkillContext } from '../skills/tools.js';
+import { MEDIA_TOOL_DEFINITIONS } from '../media/tools.js';
+import type { MediaClient } from '../media/client.js';
 import {
   MEMORY_TOOL_DEFINITIONS,
   NUDGE_EVERY,
@@ -46,6 +48,8 @@ export interface TurnOptions {
   memory?: MemoryStore;
   /** Enables the skill tools and the skills index. */
   skills?: SkillStore;
+  /** Enables the media tools. Absent when Gemini is not logged in. */
+  media?: MediaClient;
   /** MCP tools for this turn, offered to the model alongside the built-ins. */
   mcp?: {
     toolDefinitions(): ToolDefinition[];
@@ -166,6 +170,7 @@ export async function runTurn(
               ...TOOL_DEFINITIONS,
               ...(options.memory ? MEMORY_TOOL_DEFINITIONS : []),
               ...(options.skills ? SKILL_TOOL_DEFINITIONS : []),
+              ...(options.media ? MEDIA_TOOL_DEFINITIONS : []),
               ...(options.mcp?.toolDefinitions() ?? []),
             ]
           : [],
@@ -181,6 +186,7 @@ export async function runTurn(
               mcp: options.mcp,
               memory: options.memory,
               skills: options.skills,
+              media: options.media,
             }),
           confirm: options.confirm,
           signal: options.signal,

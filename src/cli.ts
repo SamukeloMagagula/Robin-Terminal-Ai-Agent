@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { select } from '@inquirer/prompts';
+import { select, confirm } from '@inquirer/prompts';
 import type { Provider } from './providers/types.js';
 import { listProviders, getProvider } from './providers/index.js';
 import { runLogin, runLogout } from './commands/auth-commands.js';
@@ -15,6 +15,37 @@ import {
 } from './commands/gateway-command.js';
 import { runMcp } from './commands/mcp-command.js';
 import { runUi } from './commands/ui-command.js';
+import {
+  runConfigList,
+  runConfigGet,
+  runConfigSet,
+  runConfigUnset,
+} from './commands/config-command.js';
+import { runSetupCommand } from './commands/setup-command.js';
+import {
+  runAutonomyAdd,
+  runAutonomyList,
+  runAutonomyLog,
+  runAutonomyRevoke,
+  runAutonomyShow,
+  type RuleFlags,
+} from './commands/autonomy-command.js';
+import { AutonomyStore } from './autonomy/grant-store.js';
+import {
+  runScheduleAdd,
+  runScheduleEnable,
+  runScheduleList,
+  runScheduleRemove,
+  runScheduleShow,
+  type AddOptions,
+} from './commands/schedule-command.js';
+import { ScheduleStore } from './schedule/store.js';
+import { ensureGateway } from './gateway/ensure.js';
+import { AuditLog } from './autonomy/audit.js';
+import { SettingsStore } from './settings/store.js';
+import { storedChatDefault } from './settings/defaults.js';
+import { hydrateEnv } from './settings/hydrate.js';
+import { capturePristineEnv } from './settings/env.js';
 import { runSkillList, runSkillAdd, runSkillUpdate } from './commands/skill-command.js';
 import { runServe, serveHelpText, type ServeOptions } from './commands/serve-command.js';
 import { pickRandomProviderAndModel } from './random-pick.js';
@@ -140,6 +171,16 @@ async function startChat(providerId?: string, continueSession = false): Promise<
     await runRepl({ provider, model, ...common });
     return;
   }
+  // No provider named: honour the pair `robin setup` stored, and only fall
+  // back to the menu when there is nothing usable to honour.
+  const stored = await storedChatDefault(new SettingsStore(), listProviders());
+  if (stored) {
+    await ensureAuthenticated(stored.provider);
+    console.log(mutedColor(`${stored.provider.name} · ${stored.model} — your default. Change it with \`robin setup\`.`));
+    await runRepl({ provider: stored.provider, model: stored.model, ...common });
+    return;
+  }
+
   const { provider, model } = await pickProviderAndModel();
   await runRepl({ provider, model, ...common });
 }
@@ -197,6 +238,7 @@ program
   .option('-p, --provider <id>', 'provider to answer with (default: first logged in)')
   .option('-m, --model <model>', 'model to answer with')
   .option('--allow-tools', 'let tool calls run without approval — see the warning below', false)
+  .option('--manifest <id>', 'let it act unattended within a capability manifest (see `robin autonomy`)')
   .option('--whoami', 'print the sender id of anyone who messages the bot, then exit', false)
   .addHelpText('after', `\n${serveHelpText()}`)
   .action(async (channel: string, options: ServeOptions) => {
@@ -275,6 +317,156 @@ program
   });
 
 program
+  .command('setup')
+  .description('First-run wizard: pick a provider, log in, and save a default model')
+  .action(async () => {
+    requireInteractiveTerminal();
+    await runSetupCommand();
+  });
+
+const config = program
+  .command('config')
+  .description('Read and change stored settings (~/.robin/settings.json)');
+
+config
+  .command('list', { isDefault: true })
+  .description('Show every setting, its value, and where that value came from')
+  .action(async () => {
+    await runConfigList(new SettingsStore());
+  });
+
+config
+  .command('get <key>')
+  .description('Show one setting')
+  .action(async (key: string) => {
+    await runConfigGet(new SettingsStore(), key);
+  });
+
+config
+  .command('set <key> <value>')
+  .description('Change one setting')
+  .action(async (key: string, value: string) => {
+    await runConfigSet(new SettingsStore(), key, value);
+  });
+
+config
+  .command('unset <key>')
+  .description('Forget one setting, reverting it to its default')
+  .action(async (key: string) => {
+    await runConfigUnset(new SettingsStore(), key);
+  });
+
+const autonomy = program
+  .command('autonomy')
+  .description('Capability manifests — what Robin may do with nobody watching');
+
+autonomy
+  .command('list', { isDefault: true })
+  .description('List every manifest and when it lapses')
+  .action(async () => {
+    await runAutonomyList(new AutonomyStore());
+  });
+
+autonomy
+  .command('show <id>')
+  .description('Show one manifest in full')
+  .action(async (id: string) => {
+    await runAutonomyShow(new AutonomyStore(), id);
+  });
+
+autonomy
+  .command('add <id>')
+  .description('Create a manifest, after showing you exactly what it would allow')
+  .option('--command <pattern...>', 'a command it may run, e.g. "git *"')
+  .option('--read <glob...>', 'a path it may read')
+  .option('--write <glob...>', 'a path it may write')
+  .option('--mcp <name...>', 'an MCP tool it may call, e.g. "github.list_issues"')
+  .option('--expires <duration>', 'how long the grant lasts: 7d, 24h, or never', '7d')
+  .option('--escalate <surface:minutes>', 'also offer approvals here, e.g. telegram:30')
+  .action(async (id: string, flags: RuleFlags) => {
+    // A manifest is a decision made by someone who is present. Creating one
+    // from a script would be exactly the thing it exists to prevent.
+    requireInteractiveTerminal();
+    await runAutonomyAdd(new AutonomyStore(), id, flags, {
+      confirm: () => confirm({ message: 'Create this manifest?', default: false }),
+      now: new Date(),
+      out: console.log,
+    });
+  });
+
+autonomy
+  .command('revoke <id>')
+  .description('Delete a manifest — running sessions lose it at once')
+  .action(async (id: string) => {
+    await runAutonomyRevoke(new AutonomyStore(), id);
+  });
+
+autonomy
+  .command('log <id>')
+  .description('What this manifest allowed, and what it refused')
+  .action(async (id: string) => {
+    await runAutonomyLog(new AuditLog(), id);
+  });
+
+const schedule = program
+  .command('schedule')
+  .description('Jobs the gateway runs on a timer, and where their answers go');
+
+schedule
+  .command('list', { isDefault: true })
+  .description('List every job, when it next runs, and how the last run went')
+  .action(async () => {
+    await runScheduleList(new ScheduleStore());
+  });
+
+schedule
+  .command('show <name>')
+  .description('Show one job in full')
+  .action(async (name: string) => {
+    await runScheduleShow(new ScheduleStore(), name);
+  });
+
+schedule
+  .command('add <name>')
+  .description('Add a job — starts the gateway, since jobs only fire while it runs')
+  .requiredOption('--at <cron>', 'when to run it, e.g. "0 9 * * 1-5"')
+  .requiredOption('--prompt <text>', 'what to ask Robin when it fires')
+  .option('--manifest <id>', 'the capability manifest it may act under (see `robin autonomy`)')
+  .option('--deliver <channel:chat>', 'where to send the answer, e.g. telegram:123456789')
+  .option('--provider <id>', 'provider to answer with (default: your configured default)')
+  .option('--model <model>', 'model to answer with')
+  .action(async (name: string, options: AddOptions) => {
+    await runScheduleAdd(name, options, {
+      store: new ScheduleStore(),
+      autonomy: new AutonomyStore(),
+      ensure: ensureGateway,
+      now: new Date(),
+      out: console.log,
+    });
+  });
+
+schedule
+  .command('remove <name>')
+  .description('Forget a job')
+  .action(async (name: string) => {
+    await runScheduleRemove(new ScheduleStore(), name);
+  });
+
+schedule
+  .command('enable <name>')
+  .description('Let a job run again')
+  .action(async (name: string) => {
+    await runScheduleEnable(new ScheduleStore(), name, true);
+  });
+
+schedule
+  .command('disable <name>')
+  .description('Stop a job running, without forgetting it')
+  .action(async (name: string) => {
+    await runScheduleEnable(new ScheduleStore(), name, false);
+  });
+
+program
   .command('chat [provider]')
   .description('Start a chat session — pass a provider id, or "random" to roll one')
   .option('-c, --continue', "Pick up this directory's last conversation instead of starting a new one")
@@ -289,4 +481,11 @@ program.action(async (options: { continue?: boolean }) => {
 
 installGlobalErrorHandlers();
 
-program.parseAsync(process.argv).catch(reportFatal);
+// Stored settings become the environment the rest of the process reads, before
+// any command runs. Variables already exported are left alone, so the shell
+// still outranks the file — and the snapshot taken first is what keeps a
+// hydrated value from later being mistaken for one the user exported.
+capturePristineEnv();
+hydrateEnv(new SettingsStore())
+  .then(() => program.parseAsync(process.argv))
+  .catch(reportFatal);

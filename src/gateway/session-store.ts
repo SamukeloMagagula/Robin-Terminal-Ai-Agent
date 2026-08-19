@@ -21,11 +21,13 @@ export interface PersistedSession {
   model: string;
   cwd: string;
   /** Absent in files written before origins existed; treated as a terminal. */
-  origin?: 'terminal' | 'channel' | 'http';
+  origin?: 'terminal' | 'channel' | 'http' | 'schedule';
   /** Absent in files written before tokens were counted. */
   tokens?: { input: number; output: number };
   toolsEnabled: boolean;
   autoApprove: boolean;
+  /** The manifest governing it, so a restart does not silently ungovern it. */
+  manifestId?: string;
   turnCount: number;
   systemPrompt?: string;
   history: Message[];
