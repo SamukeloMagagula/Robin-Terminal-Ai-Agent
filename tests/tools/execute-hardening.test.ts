@@ -128,6 +128,26 @@ describe('read-only auto-approval', () => {
     });
     expect(asked).toBe(true);
   });
+
+  it('does not auto-approve a read-only command that targets a credential file, and warns about it', async () => {
+    const sshDir = path.join(os.homedir(), '.ssh');
+    let asked = false;
+    const messages: string[] = [];
+    const announced: string[] = [];
+    const result = await executeTool(
+      call('run_command', { command: `cat ${path.join(sshDir, 'id_rsa')}` }),
+      async (request) => {
+        asked = true;
+        messages.push(request.message);
+        return false;
+      },
+      { onAutoApproved: (c) => announced.push(c) }
+    );
+    expect(asked).toBe(true);
+    expect(announced).toEqual([]);
+    expect(messages[0]).toContain('protected credential location');
+    expect(result).toContain('declined by the user');
+  });
 });
 
 describe('run_command timeout', () => {

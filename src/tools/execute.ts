@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
 import type { ToolCall } from '../providers/types.js';
-import { checkPath, defaultSensitiveDirs } from './sensitive-paths.js';
+import { checkPath, defaultSensitiveDirs, commandTouchesSensitivePath } from './sensitive-paths.js';
 import type { MediaClient } from '../media/client.js';
 import { generateImageTool, speakTool, transcribeTool } from '../media/tools.js';
 
@@ -480,18 +480,30 @@ async function runCommandTool(
   onOutput?: (chunk: string) => void,
   cwd: string = process.cwd()
 ): Promise<string> {
+  // A command that only reads is still worth stopping for if what it reads is
+  // a credential: `cat ~/.ssh/id_rsa` is `cat`, which is on the allowlist, but
+  // auto-approving it would make the allowlist a zero-friction exfiltration
+  // path. Unlike read_file/write_file this cannot refuse outright — a shell
+  // command has no single structured path argument, and legitimate commands
+  // like `ssh-keygen -f ~/.ssh/id_rsa` target these locations on purpose — so
+  // it forces a prompt and names what it found instead.
+  const sensitivePath = await commandTouchesSensitivePath(command, cwd);
+
   // Listing and inspecting cost the user nothing to allow, and asking about
   // every `ls` trains them to approve without reading. Anything the allowlist
   // does not positively recognise still goes to a prompt.
-  if (isReadOnlyCommand(command)) {
+  if (isReadOnlyCommand(command) && !sensitivePath) {
     onAutoApproved?.(command);
   } else {
-    const warning = isDangerousCommand(command)
+    const dangerWarning = isDangerousCommand(command)
       ? '⚠ This command looks potentially destructive — review it carefully.\n'
+      : '';
+    const credentialWarning = sensitivePath
+      ? `⚠ This command references a protected credential location (${sensitivePath}) — review carefully.\n`
       : '';
     const approved = await confirm({
       kind: 'run_command',
-      message: `${warning}Run "${command}"?`,
+      message: `${dangerWarning}${credentialWarning}Run "${command}"?`,
       subject: command,
     });
     if (!approved) {

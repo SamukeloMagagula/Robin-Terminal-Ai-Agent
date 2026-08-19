@@ -84,6 +84,70 @@ export async function realPathOrNearest(filePath: string): Promise<string> {
   }
 }
 
+/**
+ * Splits a shell command into argv-style tokens, honouring single and double
+ * quotes so a quoted argument containing whitespace — `cat "my secrets/id_rsa"`
+ * — survives as one token instead of being torn apart by a bare whitespace
+ * split, which would mangle the path past recognition and let it slip by
+ * undetected. Not a full shell grammar (no nested quotes, no backslash
+ * escapes) — good enough to recover the arguments a real shell would pass.
+ */
+function splitCommandTokens(command: string): string[] {
+  const tokens: string[] = [];
+  const pattern = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(command)) !== null) {
+    tokens.push(match[1] ?? match[2] ?? match[3]);
+  }
+  return tokens;
+}
+
+/**
+ * A token from a shell command that could plausibly be a path argument: any
+ * non-flag token, including a bare filename a command might read. Flags like
+ * `-n` or `--output=x` are skipped — this is about the thing the command
+ * touches, not how it was asked to touch it. Deliberately broad rather than
+ * narrow: a non-path token like a numeric argument just resolves to nothing
+ * sensitive and costs one wasted lookup, whereas narrowing this and missing a
+ * real path is the failure mode that matters here.
+ */
+function looksLikePathToken(token: string): boolean {
+  return !token.startsWith('-');
+}
+
+function expandHome(token: string): string {
+  if (token === '~') return os.homedir();
+  if (token.startsWith('~/') || token.startsWith('~\\')) {
+    return path.join(os.homedir(), token.slice(2));
+  }
+  return token;
+}
+
+/**
+ * Whether a shell command references a protected credential location in any
+ * of its arguments — `run_command` has no single structured path the way
+ * `read_file`/`write_file` do, so this scans tokens heuristically rather than
+ * refusing outright. Returns the real path found, or undefined.
+ */
+export async function commandTouchesSensitivePath(
+  command: string,
+  cwd: string = process.cwd(),
+  sensitiveDirs: string[] = defaultSensitiveDirs()
+): Promise<string | undefined> {
+  const tokens = splitCommandTokens(command).slice(1);
+  const realDirs = await Promise.all(sensitiveDirs.map((dir) => realPathOrNearest(dir)));
+
+  for (const raw of tokens) {
+    if (!looksLikePathToken(raw)) continue;
+    const candidate = expandHome(raw);
+    const realPath = await realPathOrNearest(path.resolve(cwd, candidate));
+    if (isInsideAnyDirectory(realPath, realDirs) || isSensitiveBasename(realPath)) {
+      return realPath;
+    }
+  }
+  return undefined;
+}
+
 export interface PathVerdict {
   blocked: boolean;
   /** Ready-to-print refusal, phrased for the verb that triggered the check. */

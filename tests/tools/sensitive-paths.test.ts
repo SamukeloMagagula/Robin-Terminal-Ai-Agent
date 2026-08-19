@@ -8,6 +8,7 @@ import {
   isInsideDirectory,
   realPathOrNearest,
   defaultSensitiveDirs,
+  commandTouchesSensitivePath,
 } from '../../src/tools/sensitive-paths';
 
 let tmp: string;
@@ -112,5 +113,64 @@ describe('checkPath', () => {
 
     const verdict = await checkPath(link, 'read', [vault]);
     expect(verdict.blocked).toBe(true);
+  });
+});
+
+describe('commandTouchesSensitivePath', () => {
+  it('flags a command whose argument sits inside a protected directory', async () => {
+    const vault = path.join(tmp, 'vault');
+    await fs.mkdir(vault);
+    const secret = path.join(vault, 'id_rsa');
+    await fs.writeFile(secret, 'x');
+
+    const hit = await commandTouchesSensitivePath(`cat ${secret}`, tmp, [vault]);
+    expect(hit).toBeDefined();
+  });
+
+  it('flags a command whose argument is a sensitive basename anywhere', async () => {
+    await fs.writeFile(path.join(tmp, '.env'), 'SECRET=1');
+
+    const hit = await commandTouchesSensitivePath('head -n 5 .env', tmp, []);
+    expect(hit).toBeDefined();
+  });
+
+  it('leaves an ordinary command alone', async () => {
+    await fs.writeFile(path.join(tmp, 'notes.md'), 'hi');
+
+    const hit = await commandTouchesSensitivePath('cat notes.md', tmp, []);
+    expect(hit).toBeUndefined();
+  });
+
+  it('does not false-positive on a word that merely contains a sensitive name', async () => {
+    const hit = await commandTouchesSensitivePath('echo credentialsAreGreat', tmp, []);
+    expect(hit).toBeUndefined();
+  });
+
+  it('flags a directory argument that is itself protected', async () => {
+    const vault = path.join(tmp, 'vault');
+    await fs.mkdir(vault);
+
+    const hit = await commandTouchesSensitivePath(`ls ${vault}`, tmp, [vault]);
+    expect(hit).toBeDefined();
+  });
+
+  it('flags a quoted path containing a space', async () => {
+    const vault = path.join(tmp, 'my vault');
+    await fs.mkdir(vault);
+    const secret = path.join(vault, 'id_rsa');
+    await fs.writeFile(secret, 'x');
+
+    const hit = await commandTouchesSensitivePath(`cat "${secret}"`, tmp, [vault]);
+    expect(hit).toBeDefined();
+  });
+
+  it('flags a single-quoted path containing a space', async () => {
+    const vault = path.join(tmp, 'my vault');
+    await fs.mkdir(vault);
+    const secret = path.join(vault, 'id_rsa');
+    await fs.writeFile(secret, 'x');
+
+    const hit = await commandTouchesSensitivePath(`cat '${secret}'`, tmp, [vault]);
+    expect(hit).toBeDefined();
   });
 });
