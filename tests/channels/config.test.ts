@@ -79,3 +79,49 @@ describe('loadChannelConfig', () => {
     expect(config.model).toBeUndefined();
   });
 });
+
+describe('loadChannelConfig — signal', () => {
+  const signalFile = () =>
+    configFile(
+      JSON.stringify({
+        channels: {
+          signal: { phoneNumber: '+15551234567', apiUrl: 'http://localhost:8080', allow: ['+15559876543'] },
+        },
+      })
+    );
+
+  it('reads phoneNumber and apiUrl from the file', async () => {
+    const config = await loadChannelConfig('signal', await signalFile(), {});
+    expect(config.phoneNumber).toBe('+15551234567');
+    expect(config.apiUrl).toBe('http://localhost:8080');
+  });
+
+  it('lets SIGNAL_PHONE_NUMBER override the file, not SIGNAL_BOT_TOKEN', async () => {
+    const config = await loadChannelConfig('signal', await signalFile(), {
+      SIGNAL_PHONE_NUMBER: '+15550001111',
+      SIGNAL_BOT_TOKEN: 'should-be-ignored',
+    });
+    expect(config.phoneNumber).toBe('+15550001111');
+  });
+
+  it('lets SIGNAL_API_URL override the file', async () => {
+    const config = await loadChannelConfig('signal', await signalFile(), {
+      SIGNAL_API_URL: 'http://elsewhere:9000',
+    });
+    expect(config.apiUrl).toBe('http://elsewhere:9000');
+  });
+
+  it('refuses to start with no phone number anywhere', async () => {
+    const file = await configFile(
+      JSON.stringify({ channels: { signal: { apiUrl: 'http://localhost:8080', allow: ['1'] } } })
+    );
+    await expect(loadChannelConfig('signal', file, {})).rejects.toThrow(/No phone number/);
+  });
+
+  it('refuses to start with no apiUrl anywhere', async () => {
+    const file = await configFile(
+      JSON.stringify({ channels: { signal: { phoneNumber: '+15551234567', allow: ['1'] } } })
+    );
+    await expect(loadChannelConfig('signal', file, {})).rejects.toThrow(/No API URL/);
+  });
+});

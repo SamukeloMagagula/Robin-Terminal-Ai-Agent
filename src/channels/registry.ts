@@ -1,6 +1,7 @@
 import { TelegramTransport } from './telegram.js';
 import { DiscordTransport } from './discord.js';
 import { SlackTransport } from './slack.js';
+import { SignalTransport } from './signal.js';
 import type { ChannelTransport } from './types.js';
 import { UserFacingError } from '../startup/bootstrap.js';
 
@@ -20,7 +21,15 @@ import { UserFacingError } from '../startup/bootstrap.js';
  */
 export const CHANNELS: Record<
   string,
-  { build?: (config: { token: string; appToken?: string }) => ChannelTransport; pending?: string }
+  {
+    build?: (config: {
+      token: string;
+      appToken?: string;
+      apiUrl?: string;
+      phoneNumber?: string;
+    }) => ChannelTransport;
+    pending?: string;
+  }
 > = {
   telegram: { build: ({ token }) => new TelegramTransport({ token }) },
   discord: { build: ({ token }) => new DiscordTransport({ token }) },
@@ -35,6 +44,17 @@ export const CHANNELS: Record<
         );
       }
       return new SlackTransport({ token, appToken });
+    },
+  },
+  signal: {
+    build: ({ apiUrl, phoneNumber }) => {
+      if (!apiUrl || !phoneNumber) {
+        throw new UserFacingError(
+          'Signal needs an apiUrl and a phoneNumber. Set SIGNAL_API_URL and SIGNAL_PHONE_NUMBER, ' +
+            'or add them to the signal entry in ~/.robin/channels.json.'
+        );
+      }
+      return new SignalTransport({ apiUrl, phoneNumber });
     },
   },
   whatsapp: {

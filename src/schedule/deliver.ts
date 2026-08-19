@@ -59,7 +59,12 @@ async function sendToChannel(channel: string, chatId: string, text: string): Pro
   const config = await loadChannelConfig(channel, undefined, process.env, {
     requireAllowlist: false,
   });
-  const transport = entry.build({ token: config.token, appToken: config.appToken });
+  const transport = entry.build({
+    token: config.token,
+    appToken: config.appToken,
+    apiUrl: config.apiUrl,
+    phoneNumber: config.phoneNumber,
+  });
 
   await transport.connect();
   await transport.send(chatId, text);

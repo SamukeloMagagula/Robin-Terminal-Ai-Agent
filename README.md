@@ -28,7 +28,7 @@ Built by Samukelo "Batman" Magagula.
 | [Capability manifests](#capability-manifests) | letting it act unattended, within limits |
 | [Scheduled jobs](#scheduled-jobs) | prompts on a timer, answers where you want them |
 | [Images, speech and transcription](#images-speech-and-transcription) | the media tools |
-| [Remote control](#remote-control-telegram-discord-slack) | Telegram, Discord, Slack |
+| [Remote control](#remote-control-telegram-discord-slack-signal) | Telegram, Discord, Slack, Signal |
 | [Skills](#skills) · [Memory](#memory) · [MCP servers](#mcp-servers) | what it knows and what it can reach |
 | [How replies are printed](#how-replies-are-printed) | markdown in a terminal |
 | [Troubleshooting](#troubleshooting) | when it misbehaves |
@@ -680,24 +680,27 @@ A server that fails to start, or dies, is disabled with one muted line — the t
 
 **Not supported yet:** the Streamable-HTTP transport (stdio only), and MCP resources and prompts (tools only).
 
-## Remote control (Telegram, Discord, Slack)
+## Remote control (Telegram, Discord, Slack, Signal)
 
 `robin serve` runs Robin as a bridge so you can drive it from a messaging app while you're away from the terminal.
 
-Three channels can drive Robin: Telegram, Discord and Slack. Email is
+Four channels can drive Robin: Telegram, Discord, Slack and Signal. Email is
 send-only — see [Scheduled jobs](#scheduled-jobs) — because an allowlist built
 on a forgeable `From` header would be a much weaker gate than the
-platform-authenticated ids these three provide.
+platform-authenticated ids these four provide.
 
 ```bash
 robin serve telegram
 robin serve discord
 robin serve slack
+robin serve signal
 ```
 
-All three work today, and all three connect *outward* — Telegram by long-polling, Discord over its gateway, Slack over Socket Mode — so none needs a public address or an open port. That is the whole reason these came first: they run from a laptop behind NAT exactly as they are.
+All four work today, and all four connect *outward* — Telegram by long-polling, Discord over its gateway, Slack over Socket Mode, Signal by polling a local signal-cli-rest-api container — so none needs a public address or an open port. That is the whole reason these came first: they run from a laptop behind NAT exactly as they are.
 
 **Slack needs two tokens**, issued separately: the bot token (`xoxb-`) to act, and an app-level token (`xapp-`, created under *Basic Information → App-Level Tokens* with the `connections:write` scope) to open the socket. Enable Socket Mode, subscribe to `message.im` and `message.channels`, and put both in `channels.json` as `token` and `appToken`, or in `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN`.
+
+**Signal has no official bot API.** It talks to a self-hosted [signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api) container instead of a token: run that container with a phone number registered to signal-cli, then set `apiUrl` (the container's base URL) and `phoneNumber` (the registered number, E.164 format) in `channels.json`'s `signal` entry, or `SIGNAL_API_URL` and `SIGNAL_PHONE_NUMBER`. There is no message-editing endpoint, so a streamed reply appears once, finished, rather than being edited in place the way the other three do.
 
 WhatsApp and Teams are recognised channel names that explain what they still need. Both require a public webhook endpoint, so each is a transport adapter plus a listener something on the internet can reach. Everything above the transport — access control, sessions, approvals, the agent loop — is already shared, which is why Discord was one file.
 

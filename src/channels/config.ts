@@ -24,6 +24,12 @@ export interface ChannelConfig {
    * separately. Absent for every other channel.
    */
   appToken?: string;
+  /** Base URL of the signal-cli-rest-api container. Signal only. */
+  apiUrl?: string;
+  /** The registered Signal number, E.164 format. Signal only — this is the
+   *  channel's identity, in the role a bot token plays for every other
+   *  channel. */
+  phoneNumber?: string;
   /** Sender ids permitted to drive Robin. */
   allow: string[];
   /** Provider id to answer with. Falls back to the serve command's default. */
@@ -61,6 +67,11 @@ export const EXAMPLE_CONFIG = `{
       "token": "xoxb-your-bot-token",
       "appToken": "xapp-your-app-level-token",
       "allow": ["U0123456789"]
+    },
+    "signal": {
+      "phoneNumber": "+15551234567",
+      "apiUrl": "http://localhost:8080",
+      "allow": ["+15559876543"]
     }
   }
 }`;
@@ -118,18 +129,44 @@ export async function loadChannelConfig(
   }
 
   const record = entry as Record<string, unknown>;
-  const token = envToken || (typeof record.token === 'string' ? record.token.trim() : '');
-  if (!token) {
-    throw new UserFacingError(
-      `No token for "${channel}". Set ${tokenEnvVar(channel)} or add a "token" to ${filePath}.`
-    );
-  }
 
   const allow = parseAllowlist(record.allow);
   if (allow.length === 0 && requireAllowlist) {
     throw new UserFacingError(
       `"${channel}" has an empty "allow" list in ${filePath}, so every message would be refused.\n` +
         `Run \`robin serve ${channel} --whoami\`, message the bot, and it will print the id to add.`
+    );
+  }
+
+  const provider = typeof record.provider === 'string' ? record.provider : undefined;
+  const model = typeof record.model === 'string' ? record.model : undefined;
+
+  // Signal has no bot token — a registered phone number and a reachable
+  // signal-cli-rest-api URL play that role instead, so it skips the generic
+  // token check below in favour of its own two.
+  if (channel === 'signal') {
+    const phoneNumber =
+      env.SIGNAL_PHONE_NUMBER?.trim() ||
+      (typeof record.phoneNumber === 'string' ? record.phoneNumber.trim() : '');
+    if (!phoneNumber) {
+      throw new UserFacingError(
+        `No phone number for "signal". Set SIGNAL_PHONE_NUMBER or add a "phoneNumber" to ${filePath}.`
+      );
+    }
+    const apiUrl =
+      env.SIGNAL_API_URL?.trim() || (typeof record.apiUrl === 'string' ? record.apiUrl.trim() : '');
+    if (!apiUrl) {
+      throw new UserFacingError(
+        `No API URL for "signal". Set SIGNAL_API_URL or add an "apiUrl" to ${filePath}.`
+      );
+    }
+    return { token: phoneNumber, phoneNumber, apiUrl, allow, provider, model };
+  }
+
+  const token = envToken || (typeof record.token === 'string' ? record.token.trim() : '');
+  if (!token) {
+    throw new UserFacingError(
+      `No token for "${channel}". Set ${tokenEnvVar(channel)} or add a "token" to ${filePath}.`
     );
   }
 
@@ -140,7 +177,7 @@ export async function loadChannelConfig(
       (typeof record.appToken === 'string' ? record.appToken.trim() : undefined) ||
       undefined,
     allow,
-    provider: typeof record.provider === 'string' ? record.provider : undefined,
-    model: typeof record.model === 'string' ? record.model : undefined,
+    provider,
+    model,
   };
 }

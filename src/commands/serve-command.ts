@@ -87,7 +87,12 @@ export async function runServe(channelName: string, options: ServeOptions): Prom
   const config = await loadChannelConfig(channelName, undefined, process.env, {
     requireAllowlist: !options.whoami,
   });
-  const transport = channel.build({ token: config.token, appToken: config.appToken });
+  const transport = channel.build({
+    token: config.token,
+    appToken: config.appToken,
+    apiUrl: config.apiUrl,
+    phoneNumber: config.phoneNumber,
+  });
 
   // One controller for both modes, so Ctrl+C unwinds the poll loop rather than
   // leaving a detached long-poll holding the process open.
