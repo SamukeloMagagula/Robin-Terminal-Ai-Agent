@@ -708,6 +708,8 @@ robin serve whatsapp
 
 Telegram, Discord, Slack and Signal all connect *outward* — long-polling or an open socket — so none of them needs a public address or an open port; that's the whole reason these came first, since they run from a laptop behind NAT exactly as they are.
 
+**However you can't know your own sender id until something tells you.** Every channel here supports `--whoami` for exactly that: `robin serve <channel> --whoami` connects, prints the id of anyone who messages it, and reaches the model with nothing — message the bot once, copy the id it prints, add it to `allow` in `channels.json`.
+
 **Slack needs two tokens**, issued separately: the bot token (`xoxb-`) to act, and an app-level token (`xapp-`, created under *Basic Information → App-Level Tokens* with the `connections:write` scope) to open the socket. Enable Socket Mode, subscribe to `message.im` and `message.channels`, and put both in `channels.json` as `token` and `appToken`, or in `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN`.
 
 **Signal has no official bot API.** It talks to a self-hosted [signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api) container instead of a token: run that container with a phone number registered to signal-cli, then set `apiUrl` (the container's base URL) and `phoneNumber` (the registered number, E.164 format) in `channels.json`'s `signal` entry, or `SIGNAL_API_URL` and `SIGNAL_PHONE_NUMBER`. There is no message-editing endpoint, so a streamed reply appears once, finished, rather than being edited in place the way the other three do.

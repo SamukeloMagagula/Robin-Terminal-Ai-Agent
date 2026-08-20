@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import * as http from 'node:http';
 import * as crypto from 'node:crypto';
-import { WhatsAppTransport } from '../../src/channels/whatsapp';
+import { WhatsAppTransport, type WhatsAppOptions } from '../../src/channels/whatsapp';
 import type { IncomingMessage } from '../../src/channels/types';
 
 const opts = {
@@ -36,16 +36,18 @@ function request(
   });
 }
 
-/** Starts receive(), returns the bound port once the listener is up. */
+/** Builds a transport and starts receive(), returning the bound port once the listener is up. */
 async function startTransport(
-  transport: WhatsAppTransport,
+  options: WhatsAppOptions,
   handler: (m: IncomingMessage) => Promise<void> = async () => {}
-): Promise<{ port: number; controller: AbortController; done: Promise<void> }> {
+): Promise<{ transport: WhatsAppTransport; port: number; controller: AbortController; done: Promise<void> }> {
   const controller = new AbortController();
-  const portPromise = new Promise<number>((resolve) => transport.onListening(resolve));
+  let resolvePort!: (port: number) => void;
+  const portPromise = new Promise<number>((resolve) => (resolvePort = resolve));
+  const transport = new WhatsAppTransport({ ...options, onListening: resolvePort });
   const done = transport.receive(handler, controller.signal);
   const port = await portPromise;
-  return { port, controller, done };
+  return { transport, port, controller, done };
 }
 
 function textPayload(overrides: Record<string, unknown> = {}) {
@@ -94,8 +96,7 @@ describe('WhatsAppTransport.connect', () => {
 
 describe('WhatsAppTransport.receive — webhook verification', () => {
   it('echoes the challenge back when the verify token matches', async () => {
-    const transport = new WhatsAppTransport(opts);
-    const { port, controller, done } = await startTransport(transport);
+    const { transport, port, controller, done } = await startTransport(opts);
     cleanup = async () => {
       controller.abort();
       await done;
@@ -110,8 +111,7 @@ describe('WhatsAppTransport.receive — webhook verification', () => {
   });
 
   it('refuses with 403 when the verify token is wrong', async () => {
-    const transport = new WhatsAppTransport(opts);
-    const { port, controller, done } = await startTransport(transport);
+    const { transport, port, controller, done } = await startTransport(opts);
     cleanup = async () => {
       controller.abort();
       await done;
@@ -128,8 +128,7 @@ describe('WhatsAppTransport.receive — webhook verification', () => {
 describe('WhatsAppTransport.receive — signature verification', () => {
   it('accepts a correctly signed message and delivers it to the handler', async () => {
     const received: IncomingMessage[] = [];
-    const transport = new WhatsAppTransport(opts);
-    const { port, controller, done } = await startTransport(transport, async (m) => {
+    const { transport, port, controller, done } = await startTransport(opts, async (m) => {
       received.push(m);
     });
     cleanup = async () => {
@@ -156,8 +155,7 @@ describe('WhatsAppTransport.receive — signature verification', () => {
 
   it('rejects a missing or wrong signature with 401 and never calls the handler', async () => {
     const received: IncomingMessage[] = [];
-    const transport = new WhatsAppTransport(opts);
-    const { port, controller, done } = await startTransport(transport, async (m) => {
+    const { transport, port, controller, done } = await startTransport(opts, async (m) => {
       received.push(m);
     });
     cleanup = async () => {
@@ -179,8 +177,7 @@ describe('WhatsAppTransport.receive — signature verification', () => {
 
   it('drops a non-text message type', async () => {
     const received: IncomingMessage[] = [];
-    const transport = new WhatsAppTransport(opts);
-    const { port, controller, done } = await startTransport(transport, async (m) => {
+    const { transport, port, controller, done } = await startTransport(opts, async (m) => {
       received.push(m);
     });
     cleanup = async () => {
@@ -215,8 +212,7 @@ describe('WhatsAppTransport.receive — signature verification', () => {
 
 describe('WhatsAppTransport.receive — lifecycle', () => {
   it('closes the listener when the signal aborts', async () => {
-    const transport = new WhatsAppTransport(opts);
-    const { port, controller, done } = await startTransport(transport);
+    const { transport, port, controller, done } = await startTransport(opts);
     controller.abort();
     await done;
 

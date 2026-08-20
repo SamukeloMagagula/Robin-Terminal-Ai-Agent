@@ -57,6 +57,17 @@ export interface WhatsAppOptions {
   bindHost?: string;
   /** Injectable for tests. Defaults to the global fetch. */
   fetchImpl?: typeof fetch;
+  /**
+   * Fires once the webhook listener is bound and its real port is known.
+   *
+   * Not part of `ChannelTransport` — this exists only so a test using
+   * `webhookPort: 0` (OS-assigned) can learn the real port before making
+   * requests against it; production code names its own fixed port and has no
+   * need to be told it back. Set at construction, not exposed as a public
+   * method, so it reads as the test seam it is rather than a general-purpose
+   * event API on the class.
+   */
+  onListening?: (port: number) => void;
 }
 
 export class WhatsAppTransport implements ChannelTransport {
@@ -70,7 +81,7 @@ export class WhatsAppTransport implements ChannelTransport {
   private readonly webhookPort: number;
   private readonly bindHost: string;
   private readonly fetchImpl: typeof fetch;
-  private listeningListeners: ((port: number) => void)[] = [];
+  private readonly onListening?: (port: number) => void;
 
   constructor(options: WhatsAppOptions) {
     this.token = options.token;
@@ -80,15 +91,7 @@ export class WhatsAppTransport implements ChannelTransport {
     this.webhookPort = options.webhookPort;
     this.bindHost = options.bindHost ?? '0.0.0.0';
     this.fetchImpl = options.fetchImpl ?? fetch;
-  }
-
-  /**
-   * Fires once the webhook listener is bound and its real port is known —
-   * needed because tests run with webhookPort 0 (OS-assigned) and production
-   * with a fixed port neither of which is knowable before listen() completes.
-   */
-  onListening(handler: (port: number) => void): void {
-    this.listeningListeners.push(handler);
+    this.onListening = options.onListening;
   }
 
   async connect(): Promise<{ identity: string }> {
@@ -150,7 +153,7 @@ export class WhatsAppTransport implements ChannelTransport {
       server.listen(this.webhookPort, this.bindHost, () => {
         const address = server.address();
         const port = typeof address === 'object' && address ? address.port : this.webhookPort;
-        for (const listener of this.listeningListeners) listener(port);
+        this.onListening?.(port);
       });
 
       signal.addEventListener('abort', () => {
