@@ -3,6 +3,7 @@ import { expand } from '@inquirer/prompts';
 import { parseCommand, type ParsedCommand } from './parse-command.js';
 import { type ConfirmRequest } from '../tools/execute.js';
 import { printBanner, printConnectionLine } from '../ui/banner.js';
+import { runBootStep } from '../ui/boot.js';
 import { gatherTelemetry } from '../ui/hud/telemetry.js';
 import { TOOL_DEFINITIONS } from '../tools/definitions.js';
 import { MEMORY_TOOL_DEFINITIONS } from '../memory/tools.js';
@@ -161,41 +162,48 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   // Before the banner, deliberately: the trust prompt asks the user to approve
   // text that becomes the system prompt, and burying it under the banner is
   // how people learn to approve without reading.
-  const { text: personality } = await loadPersonality(personalityTrust);
+  const { text: personality } = await runBootStep('Checking personality', () =>
+    loadPersonality(personalityTrust)
+  );
 
-  const info = await ensureGateway();
-  const client = await GatewayClient.connect({
-    port: info.port,
-    token: info.token,
-    kind: 'terminal',
-    canApprove: true,
-    cwd: process.cwd(),
+  const client = await runBootStep('Starting gateway', async () => {
+    const info = await ensureGateway();
+    return GatewayClient.connect({
+      port: info.port,
+      token: info.token,
+      kind: 'terminal',
+      canApprove: true,
+      cwd: process.cwd(),
+    });
   });
 
-  const resumable = resumableSession(client.sessions, process.cwd());
-  const here = sessionToOpen(client.sessions, process.cwd(), deps.continueSession ?? false);
-  let snapshot =
-    here ??
-    (await client.request<SessionSnapshot>('session.create', {
-      providerId: deps.provider.id,
-      model: deps.model,
-      cwd: process.cwd(),
-    }));
-  if (personality) {
-    snapshot = await client.request<SessionSnapshot>('session.update', {
-      id: snapshot.id,
-      patch: { personality },
-    });
-  }
-  // A session found by directory already matches, but one restored from disk
-  // may have been created elsewhere — and the terminal knows where it is now.
-  if (snapshot.cwd !== process.cwd()) {
-    snapshot = await client.request<SessionSnapshot>('session.update', {
-      id: snapshot.id,
-      patch: { cwd: process.cwd() },
-    });
-  }
-  const attached = await client.request<AttachResult>('session.attach', { id: snapshot.id });
+  const { snapshot, attached, resumable } = await runBootStep('Opening session', async () => {
+    const resumable = resumableSession(client.sessions, process.cwd());
+    const here = sessionToOpen(client.sessions, process.cwd(), deps.continueSession ?? false);
+    let snapshot =
+      here ??
+      (await client.request<SessionSnapshot>('session.create', {
+        providerId: deps.provider.id,
+        model: deps.model,
+        cwd: process.cwd(),
+      }));
+    if (personality) {
+      snapshot = await client.request<SessionSnapshot>('session.update', {
+        id: snapshot.id,
+        patch: { personality },
+      });
+    }
+    // A session found by directory already matches, but one restored from disk
+    // may have been created elsewhere — and the terminal knows where it is now.
+    if (snapshot.cwd !== process.cwd()) {
+      snapshot = await client.request<SessionSnapshot>('session.update', {
+        id: snapshot.id,
+        patch: { cwd: process.cwd() },
+      });
+    }
+    const attached = await client.request<AttachResult>('session.attach', { id: snapshot.id });
+    return { snapshot, attached, resumable };
+  });
 
   const ctx: ReplContext = {
     client,
@@ -273,29 +281,32 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     process.exit(1);
   });
 
-  // Fetched before the banner so the figure is on screen from the first
-  // frame; null (no key, no network) simply omits the line.
-  const startupUsage = await usageCache.get();
-  // Local reads only — gatherTelemetry never touches the network, so the
-  // banner does not wait on a socket to draw.
-  // The gateway decides whether the media tools exist, but it decides it from
-  // the same auth.json this process can read, so asking locally agrees with it
-  // and costs no round trip.
-  const mediaTools = (await mediaIfAvailable()) ? MEDIA_TOOL_DEFINITIONS.length : 0;
+  const { startupUsage, hudStats } = await runBootStep('Loading memory, skills & tools', async () => {
+    // Fetched before the banner so the figure is on screen from the first
+    // frame; null (no key, no network) simply omits the line.
+    const startupUsage = await usageCache.get();
+    // Local reads only — gatherTelemetry never touches the network, so the
+    // banner does not wait on a socket to draw.
+    // The gateway decides whether the media tools exist, but it decides it from
+    // the same auth.json this process can read, so asking locally agrees with it
+    // and costs no round trip.
+    const mediaTools = (await mediaIfAvailable()) ? MEDIA_TOOL_DEFINITIONS.length : 0;
 
-  const hudStats = await gatherTelemetry({
-    memory: memoryStore,
-    skills: skillStore,
-    // The MCP counts come from the gateway, which is what actually runs those
-    // servers. A number computed here would be this process's guess about
-    // another process's state.
-    toolCount:
-      TOOL_DEFINITIONS.length +
-      MEMORY_TOOL_DEFINITIONS.length +
-      SKILL_TOOL_DEFINITIONS.length +
-      mediaTools +
-      client.mcp.tools,
-    mcpServerCount: client.mcp.servers,
+    const hudStats = await gatherTelemetry({
+      memory: memoryStore,
+      skills: skillStore,
+      // The MCP counts come from the gateway, which is what actually runs those
+      // servers. A number computed here would be this process's guess about
+      // another process's state.
+      toolCount:
+        TOOL_DEFINITIONS.length +
+        MEMORY_TOOL_DEFINITIONS.length +
+        SKILL_TOOL_DEFINITIONS.length +
+        mediaTools +
+        client.mcp.tools,
+      mcpServerCount: client.mcp.servers,
+    });
+    return { startupUsage, hudStats };
   });
 
   printBanner({
