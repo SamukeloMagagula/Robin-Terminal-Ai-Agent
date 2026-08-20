@@ -1,12 +1,13 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import { spawn } from 'node:child_process';
 import type { ToolCall, ToolDefinition, Provider, Message } from '../providers/types.js';
 import { checkPath, defaultSensitiveDirs, commandTouchesSensitivePath } from './sensitive-paths.js';
 import type { MediaClient } from '../media/client.js';
 import { generateImageTool, speakTool, transcribeTool } from '../media/tools.js';
 import { runAgentTurn } from '../agent-loop.js';
 import { TOOL_DEFINITIONS } from './definitions.js';
+import { MAX_OUTPUT_LENGTH, type ExecutionBackend } from '../backends/types.js';
+import { LocalBackend } from '../backends/local.js';
 
 const MEDIA_UNAVAILABLE =
   'Error: the media tools need a Gemini API key. Run `robin login gemini` first.';
@@ -23,7 +24,6 @@ export {
   isSensitiveBasename,
 } from './sensitive-paths.js';
 
-const MAX_OUTPUT_LENGTH = 4000;
 /**
  * Appended to every decline. "Declined by the user" on its own reads to a model
  * as a failed attempt, and the reflex after a failed attempt is another attempt
@@ -123,6 +123,14 @@ export interface ExecuteOptions {
     has(name: string): boolean;
     call(name: string, args: Record<string, unknown>): Promise<string>;
   };
+  /**
+   * Where run_command actually executes. Defaults to LocalBackend — direct
+   * execution on this machine, exactly as before backends existed. Approval
+   * gating, the read-only allowlist and the dangerous-command warning all
+   * run before this is ever consulted; the backend only decides *where* an
+   * already-approved command runs.
+   */
+  backend?: ExecutionBackend;
   /** Enables the `remember` and `recall_memory` tools when present. */
   memory?: MemoryStore;
   /** Enables the `use_skill` tool when present. */
@@ -254,7 +262,8 @@ export async function executeTool(
           options.commandTimeoutMs ?? COMMAND_TIMEOUT_MS,
           options.onAutoApproved,
           options.onOutput,
-          options.cwd
+          options.cwd,
+          options.backend
         );
       case 'delegate_task':
         if (!options.delegate) return 'Error: delegation is not available in this session.';
@@ -591,7 +600,8 @@ async function runCommandTool(
   timeoutMs: number,
   onAutoApproved?: (command: string) => void,
   onOutput?: (chunk: string) => void,
-  cwd: string = process.cwd()
+  cwd: string = process.cwd(),
+  backend: ExecutionBackend = new LocalBackend()
 ): Promise<string> {
   // A command that only reads is still worth stopping for if what it reads is
   // a credential: `cat ~/.ssh/id_rsa` is `cat`, which is on the allowlist, but
@@ -623,52 +633,17 @@ async function runCommandTool(
       return `Command "${command}" was declined by the user.${DECLINE_GUIDANCE}`;
     }
   }
-  // spawn rather than exec, so output can be shown as it arrives. A long build
-  // or test run used to sit behind a dead terminal until it finished. What the
-  // *model* receives is unchanged: same combined stdout+stderr, same
-  // truncation, same Exit code prefix, same untrusted wrapper.
-  return await new Promise<string>((resolve) => {
-    const child = spawn(command, { shell: true, cwd });
-    let output = '';
-    let settled = false;
+  // Where the command actually runs is the backend's job. What the *model*
+  // receives is unchanged regardless of backend: same combined stdout+stderr,
+  // same truncation, same Exit code prefix, same untrusted wrapper.
+  const result = await backend.run(command, { cwd, timeoutMs, onOutput });
 
-    const finish = (result: string): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(result);
-    };
-
-    // Without a timeout a command that waits on stdin (which it never gets —
-    // the REPL owns it) hangs the whole session with no way back to the prompt.
-    //
-    // The timeout resolves immediately rather than waiting for 'close'. With
-    // shell:true the child is the shell, and killing it does not necessarily
-    // reap a grandchild still holding stdio open — waiting for 'close' meant a
-    // 500ms timeout took 15 seconds to report. The kill is still attempted;
-    // the promise simply does not depend on it succeeding.
-    const timer = setTimeout(() => {
-      child.kill();
-      finish(`Error: command timed out after ${timeoutMs / 1000}s and was terminated.`);
-    }, timeoutMs);
-
-    const collect = (chunk: Buffer): void => {
-      const text = chunk.toString();
-      // Cap what is retained for the model, but keep streaming to the display —
-      // someone watching a long build still wants to see it finish.
-      if (output.length < MAX_OUTPUT_LENGTH) output += text;
-      onOutput?.(text);
-    };
-    child.stdout.on('data', collect);
-    child.stderr.on('data', collect);
-
-    child.on('error', (err) => {
-      finish(`Error: ${err.message}`);
-    });
-
-    child.on('close', (code) => {
-      const truncated = output.slice(0, MAX_OUTPUT_LENGTH);
-      finish(`Exit code: ${code ?? 1}\n${wrapUntrusted(`output of "${command}"`, truncated)}`);
-    });
-  });
+  if (result.spawnError !== undefined) {
+    return `Error: ${result.spawnError}`;
+  }
+  if (result.timedOut) {
+    return `Error: command timed out after ${timeoutMs / 1000}s and was terminated.`;
+  }
+  const truncated = result.output.slice(0, MAX_OUTPUT_LENGTH);
+  return `Exit code: ${result.exitCode ?? 1}\n${wrapUntrusted(`output of "${command}"`, truncated)}`;
 }

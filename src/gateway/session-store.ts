@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import type { Message } from '../providers/types.js';
 import { robinHome } from '../profile.js';
+import type { BackendConfig } from '../backends/types.js';
 
 /**
  * How long an untouched session is kept.
@@ -28,6 +29,8 @@ export interface PersistedSession {
   autoApprove: boolean;
   /** The manifest governing it, so a restart does not silently ungovern it. */
   manifestId?: string;
+  /** Where run_command executes for this session, so a restart does not silently drop it. */
+  backend?: BackendConfig;
   turnCount: number;
   systemPrompt?: string;
   history: Message[];

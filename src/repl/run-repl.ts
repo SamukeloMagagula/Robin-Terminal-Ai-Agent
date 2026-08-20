@@ -187,6 +187,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
         providerId: deps.provider.id,
         model: deps.model,
         cwd: process.cwd(),
+        backend: deps.backend,
       }));
     if (personality) {
       snapshot = await client.request<SessionSnapshot>('session.update', {

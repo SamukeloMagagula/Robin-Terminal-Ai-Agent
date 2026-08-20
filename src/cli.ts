@@ -45,6 +45,7 @@ import { AuditLog } from './autonomy/audit.js';
 import { runMemoryNudge, DEFAULT_NUDGE_CRON, type NudgeOptions } from './commands/memory-command.js';
 import { runAcp } from './commands/acp-command.js';
 import { runProfileList } from './commands/profile-command.js';
+import { parseBackendFlag } from './commands/backend-flag.js';
 import { SettingsStore } from './settings/store.js';
 import { storedChatDefault } from './settings/defaults.js';
 import { hydrateEnv } from './settings/hydrate.js';
@@ -156,11 +157,16 @@ async function preflightOrExit(): Promise<void> {
   process.exit(1);
 }
 
-async function startChat(providerId?: string, continueSession = false): Promise<void> {
+async function startChat(
+  providerId?: string,
+  continueSession = false,
+  backendSpec?: string
+): Promise<void> {
   requireInteractiveTerminal();
   await preflightOrExit();
 
-  const common = { pickModel, pickProviderAndModel, rollRandom, continueSession };
+  const backend = backendSpec ? parseBackendFlag(backendSpec) : undefined;
+  const common = { pickModel, pickProviderAndModel, rollRandom, continueSession, backend };
 
   if (providerId === 'random') {
     const { provider, model } = await rollRandom();
@@ -512,13 +518,23 @@ program
   .command('chat [provider]')
   .description('Start a chat session — pass a provider id, or "random" to roll one')
   .option('-c, --continue', "Pick up this directory's last conversation instead of starting a new one")
-  .action(async (providerId: string | undefined, options: { continue?: boolean }) => {
-    await startChat(providerId, options.continue ?? false);
-  });
+  .option(
+    '--backend <spec>',
+    'Where run_command executes for this session, e.g. --backend docker:node:20. Defaults to direct local execution.'
+  )
+  .action(
+    async (providerId: string | undefined, options: { continue?: boolean; backend?: string }) => {
+      await startChat(providerId, options.continue ?? false, options.backend);
+    }
+  );
 
 program.option('-c, --continue', "Pick up this directory's last conversation instead of starting a new one");
-program.action(async (options: { continue?: boolean }) => {
-  await startChat(undefined, options.continue ?? false);
+program.option(
+  '--backend <spec>',
+  'Where run_command executes for this session, e.g. --backend docker:node:20. Defaults to direct local execution.'
+);
+program.action(async (options: { continue?: boolean; backend?: string }) => {
+  await startChat(undefined, options.continue ?? false, options.backend);
 });
 
 installGlobalErrorHandlers();

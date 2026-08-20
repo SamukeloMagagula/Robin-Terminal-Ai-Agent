@@ -9,6 +9,7 @@ import type { PersonalityTrustStore } from '../personality-trust.js';
 import type { MemoryStore } from '../memory/store.js';
 import type { RecallSearch } from '../recall/search.js';
 import type { WorkflowStore } from '../workflow/store.js';
+import type { BackendConfig } from '../backends/types.js';
 
 /**
  * The pickers, injected by the CLI so the REPL never imports inquirer's
@@ -26,6 +27,8 @@ export interface ReplDeps {
    * Off by default: `robin chat` means start a chat.
    */
   continueSession?: boolean;
+  /** Where run_command executes for a newly-created session. Absent means direct local execution. */
+  backend?: BackendConfig;
 }
 
 /**

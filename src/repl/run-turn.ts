@@ -14,6 +14,7 @@ import {
 } from '../memory/tools.js';
 import { runAgentTurn } from '../agent-loop.js';
 import { executeTool, DELEGATE_TOOL_DEFINITIONS } from '../tools/execute.js';
+import type { ExecutionBackend } from '../backends/types.js';
 import { TOOL_DEFINITIONS } from '../tools/definitions.js';
 import { buildFallbackCandidates, type FallbackCandidate } from './fallback.js';
 import { isModelUnsupported, isProviderQuotaExhausted } from '../providers/chat-error.js';
@@ -52,6 +53,8 @@ export interface TurnOptions {
   media?: MediaClient;
   /** Enables `delegate_task` — concurrent, isolated subagents. */
   delegate?: { provider: Provider; model: string };
+  /** Where run_command executes. Defaults to direct local execution. */
+  backend?: ExecutionBackend;
   /** MCP tools for this turn, offered to the model alongside the built-ins. */
   mcp?: {
     toolDefinitions(): ToolDefinition[];
@@ -191,6 +194,7 @@ export async function runTurn(
               skills: options.skills,
               media: options.media,
               delegate: options.delegate,
+              backend: options.backend,
             }),
           confirm: options.confirm,
           signal: options.signal,

@@ -912,9 +912,19 @@ The model can call `delegate_task` with up to 4 subtasks, each of which runs as 
 
 Each subagent gets the same four base tools (`read_file`/`write_file`/`edit_file`/`run_command`) and nothing else — no memory, skills, media, MCP, or `delegate_task` itself, so nothing it does can recursively spawn more subagents. Its tool calls are gated by the exact same approval prompts as anything else in the conversation, since it's still your call being asked for — just possibly more than one at a time, if two subagents both hit something that needs a yes/no in the same moment. Those prompts queue and show one at a time rather than overlapping.
 
+### Running commands in Docker instead of directly
+
+`robin chat --backend docker:<image>` runs `run_command` inside a Docker container instead of directly on your machine — `robin chat --backend docker:node:20`, for instance. No default image: a guessed one would make a command like `npm test` fail for a reason that isn't obvious, so `--backend docker` alone is a clear error naming the fix.
+
+The container starts on the first command of the session and stays up for the rest of it — not a fresh container per command, which would pay startup cost every time and lose whatever the previous command left behind (installed packages, temp files). Your working directory is bind-mounted in at `/workspace`, so `read_file`/`write_file`/`edit_file` keep working exactly as they do today, reading and writing the real files on your machine — only `run_command`'s execution moves into the container, and the mount is what keeps the two views of the same files in sync. The container stops when the session closes.
+
+Approval gating, the read-only allowlist, and the dangerous-command warning are all unchanged — the backend only decides *where* an already-approved command runs, not whether it needs approval.
+
+This is the first of what's meant to be several backends. SSH, and eventually sandboxed cloud runners, are on the list; each is genuinely its own project, not a flag away.
+
 ## Security
 
-**Robin has no sandbox.** Every approved command runs as a direct child of the Robin process with your full user permissions — no container, no separate user, no syscall filter, no network policy. The mechanisms below reduce risk and prevent accidents; none of them is containment, and each operates on a string the model produced. The real boundary is you reading the prompt before you answer it.
+**Robin has no sandbox by default.** Every approved command runs as a direct child of the Robin process with your full user permissions — no container, no separate user, no syscall filter, no network policy. `--backend docker` (see above) moves `run_command`'s execution into a container, but everything else — `read_file`/`write_file`/`edit_file`, the approval decision itself — still happens on the host exactly as described below. The mechanisms below reduce risk and prevent accidents; none of them is containment, and each operates on a string the model produced. The real boundary is you reading the prompt before you answer it.
 
 Full trust model, including what each control does *not* do: **[SECURITY.md](SECURITY.md)**.
 

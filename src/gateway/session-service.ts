@@ -20,6 +20,8 @@ import type { AutonomyStore } from '../autonomy/grant-store.js';
 import type { AuditLog } from '../autonomy/audit.js';
 import type { MediaClient } from '../media/client.js';
 import { ChatLog } from '../chat-log.js';
+import type { ExecutionBackend, BackendConfig } from '../backends/types.js';
+import { DockerBackend } from '../backends/docker.js';
 
 export interface SessionServiceDeps {
   providers: Provider[];
@@ -52,6 +54,12 @@ export interface SessionServiceDeps {
     has(name: string): boolean;
     call(name: string, args: Record<string, unknown>): Promise<string>;
   };
+  /** Injectable for tests. Defaults to constructing a real DockerBackend. */
+  createExecutionBackend?: (config: BackendConfig, cwd: string) => ExecutionBackend;
+}
+
+function defaultCreateExecutionBackend(config: BackendConfig, cwd: string): ExecutionBackend {
+  return new DockerBackend({ image: config.image, hostCwd: cwd });
 }
 
 /** A session plus what the daemon needs that a REPL session never carried. */
@@ -64,6 +72,8 @@ interface SessionRecord {
   autoApprove: boolean;
   /** The manifest governing it, if any. Held as an id — see Governance. */
   manifestId?: string;
+  /** Where run_command executes for this session. Absent means direct local execution. */
+  backendConfig?: BackendConfig;
   /** Last time anything about this conversation changed. */
   updatedAt: string;
   /** Turns waiting or running. A new prompt queues behind the tail. */
@@ -104,6 +114,8 @@ export class SessionService {
    * the last write for an id is usually its removal.
    */
   private readonly writeChains = new Map<number, Promise<void>>();
+  /** Live execution backends, one per session that has ever used one. Created lazily. */
+  private readonly backends = new Map<number, ExecutionBackend>();
   private nextId = 1;
 
   constructor(private readonly deps: SessionServiceDeps) {}
@@ -127,6 +139,8 @@ export class SessionService {
      * fails closed. Callers validate to give a good error, not for safety.
      */
     manifestId?: string;
+    /** Where run_command executes for this session. Absent means direct local execution. */
+    backend?: BackendConfig;
   }): SessionSnapshot {
     const provider = this.provider(params.providerId);
     // Ids are never reused: a client still holding a closed session's id would
@@ -142,12 +156,27 @@ export class SessionService {
       tokens: { input: 0, output: 0 },
       autoApprove: params.autoApprove ?? false,
       manifestId: params.manifestId,
+      backendConfig: params.backend,
       updatedAt: new Date().toISOString(),
       queue: Promise.resolve(),
       pending: 0,
     });
     this.persist(id);
     return this.snapshot(id);
+  }
+
+  /** Lazily creates and caches this session's execution backend, if it has one configured. */
+  private getBackend(id: number, record: SessionRecord): ExecutionBackend | undefined {
+    if (!record.backendConfig) return undefined;
+    let backend = this.backends.get(id);
+    if (!backend) {
+      backend = (this.deps.createExecutionBackend ?? defaultCreateExecutionBackend)(
+        record.backendConfig,
+        record.cwd
+      );
+      this.backends.set(id, backend);
+    }
+    return backend;
   }
 
   attach(id: number): AttachResult {
@@ -217,6 +246,12 @@ export class SessionService {
   close(id: number): void {
     this.record(id);
     this.records.delete(id);
+    const backend = this.backends.get(id);
+    this.backends.delete(id);
+    // Not awaited: close() is synchronous everywhere it is called, and a
+    // container that takes a moment to stop must not hold that up. A failed
+    // dispose (daemon already gone) is not this session's problem to surface.
+    if (backend) void backend.dispose().catch(() => {});
     const store = this.deps.stores.sessions;
     // Behind the same chain as this session's saves, so the delete cannot be
     // overtaken by a write that was already in flight.
@@ -327,6 +362,7 @@ export class SessionService {
         skills: this.deps.stores.skills,
         media: this.deps.media,
         delegate: { provider: session.provider, model: session.model },
+        backend: this.getBackend(id, record),
         mcp: this.deps.mcp,
         onText: (delta) => this.deps.emit(id, { kind: 'text', turnId, delta }),
         onThinking: (delta) => this.deps.emit(id, { kind: 'thinking', turnId, delta }),
@@ -434,6 +470,7 @@ export class SessionService {
         tokens: saved.tokens ?? { input: 0, output: 0 },
         autoApprove: saved.autoApprove,
         manifestId: saved.manifestId,
+        backendConfig: saved.backend,
         updatedAt: saved.updatedAt ?? new Date().toISOString(),
         queue: Promise.resolve(),
         // Whatever was running when the daemon stopped is not running now.
@@ -488,6 +525,7 @@ export class SessionService {
       toolsEnabled: session.toolsEnabled,
       autoApprove: record.autoApprove,
       manifestId: record.manifestId,
+      backend: record.backendConfig,
       turnCount: session.turnCount,
       systemPrompt: session.systemPrompt,
       history: session.history,

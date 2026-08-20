@@ -7,7 +7,8 @@ import { SessionStore } from '../../src/gateway/session-store';
 import { ApprovalRegistry } from '../../src/gateway/approvals';
 import { UnsupportedModelStore } from '../../src/providers/unsupported-models';
 import { ContextLimitStore } from '../../src/providers/context-limits';
-import type { Provider } from '../../src/providers/types';
+import type { Provider, ChatEvent } from '../../src/providers/types';
+import type { ExecutionBackend, RunOptions, RunResult } from '../../src/backends/types';
 
 function throwaway(name: string): string {
   return path.join(os.tmpdir(), `robin-${name}-${Date.now()}-${Math.random()}.json`);
@@ -28,7 +29,11 @@ function fakeProvider(id = 'copilot', name = 'GitHub Copilot'): Provider {
 }
 
 /** A service sharing one sessions directory, as a restarted daemon would. */
-async function service(dir: string, providers = [fakeProvider()]) {
+async function service(
+  dir: string,
+  providers = [fakeProvider()],
+  createExecutionBackend?: (config: { kind: 'docker'; image: string }, cwd: string) => ExecutionBackend
+) {
   const sessions = new SessionStore(dir);
   const svc = new SessionService({
     providers,
@@ -39,9 +44,32 @@ async function service(dir: string, providers = [fakeProvider()]) {
       contextLimits: new ContextLimitStore(throwaway('limits')),
       sessions,
     },
+    createExecutionBackend,
   });
   await svc.restore();
   return svc;
+}
+
+function providerRunningACommand(): Provider {
+  let round = 0;
+  return {
+    id: 'copilot',
+    name: 'GitHub Copilot',
+    isAuthenticated: vi.fn().mockResolvedValue(true),
+    login: vi.fn(),
+    logout: vi.fn(),
+    listModels: vi.fn().mockResolvedValue(['gpt-4o']),
+    chat: vi.fn().mockImplementation(async function* (): AsyncIterable<ChatEvent> {
+      if (round++ === 0) {
+        yield {
+          type: 'tool_call',
+          toolCall: { id: 't1', name: 'run_command', arguments: JSON.stringify({ command: 'node --version' }) },
+        };
+      } else {
+        yield { type: 'text', text: 'done' };
+      }
+    }),
+  } as unknown as Provider;
 }
 
 async function sessionsDir(): Promise<string> {
@@ -207,5 +235,45 @@ describe('SessionService persistence', () => {
 
   it('starts clean when there is nothing to restore', async () => {
     expect((await service(await sessionsDir())).list()).toEqual([]);
+  });
+
+  it("restores a session's execution backend config, so a resumed session still routes run_command through it", async () => {
+    const dir = await sessionsDir();
+    const firstRun = vi.fn(async (_c: string, _o: RunOptions): Promise<RunResult> => ({
+      exitCode: 0,
+      output: 'ok',
+      timedOut: false,
+    }));
+    const first = await service(dir, [providerRunningACommand()], () => ({
+      run: firstRun,
+      dispose: vi.fn(async () => {}),
+    }));
+    const created = first.create({
+      providerId: 'copilot',
+      model: 'gpt-4o',
+      cwd: 'C:/work',
+      backend: { kind: 'docker', image: 'node:20' },
+    });
+    // persist() intentionally does not save a session with no history yet —
+    // an empty conversation is exactly what robin chat opens every time it
+    // starts, and keeping it would fill /session with blank entries — so a
+    // real turn has to happen before this session has anything to restore.
+    first.sendPrompt(created.id, 'first turn', { surface: 'terminal' });
+    await first.idle();
+    await first.flush();
+
+    const run = vi.fn(async (_c: string, _o: RunOptions): Promise<RunResult> => ({
+      exitCode: 0,
+      output: 'v20.0.0',
+      timedOut: false,
+    }));
+    const createExecutionBackend = vi.fn(() => ({ run, dispose: vi.fn(async () => {}) }));
+    const second = await service(dir, [providerRunningACommand()], createExecutionBackend);
+
+    second.sendPrompt(created.id, 'run node --version', { surface: 'terminal' });
+    await second.idle();
+
+    expect(createExecutionBackend).toHaveBeenCalledWith({ kind: 'docker', image: 'node:20' }, 'C:/work');
+    expect(run).toHaveBeenCalledWith('node --version', expect.anything());
   });
 });
