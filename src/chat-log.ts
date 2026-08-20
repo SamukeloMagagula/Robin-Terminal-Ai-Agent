@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import type { Message } from './providers/types.js';
+import { robinHome } from './profile.js';
 
 /**
  * Transcripts contain everything discussed plus the contents of any file the
@@ -9,7 +9,7 @@ import type { Message } from './providers/types.js';
  * ~/Downloads, which is world-readable, backed up and scanned by other tools.
  */
 export function defaultChatLogDir(): string {
-  return path.join(os.homedir(), '.robin', 'chats');
+  return path.join(robinHome(), 'chats');
 }
 
 function timestampForFilename(date: Date): string {

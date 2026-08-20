@@ -20,6 +20,7 @@ Built by Samukelo "Batman" Magagula.
 | [Install](#install) · [Requirements](#requirements) | getting it running |
 | [First run](#first-run) · [Settings](#settings) | `robin setup`, and `robin config` |
 | [Setting up a provider](#setting-up-a-provider) | the six it talks to |
+| [Profiles](#profiles) | isolated, named copies of everything Robin owns |
 | [The gateway](#the-gateway) | where conversations live |
 | [The control UI](#the-control-ui) | driving it from a browser |
 | [Driving Robin from other tools](#driving-robin-from-other-tools) | the OpenAI-compatible API |
@@ -298,6 +299,22 @@ Several limits keep this from turning into a long wait:
 - **"Too long" is fixed, not fallen back from.** A prompt refused for exceeding the context window says nothing about the model — it will take the same conversation once it is shorter, and the next model down the chain has a different window anyway. Robin reads the limit out of the refusal, records it in `~/.robin/context-limits.json`, and immediately retries the same model with the oldest messages dropped. Every later turn on that model is trimmed to fit before it is sent, with a note saying how much was dropped. The system prompt and the message you just typed are always kept, and a tool result is never separated from the call it answers. Your session history is untouched — this is about what gets sent, not about forgetting the conversation.
 
 Errors show the provider's own explanation, not just a status code — "400 (request failed)" becomes "400 (request failed) — The requested model is not supported.", which is the difference between a mystery and something you can act on.
+
+## Profiles
+
+Everything Robin owns — credentials, memory, skills, sessions, settings, the gateway's own daemon — lives under `~/.robin` by default. Setting `ROBIN_PROFILE` switches all of it to an entirely separate, isolated tree at once:
+
+```bash
+ROBIN_PROFILE=work robin chat
+```
+
+That reads and writes `~/.robin-profiles/work/` instead of `~/.robin` — different credentials, different memory, a different gateway daemon. Nothing is shared between profiles, and nothing about the unnamed default profile changes: leave `ROBIN_PROFILE` unset and everything works exactly as it always has, at `~/.robin`.
+
+The gateway daemon becomes profile-aware for free: it's spawned as a child process that inherits the environment it was started with, so a daemon spawned under `ROBIN_PROFILE=work` reads and writes its own `gateway.json` under that profile's directory — a genuinely separate daemon process from your default one, or from any other profile's.
+
+**One thing profiles don't do on their own: give each daemon a different port.** Every daemon defaults to the same port (`18790`, or whatever `ROBIN_GATEWAY_PORT` names) regardless of profile, since port choice was never tied to *which* daemon, only to *where it listens*. Switching profiles one at a time — finish with `work`, `robin gateway stop`, switch to `personal` — works with no extra setup. Running two profiles' daemons **at the same time** needs a distinct `ROBIN_GATEWAY_PORT` for each, set alongside `ROBIN_PROFILE`, or the second daemon fails to bind and never starts.
+
+`robin profile list` shows every profile that has actually been used (has a directory) plus the one named by your current `ROBIN_PROFILE`, marking which is active. A profile is created the first time something is read or written under it — there's no `robin profile create`, the same way `~/.robin` itself has never needed an init command.
 
 ## The gateway
 

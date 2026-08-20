@@ -1,10 +1,10 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import { fileStamp } from './unsupported-models.js';
+import { robinHome } from '../profile.js';
 
 export function defaultContextLimitsPath(): string {
-  return path.join(os.homedir(), '.robin', 'context-limits.json');
+  return path.join(robinHome(), 'context-limits.json');
 }
 
 type Stored = Record<string, Record<string, number>>;

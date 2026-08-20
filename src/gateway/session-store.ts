@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import type { Message } from '../providers/types.js';
+import { robinHome } from '../profile.js';
 
 /**
  * How long an untouched session is kept.
@@ -37,7 +37,7 @@ export interface PersistedSession {
 }
 
 export function defaultSessionsDir(): string {
-  return path.join(os.homedir(), '.robin', 'sessions');
+  return path.join(robinHome(), 'sessions');
 }
 
 const ROLES = new Set(['system', 'user', 'assistant', 'tool']);

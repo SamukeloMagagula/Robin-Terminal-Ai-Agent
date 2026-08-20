@@ -9,9 +9,9 @@
 
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import { parseAllowlist } from './access.js';
 import { UserFacingError } from '../startup/bootstrap.js';
+import { robinHome } from '../profile.js';
 
 export interface ChannelConfig {
   /** Bot credential. Read from the environment in preference to the file. */
@@ -48,7 +48,7 @@ export interface ChannelConfig {
 }
 
 export function defaultChannelConfigPath(): string {
-  return path.join(os.homedir(), '.robin', 'channels.json');
+  return path.join(robinHome(), 'channels.json');
 }
 
 /** e.g. TELEGRAM_BOT_TOKEN — the conventional name, and what most guides use. */

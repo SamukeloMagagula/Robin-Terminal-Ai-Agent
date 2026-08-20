@@ -44,6 +44,7 @@ import { ensureGateway } from './gateway/ensure.js';
 import { AuditLog } from './autonomy/audit.js';
 import { runMemoryNudge, DEFAULT_NUDGE_CRON, type NudgeOptions } from './commands/memory-command.js';
 import { runAcp } from './commands/acp-command.js';
+import { runProfileList } from './commands/profile-command.js';
 import { SettingsStore } from './settings/store.js';
 import { storedChatDefault } from './settings/defaults.js';
 import { hydrateEnv } from './settings/hydrate.js';
@@ -482,6 +483,20 @@ memory
       autonomy: new AutonomyStore(),
       ensure: ensureGateway,
       now: new Date(),
+      out: console.log,
+    });
+  });
+
+const profile = program
+  .command('profile')
+  .description('Named, isolated sets of Robin\'s own files — credentials, memory, sessions, everything under ~/.robin');
+
+profile
+  .command('list', { isDefault: true })
+  .description('What ROBIN_PROFILE can be set to, and which one is active')
+  .action(async () => {
+    await runProfileList({
+      currentProfile: process.env.ROBIN_PROFILE?.trim() || undefined,
       out: console.log,
     });
   });

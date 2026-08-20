@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
+import { robinHome } from '../profile.js';
 
 /**
  * Remembers models a provider has explicitly rejected as unsupported.
@@ -15,7 +15,7 @@ import * as os from 'node:os';
  * `model_not_supported` style code is ever recorded.
  */
 export function defaultUnsupportedPath(): string {
-  return path.join(os.homedir(), '.robin', 'unsupported-models.json');
+  return path.join(robinHome(), 'unsupported-models.json');
 }
 
 type Stored = Record<string, string[]>;

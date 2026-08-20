@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import type { Message } from './providers/types.js';
+import { robinHome } from './profile.js';
 
 export interface SavedConversation {
   providerId: string;
@@ -12,7 +12,7 @@ export interface SavedConversation {
 }
 
 export function defaultConversationsDir(): string {
-  return path.join(os.homedir(), '.robin', 'conversations');
+  return path.join(robinHome(), 'conversations');
 }
 
 /** Slot names to filesystem-safe basenames — rejects anything that could escape the conversations directory. */

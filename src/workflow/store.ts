@@ -1,10 +1,10 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import { ROLES, isRole, type Role, type RoleConfig, type WorkflowConfig } from './types.js';
+import { robinHome } from '../profile.js';
 
 export function defaultWorkflowsDir(): string {
-  return path.join(os.homedir(), '.robin', 'workflows');
+  return path.join(robinHome(), 'workflows');
 }
 
 export function isValidWorkflowName(name: string): boolean {

@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import { parseFrontmatter } from '../frontmatter.js';
+import { robinHome } from '../profile.js';
 
 export type MemoryType = 'user' | 'project' | 'reference';
 
@@ -26,7 +26,7 @@ export const MAX_PROFILE_BYTES = 4 * 1024;
 export const PROFILE_FILE = 'profile.md';
 
 export function defaultMemoryDir(): string {
-  return path.join(os.homedir(), '.robin', 'memory');
+  return path.join(robinHome(), 'memory');
 }
 
 /** Slot names to filesystem-safe basenames, as the other stores do. */

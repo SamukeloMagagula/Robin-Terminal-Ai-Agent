@@ -1,8 +1,8 @@
 import * as path from 'node:path';
-import * as os from 'node:os';
 import type { ReplContext } from '../repl-context.js';
 import { INPUT_HISTORY_FILENAME } from '../input-history.js';
 import { mutedColor } from '../../ui/theme.js';
+import { robinHome } from '../../profile.js';
 
 export async function handleHistory(ctx: ReplContext, arg?: string): Promise<void> {
   if (arg === 'clear') {
@@ -17,7 +17,7 @@ export async function handleHistory(ctx: ReplContext, arg?: string): Promise<voi
     return;
   }
 
-  const file = path.join(os.homedir(), '.robin', INPUT_HISTORY_FILENAME);
+  const file = path.join(robinHome(), INPUT_HISTORY_FILENAME);
   console.log(mutedColor(`${ctx.inputHistory.length} entries, stored at ${file}`));
   console.log(
     mutedColor('Clear it with /history clear, or set ROBIN_NO_HISTORY_FILE=1 to disable.')

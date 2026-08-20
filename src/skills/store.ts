@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import { parseFrontmatter, renderFrontmatter } from '../frontmatter.js';
+import { robinHome } from '../profile.js';
 
 export interface Skill {
   name: string;
@@ -27,7 +27,7 @@ export const MAX_SKILL_INDEX_BYTES = 4 * 1024;
 export const SKILL_FILE = 'SKILL.md';
 
 export function defaultSkillsDir(): string {
-  return path.join(os.homedir(), '.robin', 'skills');
+  return path.join(robinHome(), 'skills');
 }
 
 export function isValidSkillName(name: string): boolean {

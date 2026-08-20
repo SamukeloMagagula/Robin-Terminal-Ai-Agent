@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import type { RuleKind } from './manifest.js';
+import { robinHome } from '../profile.js';
 
 export interface AuditEntry {
   ts: string;
@@ -15,7 +15,7 @@ export interface AuditEntry {
 }
 
 export function defaultAuditDir(): string {
-  return path.join(os.homedir(), '.robin', 'audit');
+  return path.join(robinHome(), 'audit');
 }
 
 /**

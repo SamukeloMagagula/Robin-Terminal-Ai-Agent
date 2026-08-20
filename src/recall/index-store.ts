@@ -1,10 +1,10 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import type { RecallMatch } from '../recall.js';
+import { robinHome } from '../profile.js';
 
 export function defaultIndexPath(): string {
-  return path.join(os.homedir(), '.robin', 'index.db');
+  return path.join(robinHome(), 'index.db');
 }
 
 /** Rows returned per query, matching the grep path's cap. */

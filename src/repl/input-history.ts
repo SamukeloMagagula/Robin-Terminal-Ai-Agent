@@ -2,7 +2,7 @@
 
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
+import { robinHome } from '../profile.js';
 
 export const MAX_INPUT_HISTORY = 200;
 
@@ -53,7 +53,7 @@ export function decodeHistoryLine(line: string): string {
  * must degrade history, never break the prompt.
  */
 export class InputHistoryStore {
-  constructor(private readonly dir: string = path.join(os.homedir(), '.robin')) {}
+  constructor(private readonly dir: string = robinHome()) {}
 
   /**
    * The in-flight or completed mkdir for this store, so the directory is

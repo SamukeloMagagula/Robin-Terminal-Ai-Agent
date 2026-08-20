@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
+import { robinHome } from '../profile.js';
 
 export interface McpServerConfig {
   name: string;
@@ -11,7 +11,7 @@ export interface McpServerConfig {
 }
 
 export function defaultMcpConfigPath(): string {
-  return path.join(os.homedir(), '.robin', 'mcp.json');
+  return path.join(robinHome(), 'mcp.json');
 }
 
 /**

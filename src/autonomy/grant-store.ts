@@ -1,10 +1,10 @@
 import { promises as fs } from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import type { Manifest, Rule } from './manifest.js';
+import { robinHome } from '../profile.js';
 
 export function defaultAutonomyPath(): string {
-  return path.join(os.homedir(), '.robin', 'autonomy.json');
+  return path.join(robinHome(), 'autonomy.json');
 }
 
 type StoredManifest = Omit<Manifest, 'id'>;

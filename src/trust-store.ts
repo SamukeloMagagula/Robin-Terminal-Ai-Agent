@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import { createHash } from 'node:crypto';
 import * as path from 'node:path';
-import * as os from 'node:os';
+import { robinHome } from './profile.js';
 
 /**
  * What kind of thing is being trusted. Categories are independent: approving a
@@ -11,7 +11,7 @@ import * as os from 'node:os';
 export type TrustCategory = 'personality' | 'mcp-server';
 
 export function defaultTrustPath(): string {
-  return path.join(os.homedir(), '.robin', 'personality-trust.json');
+  return path.join(robinHome(), 'personality-trust.json');
 }
 
 export function hashContent(content: string): string {

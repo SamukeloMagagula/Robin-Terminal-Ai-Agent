@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { promises as fs } from 'node:fs';
@@ -18,14 +18,14 @@ async function tempDirs() {
 describe('discoverPersonality', () => {
   it('finds nothing when neither file exists', async () => {
     const { home, project } = await tempDirs();
-    expect(await discoverPersonality(project, home)).toEqual([]);
+    expect(await discoverPersonality(project, path.join(home, '.robin'))).toEqual([]);
   });
 
   it('finds the global file', async () => {
     const { home, project } = await tempDirs();
     await fs.writeFile(path.join(home, '.robin', 'PERSONALITY.md'), 'Be terse.');
 
-    const found = await discoverPersonality(project, home);
+    const found = await discoverPersonality(project, path.join(home, '.robin'));
 
     expect(found).toHaveLength(1);
     expect(found[0].content).toBe('Be terse.');
@@ -37,7 +37,7 @@ describe('discoverPersonality', () => {
     await fs.writeFile(path.join(home, '.robin', 'PERSONALITY.md'), 'Be terse.');
     await fs.writeFile(path.join(project, 'PERSONALITY.md'), 'Be verbose.');
 
-    const found = await discoverPersonality(project, home);
+    const found = await discoverPersonality(project, path.join(home, '.robin'));
 
     expect(found.map((p) => p.scope)).toEqual(['global', 'project']);
   });
@@ -46,7 +46,7 @@ describe('discoverPersonality', () => {
     const { home, project } = await tempDirs();
     await fs.writeFile(path.join(project, 'PERSONALITY.md'), 'x'.repeat(MAX_PERSONALITY_BYTES + 1));
 
-    expect(await discoverPersonality(project, home)).toEqual([]);
+    expect(await discoverPersonality(project, path.join(home, '.robin'))).toEqual([]);
   });
 
   it('does not look in parent directories', async () => {
@@ -55,7 +55,31 @@ describe('discoverPersonality', () => {
     const child = path.join(project, 'child');
     await fs.mkdir(child);
 
-    expect(await discoverPersonality(child, home)).toEqual([]);
+    expect(await discoverPersonality(child, path.join(home, '.robin'))).toEqual([]);
+  });
+});
+
+describe('discoverPersonality — profile awareness', () => {
+  const original = process.env.ROBIN_PROFILE;
+
+  afterEach(() => {
+    if (original === undefined) delete process.env.ROBIN_PROFILE;
+    else process.env.ROBIN_PROFILE = original;
+  });
+
+  it('defaults its global lookup to robinHome(), not the bare OS home directory', async () => {
+    const { robinHome } = await import('../src/profile');
+    process.env.ROBIN_PROFILE = `discoverpersonality-test-${Date.now()}`;
+    const dir = robinHome();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, 'PERSONALITY.md'), 'Under the profile.');
+
+    try {
+      const found = await discoverPersonality(await fs.mkdtemp(path.join(os.tmpdir(), 'robin-persona-proj-')));
+      expect(found.some((p) => p.content === 'Under the profile.')).toBe(true);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import { PROTOCOL_VERSION } from './protocol.js';
+import { robinHome } from '../profile.js';
 
 /** 18789 is OpenClaw's. A machine may reasonably run both. */
 export const DEFAULT_PORT = 18790;
@@ -20,7 +20,7 @@ export interface GatewayInfo {
 }
 
 export function defaultGatewayInfoPath(): string {
-  return path.join(os.homedir(), '.robin', 'gateway.json');
+  return path.join(robinHome(), 'gateway.json');
 }
 
 export function defaultPort(): number {

@@ -10,7 +10,6 @@
 import { promises as fs } from 'node:fs';
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import {
   defaultGatewayInfoPath,
   isProcessAlive,
@@ -18,6 +17,7 @@ import {
 } from '../gateway/discovery.js';
 import { PROTOCOL_VERSION } from '../gateway/protocol.js';
 import { buildFingerprint } from '../gateway/build-id.js';
+import { robinHome } from '../profile.js';
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
 
@@ -96,9 +96,7 @@ export function checkNativeModules(
  * profile that failed to mount, a locked-down corporate image) turns every one
  * of those into a separate confusing failure later, so it is checked once here.
  */
-export async function checkConfigDir(
-  dir: string = path.join(os.homedir(), '.robin')
-): Promise<CheckResult> {
+export async function checkConfigDir(dir: string = robinHome()): Promise<CheckResult> {
   const probe = path.join(dir, '.write-probe');
   try {
     await fs.mkdir(dir, { recursive: true, mode: 0o700 });
@@ -247,7 +245,7 @@ export async function checkGateway(
 }
 
 export function buildChecks(options: PreflightOptions): Check[] {
-  const configDir = options.configDir ?? path.join(os.homedir(), '.robin');
+  const configDir = options.configDir ?? robinHome();
   const mcpConfigPath = options.mcpConfigPath ?? path.join(configDir, 'mcp.json');
 
   return [

@@ -16,9 +16,9 @@
 
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import { UserFacingError } from '../startup/bootstrap.js';
 import { pristineEnv } from './env.js';
+import { robinHome } from '../profile.js';
 import {
   SETTINGS,
   findSetting,
@@ -30,7 +30,7 @@ import {
 } from './registry.js';
 
 export function defaultSettingsPath(): string {
-  return path.join(os.homedir(), '.robin', 'settings.json');
+  return path.join(robinHome(), 'settings.json');
 }
 
 export interface ResolvedSetting {

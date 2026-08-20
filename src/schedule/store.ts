@@ -13,9 +13,9 @@
 
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import { UserFacingError } from '../startup/bootstrap.js';
 import { parseCron } from './cron.js';
+import { robinHome } from '../profile.js';
 
 export interface JobDelivery {
   /** A channel id, e.g. "telegram". */
@@ -52,7 +52,7 @@ interface ScheduleFile {
 }
 
 export function defaultSchedulePath(): string {
-  return path.join(os.homedir(), '.robin', 'schedule.json');
+  return path.join(robinHome(), 'schedule.json');
 }
 
 /** A job name becomes a key and appears in log lines; it must not name a path. */

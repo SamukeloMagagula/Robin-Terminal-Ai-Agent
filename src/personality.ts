@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
+import { robinHome } from './profile.js';
 
 export const PERSONALITY_FILENAME = 'PERSONALITY.md';
 
@@ -37,11 +37,12 @@ async function readIfPresent(filePath: string): Promise<string | undefined> {
  */
 export async function discoverPersonality(
   cwd: string = process.cwd(),
-  homeDir: string = os.homedir()
+  /** Robin's own home directory — already profile-aware, not the bare OS home. */
+  robinHomeDir: string = robinHome()
 ): Promise<Personality[]> {
   const found: Personality[] = [];
 
-  const globalPath = path.join(homeDir, '.robin', PERSONALITY_FILENAME);
+  const globalPath = path.join(robinHomeDir, PERSONALITY_FILENAME);
   const globalContent = await readIfPresent(globalPath);
   if (globalContent !== undefined) {
     found.push({ source: globalPath, scope: 'global', content: globalContent });

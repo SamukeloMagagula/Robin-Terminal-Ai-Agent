@@ -1,11 +1,11 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
+import { robinHome } from './profile.js';
 
 export type AuthData = Record<string, Record<string, unknown>>;
 
 export function defaultAuthPath(): string {
-  return path.join(os.homedir(), '.robin', 'auth.json');
+  return path.join(robinHome(), 'auth.json');
 }
 
 export class AuthStore {
