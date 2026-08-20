@@ -649,6 +649,15 @@ The index is capped at 8 KB and the profile at 4 KB. Past that, the oldest entri
 
 Never stored: credentials, tokens or key material. The tool description forbids it.
 
+**`robin memory nudge`** schedules a weekly review of everything remembered — a curated preset over [Scheduled jobs](#scheduled-jobs), not a new mechanism. It asks Robin to look over its own memory and report what's stale, contradicted by something else, or safe to forget, delivered wherever you point it:
+
+```bash
+robin memory nudge --deliver telegram:123456789
+robin memory nudge --deliver telegram:123456789 --every "0 8 * * 1"   # custom cadence
+```
+
+It's `robin schedule add` under the hood with a fixed job name (`memory-nudge`, one at a time) and a curated prompt, so `robin schedule list`, `robin schedule show memory-nudge` and `robin schedule remove memory-nudge` all work on it exactly like any other job.
+
 ## MCP servers
 
 Robin can connect to [Model Context Protocol](https://modelcontextprotocol.io) servers over stdio, adding their tools alongside its own three. Declare them in `~/.robin/mcp.json`. Either `"servers"` or `"mcpServers"` works — the second is what Claude Desktop, Cursor and most other hosts use, so a block pasted from their docs works unchanged:

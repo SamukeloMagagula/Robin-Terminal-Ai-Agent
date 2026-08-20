@@ -42,6 +42,7 @@ import {
 import { ScheduleStore } from './schedule/store.js';
 import { ensureGateway } from './gateway/ensure.js';
 import { AuditLog } from './autonomy/audit.js';
+import { runMemoryNudge, DEFAULT_NUDGE_CRON, type NudgeOptions } from './commands/memory-command.js';
 import { SettingsStore } from './settings/store.js';
 import { storedChatDefault } from './settings/defaults.js';
 import { hydrateEnv } from './settings/hydrate.js';
@@ -464,6 +465,24 @@ schedule
   .description('Stop a job running, without forgetting it')
   .action(async (name: string) => {
     await runScheduleEnable(new ScheduleStore(), name, false);
+  });
+
+const memory = program.command('memory').description("Robin's own remembered notes, from outside a chat session");
+
+memory
+  .command('nudge')
+  .description('Schedule a weekly memory review, delivered wherever you ask — a curated preset over `robin schedule add`')
+  .requiredOption('--deliver <channel:chat>', 'where to send the report, e.g. telegram:123456789')
+  .option('--every <cron>', `when to run it (default: weekly, "${DEFAULT_NUDGE_CRON}")`)
+  .option('--manifest <id>', 'the capability manifest it may act under (see `robin autonomy`)')
+  .action(async (options: NudgeOptions) => {
+    await runMemoryNudge(options, {
+      store: new ScheduleStore(),
+      autonomy: new AutonomyStore(),
+      ensure: ensureGateway,
+      now: new Date(),
+      out: console.log,
+    });
   });
 
 program
