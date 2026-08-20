@@ -1,6 +1,7 @@
 import type { ReplContext } from '../repl-context.js';
 import { wrapUntrusted } from '../../tools/execute.js';
 import { searchChatLogs } from '../../recall.js';
+import { summarizeMatches, SUMMARIZE_THRESHOLD } from '../../recall/summarize.js';
 import { renderUsageReport } from '../../usage/render-usage.js';
 import { assistantColor, errorColor, mutedColor } from '../../ui/theme.js';
 
@@ -23,7 +24,7 @@ export const HELP_ENTRIES: [string, string][] = [
   ['/workflow run <goal>', 'plan, build, test and validate with a model per role'],
   ['/random', 'switch to a randomly chosen provider and model'],
   ['/usage', 'OpenRouter spend for this key, and the account balance'],
-  ['/recall <query>', 'search past conversations under ~/.robin/chats/'],
+  ['/recall <query>', 'search past conversations under ~/.robin/chats/ (summarized above a few matches)'],
   ['/history', 'show where input history is stored, or "/history clear" to wipe it'],
   ['/clear', 'reset the conversation'],
   ['/exit', 'quit'],
@@ -46,6 +47,16 @@ export async function handleUsage(ctx: ReplContext): Promise<void> {
   );
 }
 
+function printRawMatches(matches: { file: string; lineNumber: number; context: string[] }[]): void {
+  for (const match of matches) {
+    console.log(`  ${assistantColor(match.file)}${mutedColor(`:${match.lineNumber}`)}`);
+    for (const line of match.context) {
+      console.log(`    ${mutedColor(line)}`);
+    }
+    console.log();
+  }
+}
+
 export async function handleRecall(ctx: ReplContext, arg?: string): Promise<void> {
   if (!arg) {
     console.log(errorColor('✖ Usage: /recall <query>'));
@@ -61,12 +72,23 @@ export async function handleRecall(ctx: ReplContext, arg?: string): Promise<void
     console.log(mutedColor('(searching without the index — SQLite is unavailable)'));
   }
 
-  for (const match of matches) {
-    console.log(`  ${assistantColor(match.file)}${mutedColor(`:${match.lineNumber}`)}`);
-    for (const line of match.context) {
-      console.log(`    ${mutedColor(line)}`);
+  if (matches.length > SUMMARIZE_THRESHOLD) {
+    try {
+      const summary = await summarizeMatches(ctx.deps.provider, ctx.deps.model, arg, matches);
+      console.log(`${assistantColor('Summary:')} ${summary}\n`);
+      console.log(mutedColor('Sources:'));
+      for (const match of matches) {
+        console.log(`  ${assistantColor(match.file)}${mutedColor(`:${match.lineNumber}`)}`);
+      }
+      console.log();
+    } catch {
+      // A summarization failure must not make /recall unusable — fall back to
+      // the same raw listing shown for a small match count.
+      console.log(mutedColor('(summarization unavailable — showing raw matches)'));
+      printRawMatches(matches);
     }
-    console.log();
+  } else {
+    printRawMatches(matches);
   }
   // Add to the conversation (not just the terminal) so a follow-up like
   // "yep that one" has something for the model to actually refer to.
