@@ -29,6 +29,7 @@ Built by Samukelo "Batman" Magagula.
 | [Scheduled jobs](#scheduled-jobs) | prompts on a timer, answers where you want them |
 | [Images, speech and transcription](#images-speech-and-transcription) | the media tools |
 | [Remote control](#remote-control-telegram-discord-slack-signal-whatsapp) | Telegram, Discord, Slack, Signal, WhatsApp |
+| [Editor integration (ACP)](#editor-integration-acp) | Zed, JetBrains, and other Agent Client Protocol editors |
 | [Skills](#skills) · [Memory](#memory) · [MCP servers](#mcp-servers) | what it knows and what it can reach |
 | [How replies are printed](#how-replies-are-printed) | markdown in a terminal |
 | [Troubleshooting](#troubleshooting) | when it misbehaves |
@@ -772,6 +773,16 @@ A bot's username is public and anyone who finds it can message it. On the other 
 Each chat maps to a gateway session, which is why a conversation you start on your phone is waiting in your terminal when you sit down.
 
 **Replies stream.** A chat client has no partial-message concept, so Robin posts a placeholder immediately and edits it as the answer arrives — the alternative being a silence long enough to look like the bot has died, followed by a wall of text. Edits are throttled to one every two seconds: both platforms rate-limit per channel, and an edit per token would hit that within a sentence and throttle the whole bridge.
+
+## Editor integration (ACP)
+
+`robin acp` speaks the [Agent Client Protocol](https://agentclientprotocol.com) — the same wire format Zed, JetBrains and other ACP-aware editors use to talk to an AI agent. Point your editor's agent command at `robin acp` (or however it configures a custom agent) and it spawns Robin as a subprocess, talking JSON-RPC 2.0 over stdin/stdout.
+
+Like the chat bridges above, this is a bridge into the same gateway — connects as a `terminal`-kind client, so a conversation started in your editor is the same session your terminal would see, and permission prompts appear as your editor's own approval UI rather than a terminal `y/n/a/x` box.
+
+`robin setup` needs to have been run first — there's no interactive picker to fall back to over stdio, so `robin acp` uses whatever default provider and model that command stored.
+
+**What v1 doesn't do:** it doesn't route file reads/writes or command execution through the editor's own fs/terminal integration — Robin's tools touch disk directly, the same as everywhere else, which is already correct when the editor and Robin run on the same machine. It doesn't resume a past session (`session/new` always starts fresh). And tool activity — an auto-approved command and its output — shows up as plain text in the reply rather than the structured diff/tool-call blocks some editors can render, since the gateway doesn't yet emit the per-tool-call data that would need.
 
 ## How replies are printed
 

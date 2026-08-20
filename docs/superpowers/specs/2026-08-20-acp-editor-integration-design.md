@@ -254,21 +254,33 @@ When `client.on(...)` delivers `approval.request` for a session this bridge
 owns, translate and send an ACP **request** (not a notification — this one
 needs an answer) to the editor:
 
+Verified against the real schema (the docs' own worked example) rather than
+assumed — the request's `toolCall` is minimal (`{ toolCallId }`, no name/input
+in the confirmed example), options use `optionId`/`name`/`kind`, and the
+response's `outcome` is an object, not a bare string:
+
 ```ts
-const outcome = await connection.sendRequest('session/request_permission', {
+const response = await connection.sendRequest<{
+  outcome: { outcome: 'selected'; optionId: string } | { outcome: 'cancelled' };
+}>('session/request_permission', {
   sessionId: acpSessionIdFor(event.sessionId),
-  toolCall: { id: event.approvalId, name: describeKind(event.request.kind), input: null },
+  toolCall: { toolCallId: event.approvalId },
   options: [
-    { id: 'yes', label: 'Yes, this once', isDefault: true },
-    { id: 'no', label: 'No' },
+    { optionId: 'yes', name: 'Yes, this once', kind: 'allow_once' },
+    { optionId: 'no', name: 'No', kind: 'reject_once' },
   ],
 });
+const approved = response.outcome.outcome === 'selected' && response.outcome.optionId === 'yes';
 await client.request('approval.answer', {
   approvalId: event.approvalId,
-  approved: outcome.outcome === 'approved',
+  approved,
   scope: 'once',
 });
 ```
+
+A `cancelled` outcome (the editor closed the prompt, no answer given) is
+treated as not approved — the same "silence means no" rule Robin already
+applies when nobody is attached to answer at all.
 
 `event.request.message` (the human-readable description Robin already
 builds — "Run \"npm install lodash\"?", a write preview, etc.) is not part of

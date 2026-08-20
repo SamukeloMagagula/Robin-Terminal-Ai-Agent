@@ -43,6 +43,7 @@ import { ScheduleStore } from './schedule/store.js';
 import { ensureGateway } from './gateway/ensure.js';
 import { AuditLog } from './autonomy/audit.js';
 import { runMemoryNudge, DEFAULT_NUDGE_CRON, type NudgeOptions } from './commands/memory-command.js';
+import { runAcp } from './commands/acp-command.js';
 import { SettingsStore } from './settings/store.js';
 import { storedChatDefault } from './settings/defaults.js';
 import { hydrateEnv } from './settings/hydrate.js';
@@ -483,6 +484,13 @@ memory
       now: new Date(),
       out: console.log,
     });
+  });
+
+program
+  .command('acp')
+  .description('Speak the Agent Client Protocol on stdio, for editors like Zed and JetBrains')
+  .action(async () => {
+    await runAcp();
   });
 
 program
