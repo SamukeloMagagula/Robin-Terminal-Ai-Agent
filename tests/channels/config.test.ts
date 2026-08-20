@@ -125,3 +125,127 @@ describe('loadChannelConfig — signal', () => {
     await expect(loadChannelConfig('signal', file, {})).rejects.toThrow(/No API URL/);
   });
 });
+
+describe('loadChannelConfig — whatsapp', () => {
+  const whatsappFile = () =>
+    configFile(
+      JSON.stringify({
+        channels: {
+          whatsapp: {
+            token: 'wa-token',
+            phoneNumberId: '109876543210987',
+            verifyToken: 'my-verify-token',
+            appSecret: 'my-app-secret',
+            webhookPort: 8443,
+            allow: ['15559876543'],
+          },
+        },
+      })
+    );
+
+  it('reads phoneNumberId, verifyToken, appSecret and webhookPort from the file', async () => {
+    const config = await loadChannelConfig('whatsapp', await whatsappFile(), {});
+    expect(config.phoneNumberId).toBe('109876543210987');
+    expect(config.verifyToken).toBe('my-verify-token');
+    expect(config.appSecret).toBe('my-app-secret');
+    expect(config.webhookPort).toBe(8443);
+  });
+
+  it('lets env vars override the file for all four fields', async () => {
+    const config = await loadChannelConfig('whatsapp', await whatsappFile(), {
+      WHATSAPP_PHONE_NUMBER_ID: 'env-id',
+      WHATSAPP_VERIFY_TOKEN: 'env-verify',
+      WHATSAPP_APP_SECRET: 'env-secret',
+      WHATSAPP_WEBHOOK_PORT: '9000',
+    });
+    expect(config.phoneNumberId).toBe('env-id');
+    expect(config.verifyToken).toBe('env-verify');
+    expect(config.appSecret).toBe('env-secret');
+    expect(config.webhookPort).toBe(9000);
+  });
+
+  it('refuses to start with no phoneNumberId anywhere', async () => {
+    const file = await configFile(
+      JSON.stringify({
+        channels: {
+          whatsapp: {
+            token: 't',
+            verifyToken: 'v',
+            appSecret: 's',
+            webhookPort: 8443,
+            allow: ['1'],
+          },
+        },
+      })
+    );
+    await expect(loadChannelConfig('whatsapp', file, {})).rejects.toThrow(/No phone number id/);
+  });
+
+  it('refuses to start with no verifyToken anywhere', async () => {
+    const file = await configFile(
+      JSON.stringify({
+        channels: {
+          whatsapp: { token: 't', phoneNumberId: 'id', appSecret: 's', webhookPort: 8443, allow: ['1'] },
+        },
+      })
+    );
+    await expect(loadChannelConfig('whatsapp', file, {})).rejects.toThrow(/No verify token/);
+  });
+
+  it('refuses to start with no appSecret anywhere', async () => {
+    const file = await configFile(
+      JSON.stringify({
+        channels: {
+          whatsapp: { token: 't', phoneNumberId: 'id', verifyToken: 'v', webhookPort: 8443, allow: ['1'] },
+        },
+      })
+    );
+    await expect(loadChannelConfig('whatsapp', file, {})).rejects.toThrow(/No app secret/);
+  });
+
+  it('refuses to start with no webhookPort anywhere', async () => {
+    const file = await configFile(
+      JSON.stringify({
+        channels: { whatsapp: { token: 't', phoneNumberId: 'id', verifyToken: 'v', appSecret: 's', allow: ['1'] } },
+      })
+    );
+    await expect(loadChannelConfig('whatsapp', file, {})).rejects.toThrow(/No webhook port/);
+  });
+
+  it('refuses a non-numeric WHATSAPP_WEBHOOK_PORT rather than silently producing NaN', async () => {
+    const config = loadChannelConfig('whatsapp', await whatsappFile(), {
+      WHATSAPP_WEBHOOK_PORT: 'not-a-port',
+    });
+    await expect(config).rejects.toThrow(/No webhook port/);
+  });
+
+  it('accepts a webhookPort of 0, meaning "let the OS pick"', async () => {
+    const file = await configFile(
+      JSON.stringify({
+        channels: {
+          whatsapp: {
+            token: 't',
+            phoneNumberId: 'id',
+            verifyToken: 'v',
+            appSecret: 's',
+            webhookPort: 0,
+            allow: ['1'],
+          },
+        },
+      })
+    );
+    const config = await loadChannelConfig('whatsapp', file, {});
+    expect(config.webhookPort).toBe(0);
+  });
+
+  it('still requires the generic token', async () => {
+    const file = await configFile(
+      JSON.stringify({
+        channels: {
+          whatsapp: { phoneNumberId: 'id', verifyToken: 'v', appSecret: 's', webhookPort: 8443, allow: ['1'] },
+        },
+      })
+    );
+    await expect(loadChannelConfig('whatsapp', file, {})).rejects.toThrow(/No token/);
+  });
+});

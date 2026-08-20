@@ -30,6 +30,16 @@ export interface ChannelConfig {
    *  channel's identity, in the role a bot token plays for every other
    *  channel. */
   phoneNumber?: string;
+  /** Meta's numeric id for the sending number. WhatsApp only. */
+  phoneNumberId?: string;
+  /** Arbitrary string echoed back during the one-time webhook-verification
+   *  handshake. WhatsApp only. */
+  verifyToken?: string;
+  /** Verifies X-Hub-Signature-256 on every inbound webhook POST. WhatsApp
+   *  only, and not optional in practice. */
+  appSecret?: string;
+  /** Port the WhatsApp webhook listener binds. WhatsApp only. */
+  webhookPort?: number;
   /** Sender ids permitted to drive Robin. */
   allow: string[];
   /** Provider id to answer with. Falls back to the serve command's default. */
@@ -72,6 +82,14 @@ export const EXAMPLE_CONFIG = `{
       "phoneNumber": "+15551234567",
       "apiUrl": "http://localhost:8080",
       "allow": ["+15559876543"]
+    },
+    "whatsapp": {
+      "token": "your-cloud-api-access-token",
+      "phoneNumberId": "109876543210987",
+      "verifyToken": "any-string-you-pick",
+      "appSecret": "your-meta-app-secret",
+      "webhookPort": 8443,
+      "allow": ["15551234567"]
     }
   }
 }`;
@@ -168,6 +186,54 @@ export async function loadChannelConfig(
     throw new UserFacingError(
       `No token for "${channel}". Set ${tokenEnvVar(channel)} or add a "token" to ${filePath}.`
     );
+  }
+
+  // WhatsApp's webhook needs three more credentials beyond the access token,
+  // plus the port its listener binds — none of which any other channel has.
+  if (channel === 'whatsapp') {
+    const phoneNumberId =
+      env.WHATSAPP_PHONE_NUMBER_ID?.trim() ||
+      (typeof record.phoneNumberId === 'string' ? record.phoneNumberId.trim() : '');
+    if (!phoneNumberId) {
+      throw new UserFacingError(
+        `No phone number id for "whatsapp". Set WHATSAPP_PHONE_NUMBER_ID or add a "phoneNumberId" to ${filePath}.`
+      );
+    }
+    const verifyToken =
+      env.WHATSAPP_VERIFY_TOKEN?.trim() ||
+      (typeof record.verifyToken === 'string' ? record.verifyToken.trim() : '');
+    if (!verifyToken) {
+      throw new UserFacingError(
+        `No verify token for "whatsapp". Set WHATSAPP_VERIFY_TOKEN or add a "verifyToken" to ${filePath}.`
+      );
+    }
+    const appSecret =
+      env.WHATSAPP_APP_SECRET?.trim() ||
+      (typeof record.appSecret === 'string' ? record.appSecret.trim() : '');
+    if (!appSecret) {
+      throw new UserFacingError(
+        `No app secret for "whatsapp". Set WHATSAPP_APP_SECRET or add an "appSecret" to ${filePath}.`
+      );
+    }
+    const webhookPortRaw =
+      env.WHATSAPP_WEBHOOK_PORT?.trim() ||
+      (typeof record.webhookPort === 'number' ? String(record.webhookPort) : '');
+    const webhookPort = webhookPortRaw === '' ? NaN : Number(webhookPortRaw);
+    if (webhookPortRaw === '' || Number.isNaN(webhookPort)) {
+      throw new UserFacingError(
+        `No webhook port for "whatsapp". Set WHATSAPP_WEBHOOK_PORT or add a "webhookPort" to ${filePath}.`
+      );
+    }
+    return {
+      token,
+      phoneNumberId,
+      verifyToken,
+      appSecret,
+      webhookPort,
+      allow,
+      provider,
+      model,
+    };
   }
 
   return {

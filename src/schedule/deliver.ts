@@ -64,6 +64,10 @@ async function sendToChannel(channel: string, chatId: string, text: string): Pro
     appToken: config.appToken,
     apiUrl: config.apiUrl,
     phoneNumber: config.phoneNumber,
+    phoneNumberId: config.phoneNumberId,
+    verifyToken: config.verifyToken,
+    appSecret: config.appSecret,
+    webhookPort: config.webhookPort,
   });
 
   await transport.connect();

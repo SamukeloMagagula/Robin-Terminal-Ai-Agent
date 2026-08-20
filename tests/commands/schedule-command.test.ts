@@ -54,7 +54,7 @@ describe('parseDelivery', () => {
   });
 
   it('refuses a channel that exists but is not implemented', () => {
-    expect(() => parseDelivery('whatsapp:123')).toThrow(/not wired up/i);
+    expect(() => parseDelivery('teams:123')).toThrow(/not wired up/i);
   });
 
   it('reads an email address as a destination', () => {

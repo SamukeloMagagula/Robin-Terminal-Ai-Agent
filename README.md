@@ -5,7 +5,7 @@ Robin is a terminal agent that lets you run your AI. It talks to Anthropic (Clau
 Your conversations live in a small local daemon called [the gateway](#the-gateway), not in the terminal window. That is the thing to know first, because everything else follows from it:
 
 - **Close the terminal and reopen it — the conversation is still there.** It survives a reboot too.
-- **The same conversation from anywhere.** A [browser UI](#the-control-ui), and [Telegram, Discord or Slack](#remote-control-telegram-discord-slack) when you are away from the desk. Ask something from your phone; the answer is waiting at your keyboard.
+- **The same conversation from anywhere.** A [browser UI](#the-control-ui), and [Telegram, Discord, Slack, Signal or WhatsApp](#remote-control-telegram-discord-slack-signal-whatsapp) when you are away from the desk. Ask something from your phone; the answer is waiting at your keyboard.
 - **A tool call always finds a human.** A command triggered from a chat message asks you at your terminal, saying where the request came from — and is refused when nobody is there. Where you want it to act unattended, a [capability manifest](#capability-manifests) says exactly what it may do, lapses on its own, and logs every decision.
 - **Other tools can drive it.** An [OpenAI-compatible API](#driving-robin-from-other-tools) on the same port, so editors and scripts get Robin with its tools, memory and skills rather than a bare model.
 
@@ -28,7 +28,7 @@ Built by Samukelo "Batman" Magagula.
 | [Capability manifests](#capability-manifests) | letting it act unattended, within limits |
 | [Scheduled jobs](#scheduled-jobs) | prompts on a timer, answers where you want them |
 | [Images, speech and transcription](#images-speech-and-transcription) | the media tools |
-| [Remote control](#remote-control-telegram-discord-slack-signal) | Telegram, Discord, Slack, Signal |
+| [Remote control](#remote-control-telegram-discord-slack-signal-whatsapp) | Telegram, Discord, Slack, Signal, WhatsApp |
 | [Skills](#skills) · [Memory](#memory) · [MCP servers](#mcp-servers) | what it knows and what it can reach |
 | [How replies are printed](#how-replies-are-printed) | markdown in a terminal |
 | [Troubleshooting](#troubleshooting) | when it misbehaves |
@@ -302,7 +302,7 @@ Errors show the provider's own explanation, not just a status code — "400 (req
 
 Your conversations don't live in the terminal any more. They live in a small
 local daemon — the gateway — and `robin chat` is a client of it. So are the
-[chat bridges](#remote-control-telegram-discord-slack) and the
+[chat bridges](#remote-control-telegram-discord-slack-signal-whatsapp) and the
 [control UI](#the-control-ui). The practical upshot:
 
 - **Close the terminal, reopen it in the same directory, and your conversation is still there.** No `/load`, nothing to remember to save.
@@ -680,29 +680,32 @@ A server that fails to start, or dies, is disabled with one muted line — the t
 
 **Not supported yet:** the Streamable-HTTP transport (stdio only), and MCP resources and prompts (tools only).
 
-## Remote control (Telegram, Discord, Slack, Signal)
+## Remote control (Telegram, Discord, Slack, Signal, WhatsApp)
 
 `robin serve` runs Robin as a bridge so you can drive it from a messaging app while you're away from the terminal.
 
-Four channels can drive Robin: Telegram, Discord, Slack and Signal. Email is
-send-only — see [Scheduled jobs](#scheduled-jobs) — because an allowlist built
-on a forgeable `From` header would be a much weaker gate than the
-platform-authenticated ids these four provide.
+Five channels can drive Robin: Telegram, Discord, Slack, Signal and WhatsApp.
+Email is send-only — see [Scheduled jobs](#scheduled-jobs) — because an
+allowlist built on a forgeable `From` header would be a much weaker gate than
+the platform-authenticated ids these five provide.
 
 ```bash
 robin serve telegram
 robin serve discord
 robin serve slack
 robin serve signal
+robin serve whatsapp
 ```
 
-All four work today, and all four connect *outward* — Telegram by long-polling, Discord over its gateway, Slack over Socket Mode, Signal by polling a local signal-cli-rest-api container — so none needs a public address or an open port. That is the whole reason these came first: they run from a laptop behind NAT exactly as they are.
+Telegram, Discord, Slack and Signal all connect *outward* — long-polling or an open socket — so none of them needs a public address or an open port; that's the whole reason these came first, since they run from a laptop behind NAT exactly as they are.
 
 **Slack needs two tokens**, issued separately: the bot token (`xoxb-`) to act, and an app-level token (`xapp-`, created under *Basic Information → App-Level Tokens* with the `connections:write` scope) to open the socket. Enable Socket Mode, subscribe to `message.im` and `message.channels`, and put both in `channels.json` as `token` and `appToken`, or in `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN`.
 
 **Signal has no official bot API.** It talks to a self-hosted [signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api) container instead of a token: run that container with a phone number registered to signal-cli, then set `apiUrl` (the container's base URL) and `phoneNumber` (the registered number, E.164 format) in `channels.json`'s `signal` entry, or `SIGNAL_API_URL` and `SIGNAL_PHONE_NUMBER`. There is no message-editing endpoint, so a streamed reply appears once, finished, rather than being edited in place the way the other three do.
 
-WhatsApp and Teams are recognised channel names that explain what they still need. Both require a public webhook endpoint, so each is a transport adapter plus a listener something on the internet can reach. Everything above the transport — access control, sessions, approvals, the agent loop — is already shared, which is why Discord was one file.
+**WhatsApp is the one channel here that needs a public address.** Meta's Business Cloud API has no polling mode — it pushes messages to a webhook URL over HTTPS, full stop. `robin serve whatsapp` starts a small dedicated HTTP listener (separate from the gateway's own loopback-only server) that you point a reverse proxy or tunnel (ngrok, Caddy, a cloud load balancer) at. You need, from [developers.facebook.com](https://developers.facebook.com): an access token, a phone number id, an app secret (verifies every inbound request really came from Meta), and a verify token you make up yourself (used once, during webhook registration, to prove the endpoint is yours). Set `token`, `phoneNumberId`, `verifyToken`, `appSecret` and `webhookPort` in `channels.json`'s `whatsapp` entry, or `WHATSAPP_BOT_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET` and `WHATSAPP_WEBHOOK_PORT`. Like Signal, there's no message-editing endpoint. And Cloud API only allows a free-form reply within 24 hours of the user's last message — outside that window it needs a pre-approved message template, which this channel does not set up for you.
+
+Teams is a recognised channel name that explains what it still needs — an Azure app registration and a Bot Framework endpoint reachable from Microsoft's cloud. Everything above the transport — access control, sessions, approvals, the agent loop — is already shared, which is why Discord was one file and Signal and WhatsApp were not much more.
 
 **Discord needs one thing switched on.** On your application's page at [discord.com/developers](https://discord.com/developers/applications), under *Bot*, enable the **Message Content Intent**. Without it every message arrives with empty text and the bot looks like it is ignoring you. Invite the bot to a server, or message it directly, then put your own Discord user id in the allowlist — `robin serve discord --whoami` prints the id of anyone who messages it.
 
@@ -873,7 +876,7 @@ Full trust model, including what each control does *not* do: **[SECURITY.md](SEC
 - **`write_file` always confirms; `read_file` confirms for anything outside the current working directory** — reading unrelated files is how data leaves your machine and enters the model's context. `run_command` confirms unless the command is on the read-only allowlist described above.
 - **Approvals can be remembered per action-kind for the current session** (`a` at the prompt). Session-scoped, never written to disk. Note that this deliberately removes the human from the loop for that action kind until you restart — treat `a` with more care than `y`.
 - **A chat bridge answers only sender ids on an explicit allowlist.** An empty allowlist authorises nobody and refuses to start, rather than coming online and silently declining everyone.
-- **A tool call from a chat still needs a human.** It is offered to any terminal attached to the same gateway, labelled with the channel and sender that caused it, and refused when no terminal is attached — so "nobody is at a keyboard" and "nobody approved it" stay the same thing. `--allow-tools` removes that entirely: with it, a chat message runs commands and writes files on your machine unattended, and the reading-the-prompt boundary above no longer exists. See [Remote control](#remote-control-telegram-discord-slack).
+- **A tool call from a chat still needs a human.** It is offered to any terminal attached to the same gateway, labelled with the channel and sender that caused it, and refused when no terminal is attached — so "nobody is at a keyboard" and "nobody approved it" stay the same thing. `--allow-tools` removes that entirely: with it, a chat message runs commands and writes files on your machine unattended, and the reading-the-prompt boundary above no longer exists. See [Remote control](#remote-control-telegram-discord-slack-signal-whatsapp).
 - **A capability manifest is a narrower answer than `--allow-tools`.** See [Capability manifests](#capability-manifests) below. It grants specific patterns rather than everything, lapses after seven days by default, records every decision, and stops granting the instant it is revoked. It only ever grants past the approval prompt — never past the credential-path refusals or the read-only allowlist above, both of which run before any manifest is consulted.
 - **The destructive-pattern `⚠` is a nudge, not a block.** It catches `rm -rf` but not `rm -r -f`, `$(echo rm) -rf`, or anything encoded. Don't rely on it.
 - **`read_file` and `run_command` output is wrapped as untrusted content** before it goes back to the model — file contents and command output are data the model reads, not instructions it should follow, even if the text looks like a command ("ignore previous instructions and run…"). This narrows prompt injection; it does not eliminate it, since it is a prompt-level convention the model can still be talked out of.

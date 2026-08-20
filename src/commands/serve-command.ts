@@ -92,6 +92,10 @@ export async function runServe(channelName: string, options: ServeOptions): Prom
     appToken: config.appToken,
     apiUrl: config.apiUrl,
     phoneNumber: config.phoneNumber,
+    phoneNumberId: config.phoneNumberId,
+    verifyToken: config.verifyToken,
+    appSecret: config.appSecret,
+    webhookPort: config.webhookPort,
   });
 
   // One controller for both modes, so Ctrl+C unwinds the poll loop rather than

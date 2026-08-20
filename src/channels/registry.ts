@@ -2,18 +2,18 @@ import { TelegramTransport } from './telegram.js';
 import { DiscordTransport } from './discord.js';
 import { SlackTransport } from './slack.js';
 import { SignalTransport } from './signal.js';
+import { WhatsAppTransport } from './whatsapp.js';
 import type { ChannelTransport } from './types.js';
 import { UserFacingError } from '../startup/bootstrap.js';
 
 /**
  * Channels Robin can be driven from.
  *
- * Telegram is implemented. WhatsApp and Teams are named here rather than
- * omitted so `robin serve whatsapp` explains where the work stands instead of
- * reporting an unknown command — both need a different kind of plumbing than
- * a bot token (a Business API number and a verified webhook; an Azure app
- * registration and a Bot Framework endpoint), and neither can long-poll from
- * a laptop the way Telegram does.
+ * Teams is named here rather than omitted so `robin serve teams` explains
+ * where the work stands instead of reporting an unknown command — it needs a
+ * different kind of plumbing than a bot token (an Azure app registration and
+ * a Bot Framework endpoint reachable from Microsoft's cloud), and cannot
+ * long-poll from a laptop the way Telegram does.
  *
  * Lives here rather than in serve-command because the scheduler needs the
  * same table: delivering a job's answer uses the send half of a transport,
@@ -27,6 +27,10 @@ export const CHANNELS: Record<
       appToken?: string;
       apiUrl?: string;
       phoneNumber?: string;
+      phoneNumberId?: string;
+      verifyToken?: string;
+      appSecret?: string;
+      webhookPort?: number;
     }) => ChannelTransport;
     pending?: string;
   }
@@ -58,10 +62,16 @@ export const CHANNELS: Record<
     },
   },
   whatsapp: {
-    pending:
-      'WhatsApp needs a Meta Business account, a registered phone number and a public webhook — ' +
-      'it cannot long-poll from this machine. The bridge and access layer are already shared, ' +
-      'so it is a transport adapter plus a webhook listener.',
+    build: ({ token, phoneNumberId, verifyToken, appSecret, webhookPort }) => {
+      if (!phoneNumberId || !verifyToken || !appSecret || webhookPort === undefined) {
+        throw new UserFacingError(
+          'WhatsApp needs phoneNumberId, verifyToken, appSecret and webhookPort. Set ' +
+            'WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_VERIFY_TOKEN, WHATSAPP_APP_SECRET and ' +
+            'WHATSAPP_WEBHOOK_PORT, or add them to the whatsapp entry in ~/.robin/channels.json.'
+        );
+      }
+      return new WhatsAppTransport({ token, phoneNumberId, verifyToken, appSecret, webhookPort });
+    },
   },
   teams: {
     pending:
