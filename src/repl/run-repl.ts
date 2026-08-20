@@ -1,9 +1,10 @@
 import chalk from 'chalk';
 import { expand } from '@inquirer/prompts';
 import { parseCommand, type ParsedCommand } from './parse-command.js';
-import { type ConfirmRequest } from '../tools/execute.js';
+import { type ConfirmRequest, DELEGATE_TOOL_DEFINITIONS } from '../tools/execute.js';
 import { printBanner, printConnectionLine } from '../ui/banner.js';
 import { runBootStep } from '../ui/boot.js';
+import { ApprovalQueue } from './approval-queue.js';
 import { gatherTelemetry } from '../ui/hud/telemetry.js';
 import { TOOL_DEFINITIONS } from '../tools/definitions.js';
 import { MEMORY_TOOL_DEFINITIONS } from '../memory/tools.js';
@@ -237,14 +238,19 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   // Approvals in flight, so a box can be withdrawn when another client answers
   // first rather than left on screen as a question nobody is waiting on.
   const openApprovals = new Map<string, () => void>();
+  // Serializes rendering: concurrent subagents (delegate_task) can produce
+  // more than one approval.request in quick succession, and two live
+  // inquirer prompts in one terminal would fight over the same stdin/stdout.
+  const approvalQueue = new ApprovalQueue();
 
   client.on((sessionId, event) => {
     if (sessionId !== undefined && sessionId !== ctx.sessionId) return;
 
     if (event.kind === 'approval.request') {
-      const { answer, cancel } = askApproval(event);
-      openApprovals.set(event.approvalId, cancel);
-      void answer.then(async ({ approved, scope }) => {
+      approvalQueue.enqueue(event.approvalId, async () => {
+        const { answer, cancel } = askApproval(event);
+        openApprovals.set(event.approvalId, cancel);
+        const { approved, scope } = await answer;
         if (!openApprovals.delete(event.approvalId)) return;
         await client
           .request('approval.answer', { approvalId: event.approvalId, approved, scope })
@@ -255,9 +261,13 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
     if (event.kind === 'approval.resolved') {
       const cancel = openApprovals.get(event.approvalId);
       if (cancel) {
+        // Already rendering — cancel it in place.
         openApprovals.delete(event.approvalId);
         cancel();
         console.log(mutedColor(`Answered elsewhere (${event.approved ? 'yes' : 'no'}).`));
+      } else {
+        // Still queued, not yet rendering — skip it when its turn comes.
+        approvalQueue.settleElsewhere(event.approvalId);
       }
       return;
     }
@@ -303,6 +313,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
         MEMORY_TOOL_DEFINITIONS.length +
         SKILL_TOOL_DEFINITIONS.length +
         mediaTools +
+        DELEGATE_TOOL_DEFINITIONS.length +
         client.mcp.tools,
       mcpServerCount: client.mcp.servers,
     });

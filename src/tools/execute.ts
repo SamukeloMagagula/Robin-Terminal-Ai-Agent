@@ -1,10 +1,12 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
-import type { ToolCall } from '../providers/types.js';
+import type { ToolCall, ToolDefinition, Provider, Message } from '../providers/types.js';
 import { checkPath, defaultSensitiveDirs, commandTouchesSensitivePath } from './sensitive-paths.js';
 import type { MediaClient } from '../media/client.js';
 import { generateImageTool, speakTool, transcribeTool } from '../media/tools.js';
+import { runAgentTurn } from '../agent-loop.js';
+import { TOOL_DEFINITIONS } from './definitions.js';
 
 const MEDIA_UNAVAILABLE =
   'Error: the media tools need a Gemini API key. Run `robin login gemini` first.';
@@ -133,7 +135,57 @@ export interface ExecuteOptions {
    * keep trying.
    */
   media?: MediaClient;
+  /**
+   * Enables `delegate_task` when present — up to 4 subtasks run concurrently,
+   * each a fresh agent with no memory of this conversation and a restricted
+   * toolset (TOOL_DEFINITIONS only: no memory, skills, media, mcp, or
+   * delegate_task itself, so nothing can recursively spawn).
+   */
+  delegate?: { provider: Provider; model: string };
 }
+
+/** A single independent piece of work handed to `delegate_task`. */
+interface DelegateTask {
+  label: string;
+  prompt: string;
+}
+
+const MAX_DELEGATE_TASKS = 4;
+
+export const DELEGATE_TOOL_DEFINITIONS: ToolDefinition[] = [
+  {
+    name: 'delegate_task',
+    description:
+      'Run up to 4 subtasks in parallel, each as a fresh agent with no memory of this ' +
+      'conversation and no shared context between subtasks. Use for work that genuinely ' +
+      'splits into independent pieces — reviewing several files, researching several ' +
+      'unrelated questions — not for a single sequential task, which runs faster without ' +
+      'the isolation overhead. Each subtask needs a self-contained prompt: it cannot ask ' +
+      'you anything back, and cannot see what you already know.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tasks: {
+          type: 'array',
+          minItems: 1,
+          maxItems: MAX_DELEGATE_TASKS,
+          items: {
+            type: 'object',
+            properties: {
+              label: { type: 'string', description: 'Short name for this subtask, shown in the result.' },
+              prompt: {
+                type: 'string',
+                description: 'Everything the subtask needs — full context, since it starts blank.',
+              },
+            },
+            required: ['label', 'prompt'],
+          },
+        },
+      },
+      required: ['tasks'],
+    },
+  },
+];
 
 export async function executeTool(
   toolCall: ToolCall,
@@ -204,6 +256,9 @@ export async function executeTool(
           options.onOutput,
           options.cwd
         );
+      case 'delegate_task':
+        if (!options.delegate) return 'Error: delegation is not available in this session.';
+        return await delegateTaskTool(args, confirm, options.delegate, options);
       default:
         return `Error: unknown tool "${toolCall.name}".`;
     }
@@ -470,6 +525,64 @@ async function runMcpTool(
       ? `${result.slice(0, MAX_OUTPUT_LENGTH)}\n...[truncated ${result.length - MAX_OUTPUT_LENGTH} characters]`
       : result;
   return wrapUntrusted(`output of MCP tool "${name}"`, truncated);
+}
+
+function parseDelegateTasks(raw: unknown): DelegateTask[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error('"tasks" must be a non-empty array.');
+  }
+  if (raw.length > MAX_DELEGATE_TASKS) {
+    throw new Error(`delegate_task accepts at most ${MAX_DELEGATE_TASKS} tasks, got ${raw.length}.`);
+  }
+  return raw.map((entry, i) => {
+    if (!entry || typeof entry !== 'object') {
+      throw new Error(`tasks[${i}] must be an object.`);
+    }
+    const { label, prompt } = entry as Record<string, unknown>;
+    if (typeof label !== 'string' || !label) throw new Error(`tasks[${i}].label must be a non-empty string.`);
+    if (typeof prompt !== 'string' || !prompt) throw new Error(`tasks[${i}].prompt must be a non-empty string.`);
+    return { label, prompt };
+  });
+}
+
+/**
+ * Runs a batch of subtasks concurrently, each a fresh agent with no shared
+ * history. Reuses runAgentTurn directly rather than session.ts/run-turn.ts —
+ * run-turn.ts already imports this module to wire executeTool into
+ * runAgentTurn's deps, so importing it back here would be circular.
+ */
+async function delegateTaskTool(
+  args: Record<string, unknown>,
+  confirm: ConfirmFn,
+  delegate: { provider: Provider; model: string },
+  baseOptions: ExecuteOptions
+): Promise<string> {
+  let tasks: DelegateTask[];
+  try {
+    tasks = parseDelegateTasks(args.tasks);
+  } catch (err) {
+    return `Error: ${(err as Error).message}`;
+  }
+
+  const results = await Promise.all(
+    tasks.map(async (task) => {
+      try {
+        const messages: Message[] = [{ role: 'user', content: task.prompt }];
+        const newMessages = await runAgentTurn(delegate.provider, delegate.model, messages, TOOL_DEFINITIONS, {
+          confirm,
+          executeTool: (toolCall, cf) =>
+            executeTool(toolCall, cf, { cwd: baseOptions.cwd, mcp: baseOptions.mcp }),
+          onText: () => {},
+        });
+        const reply = [...newMessages].reverse().find((m) => m.role === 'assistant')?.content ?? '';
+        return { label: task.label, ok: true, output: reply };
+      } catch (err) {
+        return { label: task.label, ok: false, output: (err as Error).message };
+      }
+    })
+  );
+
+  return results.map((r) => `## ${r.label}${r.ok ? '' : ' (failed)'}\n${r.output}`).join('\n\n');
 }
 
 async function runCommandTool(

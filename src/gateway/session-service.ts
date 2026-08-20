@@ -326,6 +326,7 @@ export class SessionService {
         memory: this.deps.stores.memory,
         skills: this.deps.stores.skills,
         media: this.deps.media,
+        delegate: { provider: session.provider, model: session.model },
         mcp: this.deps.mcp,
         onText: (delta) => this.deps.emit(id, { kind: 'text', turnId, delta }),
         onThinking: (delta) => this.deps.emit(id, { kind: 'thinking', turnId, delta }),

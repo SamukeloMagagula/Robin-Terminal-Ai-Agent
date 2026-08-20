@@ -878,6 +878,12 @@ This is an allowlist, not a blocklist — anything not recognised still prompts.
 
 `run_command` executes with the same permissions as the terminal you're running `robin` in — there's no sandboxing, so only approve commands you'd be comfortable running yourself. Commands matching common destructive patterns (`rm -rf`, `sudo`, `curl … | bash`, `mkfs`, `shutdown`, etc.) get an extra `⚠` warning above the confirmation prompt — a heuristic nudge to look twice, not a block.
 
+### Delegating to subagents
+
+The model can call `delegate_task` with up to 4 subtasks, each of which runs as a **fresh agent with no memory of the conversation** — genuinely useful for work that splits into independent pieces (reviewing several files, researching several unrelated questions), not for a single sequential task, which runs faster without the isolation. Subtasks run concurrently and their results come back as one combined reply.
+
+Each subagent gets the same four base tools (`read_file`/`write_file`/`edit_file`/`run_command`) and nothing else — no memory, skills, media, MCP, or `delegate_task` itself, so nothing it does can recursively spawn more subagents. Its tool calls are gated by the exact same approval prompts as anything else in the conversation, since it's still your call being asked for — just possibly more than one at a time, if two subagents both hit something that needs a yes/no in the same moment. Those prompts queue and show one at a time rather than overlapping.
+
 ## Security
 
 **Robin has no sandbox.** Every approved command runs as a direct child of the Robin process with your full user permissions — no container, no separate user, no syscall filter, no network policy. The mechanisms below reduce risk and prevent accidents; none of them is containment, and each operates on a string the model produced. The real boundary is you reading the prompt before you answer it.

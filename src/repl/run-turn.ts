@@ -13,7 +13,7 @@ import {
   composeMemoryContext,
 } from '../memory/tools.js';
 import { runAgentTurn } from '../agent-loop.js';
-import { executeTool } from '../tools/execute.js';
+import { executeTool, DELEGATE_TOOL_DEFINITIONS } from '../tools/execute.js';
 import { TOOL_DEFINITIONS } from '../tools/definitions.js';
 import { buildFallbackCandidates, type FallbackCandidate } from './fallback.js';
 import { isModelUnsupported, isProviderQuotaExhausted } from '../providers/chat-error.js';
@@ -50,6 +50,8 @@ export interface TurnOptions {
   skills?: SkillStore;
   /** Enables the media tools. Absent when Gemini is not logged in. */
   media?: MediaClient;
+  /** Enables `delegate_task` — concurrent, isolated subagents. */
+  delegate?: { provider: Provider; model: string };
   /** MCP tools for this turn, offered to the model alongside the built-ins. */
   mcp?: {
     toolDefinitions(): ToolDefinition[];
@@ -171,6 +173,7 @@ export async function runTurn(
               ...(options.memory ? MEMORY_TOOL_DEFINITIONS : []),
               ...(options.skills ? SKILL_TOOL_DEFINITIONS : []),
               ...(options.media ? MEDIA_TOOL_DEFINITIONS : []),
+              ...(options.delegate ? DELEGATE_TOOL_DEFINITIONS : []),
               ...(options.mcp?.toolDefinitions() ?? []),
             ]
           : [],
@@ -187,6 +190,7 @@ export async function runTurn(
               memory: options.memory,
               skills: options.skills,
               media: options.media,
+              delegate: options.delegate,
             }),
           confirm: options.confirm,
           signal: options.signal,
