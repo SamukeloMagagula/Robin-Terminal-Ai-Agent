@@ -1,10 +1,18 @@
 import { describe, it, expect, vi } from 'vitest';
 import { searchRegistry, installablePackage, commandFor, type RegistryServer } from '../../src/mcp/catalogue';
 
-function searchResponse(servers: unknown[], nextCursor?: string): typeof fetch {
+/** Wraps servers the way the real registry does: {server, _meta}, not flat. */
+function envelope(server: RegistryServer, isLatest = true) {
+  return {
+    server,
+    _meta: { 'io.modelcontextprotocol.registry/official': { isLatest } },
+  };
+}
+
+function searchResponse(entries: unknown[], nextCursor?: string): typeof fetch {
   return vi.fn().mockResolvedValue({
     ok: true,
-    json: async () => ({ servers, metadata: { count: servers.length, nextCursor } }),
+    json: async () => ({ servers: entries, metadata: { count: entries.length, nextCursor } }),
   }) as unknown as typeof fetch;
 }
 
@@ -38,14 +46,42 @@ describe('searchRegistry', () => {
     expect(url).toContain('limit=');
   });
 
-  it('returns the servers array', async () => {
-    const found = await searchRegistry('filesystem', searchResponse([npmServer]));
+  it('unwraps the server from its envelope', async () => {
+    const found = await searchRegistry('filesystem', searchResponse([envelope(npmServer)]));
     expect(found).toEqual([npmServer]);
   });
 
   it('reports a failed request rather than returning nothing', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 500 }) as unknown as typeof fetch;
     await expect(searchRegistry('x', fetchImpl)).rejects.toThrow(/500/);
+  });
+
+  // The real registry can list several published versions of one server name.
+  it('keeps only the version flagged isLatest when a name repeats', async () => {
+    const old = { ...npmServer, version: '0.1.2' };
+    const current = { ...npmServer, version: '0.1.3' };
+    const fetchImpl = searchResponse([envelope(old, false), envelope(current, true)]);
+
+    const found = await searchRegistry('filesystem', fetchImpl);
+
+    expect(found).toHaveLength(1);
+    expect(found[0].version).toBe('0.1.3');
+  });
+
+  it('falls back to the first seen version when none is flagged isLatest', async () => {
+    const first = { ...npmServer, version: '0.1.2' };
+    const second = { ...npmServer, version: '0.1.3' };
+    const fetchImpl = searchResponse([envelope(first, false), envelope(second, false)]);
+
+    const found = await searchRegistry('filesystem', fetchImpl);
+
+    expect(found).toHaveLength(1);
+    expect(found[0].version).toBe('0.1.2');
+  });
+
+  it('skips an entry with no server object', async () => {
+    const fetchImpl = searchResponse([{ _meta: {} }, envelope(npmServer)]);
+    expect(await searchRegistry('x', fetchImpl)).toEqual([npmServer]);
   });
 });
 
@@ -54,12 +90,24 @@ describe('installablePackage', () => {
     expect(installablePackage(npmServer)).toBe(npmServer.packages[0]);
   });
 
-  it('returns undefined for a remotes-only server', () => {
+  it('returns undefined for a remotes-only server with an empty packages array', () => {
     const remoteOnly: RegistryServer = {
       name: 'x',
       description: 'd',
       version: '1',
       packages: [],
+      remotes: [{ type: 'streamable-http', url: 'https://example.com' }],
+    };
+    expect(installablePackage(remoteOnly)).toBeUndefined();
+  });
+
+  // The real registry omits `packages` entirely for a remotes-only server
+  // rather than sending an empty array.
+  it('returns undefined for a remotes-only server with packages absent', () => {
+    const remoteOnly: RegistryServer = {
+      name: 'x',
+      description: 'd',
+      version: '1',
       remotes: [{ type: 'streamable-http', url: 'https://example.com' }],
     };
     expect(installablePackage(remoteOnly)).toBeUndefined();

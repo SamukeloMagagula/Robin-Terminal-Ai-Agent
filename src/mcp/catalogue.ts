@@ -31,9 +31,22 @@ export interface RegistryServer {
   name: string;
   description: string;
   version: string;
-  packages: RegistryPackage[];
+  /** Absent, not just empty, for a server that only offers remotes. */
+  packages?: RegistryPackage[];
   /** Present only to detect "no packages, HTTP/SSE only" — never installable. */
   remotes?: unknown[];
+}
+
+/**
+ * Each result wraps the actual server under `server`, alongside `_meta` —
+ * the registry's own status/versioning envelope, not the server's own
+ * fields. `isLatest` lives there, not on the server itself.
+ */
+interface RawServerEntry {
+  server?: RegistryServer;
+  _meta?: {
+    'io.modelcontextprotocol.registry/official'?: { isLatest?: boolean };
+  };
 }
 
 export async function searchRegistry(
@@ -45,8 +58,22 @@ export async function searchRegistry(
   if (!res.ok) {
     throw new Error(`Could not search the MCP registry: HTTP ${res.status}.`);
   }
-  const body = (await res.json()) as { servers?: RegistryServer[] };
-  return body.servers ?? [];
+  const body = (await res.json()) as { servers?: RawServerEntry[] };
+
+  // The registry can list several versions of the same server name; keep
+  // only the one flagged isLatest, or the first seen when none is flagged.
+  const bestByName = new Map<string, { server: RegistryServer; isLatest: boolean }>();
+  for (const entry of body.servers ?? []) {
+    const server = entry.server;
+    if (!server?.name) continue;
+    const isLatest =
+      entry._meta?.['io.modelcontextprotocol.registry/official']?.isLatest === true;
+    const existing = bestByName.get(server.name);
+    if (!existing || (isLatest && !existing.isLatest)) {
+      bestByName.set(server.name, { server, isLatest });
+    }
+  }
+  return [...bestByName.values()].map((v) => v.server);
 }
 
 /**
@@ -56,7 +83,7 @@ export async function searchRegistry(
  * guess. undefined when nothing maps, including a remotes-only server.
  */
 export function installablePackage(server: RegistryServer): RegistryPackage | undefined {
-  for (const pkg of server.packages) {
+  for (const pkg of server.packages ?? []) {
     try {
       commandFor(pkg);
       return pkg;
