@@ -2,7 +2,8 @@ import type { ReplContext } from '../repl-context.js';
 import { wrapUntrusted } from '../../tools/execute.js';
 import { searchChatLogs } from '../../recall.js';
 import { summarizeMatches, SUMMARIZE_THRESHOLD } from '../../recall/summarize.js';
-import { renderUsageReport } from '../../usage/render-usage.js';
+import { renderUsageReport, renderLocalUsageReport } from '../../usage/render-usage.js';
+import { buildUsageReport } from '../../usage/usage-report.js';
 import { assistantColor, errorColor, mutedColor } from '../../ui/theme.js';
 
 export const HELP_ENTRIES: [string, string][] = [
@@ -45,6 +46,9 @@ export async function handleUsage(ctx: ReplContext): Promise<void> {
           'No OpenRouter usage available — run `robin login openrouter`, or check your connection.'
         )
   );
+  console.log();
+  const entries = await ctx.stores.usageLog.readAll();
+  console.log(renderLocalUsageReport(buildUsageReport(entries)));
 }
 
 function printRawMatches(matches: { file: string; lineNumber: number; context: string[] }[]): void {

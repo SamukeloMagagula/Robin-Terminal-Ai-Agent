@@ -4,6 +4,7 @@ import type { SessionSnapshot } from '../gateway/protocol.js';
 import type { ConversationStore } from '../conversation-store.js';
 import type { SkillStore } from '../skills/store.js';
 import type { UsageCache } from '../usage/openrouter-usage.js';
+import type { UsageLog } from '../usage/usage-log.js';
 import type { InputHistoryStore } from './input-history.js';
 import type { PersonalityTrustStore } from '../personality-trust.js';
 import type { MemoryStore } from '../memory/store.js';
@@ -54,6 +55,7 @@ export interface ReplContext {
     conversation: ConversationStore;
     skill: SkillStore;
     usage: UsageCache;
+    usageLog: UsageLog;
     inputHistory: InputHistoryStore;
     personalityTrust: PersonalityTrustStore;
     memory: MemoryStore;

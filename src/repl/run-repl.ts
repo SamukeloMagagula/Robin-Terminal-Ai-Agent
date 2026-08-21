@@ -22,6 +22,7 @@ import { MemoryStore } from '../memory/store.js';
 import { WorkflowStore } from '../workflow/store.js';
 import { RecallSearch } from '../recall/search.js';
 import { UsageCache } from '../usage/openrouter-usage.js';
+import { UsageLog } from '../usage/usage-log.js';
 import { renderUsageLine } from '../usage/render-usage.js';
 import { assistantColor, errorColor, mutedColor, divider, box } from '../ui/theme.js';
 import { ensureGateway } from '../gateway/ensure.js';
@@ -153,6 +154,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
   const conversationStore = new ConversationStore();
   const skillStore = new SkillStore();
   const usageCache = new UsageCache();
+  const usageLog = new UsageLog();
   const personalityTrust = new PersonalityTrustStore();
   const memoryStore = new MemoryStore();
   const workflowStore = new WorkflowStore();
@@ -216,6 +218,7 @@ export async function runRepl(deps: ReplDeps): Promise<void> {
       conversation: conversationStore,
       skill: skillStore,
       usage: usageCache,
+      usageLog,
       inputHistory: inputHistoryStore,
       personalityTrust,
       memory: memoryStore,
