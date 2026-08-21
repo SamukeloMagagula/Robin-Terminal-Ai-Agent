@@ -3,6 +3,7 @@ import { DiscordTransport } from './discord.js';
 import { SlackTransport } from './slack.js';
 import { SignalTransport } from './signal.js';
 import { WhatsAppTransport } from './whatsapp.js';
+import { IMessageTransport } from './imessage.js';
 import type { ChannelTransport } from './types.js';
 import { UserFacingError } from '../startup/bootstrap.js';
 
@@ -71,6 +72,17 @@ export const CHANNELS: Record<
         );
       }
       return new WhatsAppTransport({ token, phoneNumberId, verifyToken, appSecret, webhookPort });
+    },
+  },
+  imessage: {
+    build: ({ apiUrl, token }) => {
+      if (!apiUrl) {
+        throw new UserFacingError(
+          'iMessage needs an apiUrl. Set IMESSAGE_API_URL, or add an "apiUrl" ' +
+            'to the imessage entry in ~/.robin/channels.json.'
+        );
+      }
+      return new IMessageTransport({ apiUrl, password: token });
     },
   },
   teams: {

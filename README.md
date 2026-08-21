@@ -5,7 +5,7 @@ Robin is a terminal agent that lets you run your AI. It talks to Anthropic (Clau
 Your conversations live in a small local daemon called [the gateway](#the-gateway), not in the terminal window. That is the thing to know first, because everything else follows from it:
 
 - **Close the terminal and reopen it — the conversation is still there.** It survives a reboot too.
-- **The same conversation from anywhere.** A [browser UI](#the-control-ui), and [Telegram, Discord, Slack, Signal or WhatsApp](#remote-control-telegram-discord-slack-signal-whatsapp) when you are away from the desk. Ask something from your phone; the answer is waiting at your keyboard.
+- **The same conversation from anywhere.** A [browser UI](#the-control-ui), and [Telegram, Discord, Slack, Signal, WhatsApp or iMessage](#remote-control-telegram-discord-slack-signal-whatsapp-imessage) when you are away from the desk. Ask something from your phone; the answer is waiting at your keyboard.
 - **A tool call always finds a human.** A command triggered from a chat message asks you at your terminal, saying where the request came from — and is refused when nobody is there. Where you want it to act unattended, a [capability manifest](#capability-manifests) says exactly what it may do, lapses on its own, and logs every decision.
 - **Other tools can drive it.** An [OpenAI-compatible API](#driving-robin-from-other-tools) on the same port, so editors and scripts get Robin with its tools, memory and skills rather than a bare model.
 
@@ -29,7 +29,7 @@ Built by Samukelo "Batman" Magagula.
 | [Capability manifests](#capability-manifests) | letting it act unattended, within limits |
 | [Scheduled jobs](#scheduled-jobs) | prompts on a timer, answers where you want them |
 | [Images, speech and transcription](#images-speech-and-transcription) | the media tools |
-| [Remote control](#remote-control-telegram-discord-slack-signal-whatsapp) | Telegram, Discord, Slack, Signal, WhatsApp |
+| [Remote control](#remote-control-telegram-discord-slack-signal-whatsapp-imessage) | Telegram, Discord, Slack, Signal, WhatsApp, iMessage |
 | [Editor integration (ACP)](#editor-integration-acp) | Zed, JetBrains, and other Agent Client Protocol editors |
 | [Skills](#skills) · [Memory](#memory) · [MCP servers](#mcp-servers) | what it knows and what it can reach |
 | [How replies are printed](#how-replies-are-printed) | markdown in a terminal |
@@ -707,14 +707,14 @@ A server that fails to start, or dies, is disabled with one muted line — the t
 
 **Not supported yet:** the Streamable-HTTP transport (stdio only), and MCP resources and prompts (tools only).
 
-## Remote control (Telegram, Discord, Slack, Signal, WhatsApp)
+## Remote control (Telegram, Discord, Slack, Signal, WhatsApp, iMessage)
 
 `robin serve` runs Robin as a bridge so you can drive it from a messaging app while you're away from the terminal.
 
-Five channels can drive Robin: Telegram, Discord, Slack, Signal and WhatsApp.
-Email is send-only — see [Scheduled jobs](#scheduled-jobs) — because an
-allowlist built on a forgeable `From` header would be a much weaker gate than
-the platform-authenticated ids these five provide.
+Six channels can drive Robin: Telegram, Discord, Slack, Signal, WhatsApp and
+iMessage. Email is send-only — see [Scheduled jobs](#scheduled-jobs) —
+because an allowlist built on a forgeable `From` header would be a much
+weaker gate than the platform-authenticated ids these six provide.
 
 ```bash
 robin serve telegram
@@ -722,9 +722,10 @@ robin serve discord
 robin serve slack
 robin serve signal
 robin serve whatsapp
+robin serve imessage
 ```
 
-Telegram, Discord, Slack and Signal all connect *outward* — long-polling or an open socket — so none of them needs a public address or an open port; that's the whole reason these came first, since they run from a laptop behind NAT exactly as they are.
+Telegram, Discord, Slack, Signal and iMessage all connect *outward* — long-polling or an open socket — so none of them needs a public address or an open port; that's the whole reason these came first, since they run from a laptop behind NAT exactly as they are.
 
 **However you can't know your own sender id until something tells you.** Every channel here supports `--whoami` for exactly that: `robin serve <channel> --whoami` connects, prints the id of anyone who messages it, and reaches the model with nothing — message the bot once, copy the id it prints, add it to `allow` in `channels.json`.
 
@@ -734,7 +735,9 @@ Telegram, Discord, Slack and Signal all connect *outward* — long-polling or an
 
 **WhatsApp is the one channel here that needs a public address.** Meta's Business Cloud API has no polling mode — it pushes messages to a webhook URL over HTTPS, full stop. `robin serve whatsapp` starts a small dedicated HTTP listener (separate from the gateway's own loopback-only server) that you point a reverse proxy or tunnel (ngrok, Caddy, a cloud load balancer) at. You need, from [developers.facebook.com](https://developers.facebook.com): an access token, a phone number id, an app secret (verifies every inbound request really came from Meta), and a verify token you make up yourself (used once, during webhook registration, to prove the endpoint is yours). Set `token`, `phoneNumberId`, `verifyToken`, `appSecret` and `webhookPort` in `channels.json`'s `whatsapp` entry, or `WHATSAPP_BOT_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET` and `WHATSAPP_WEBHOOK_PORT`. Like Signal, there's no message-editing endpoint. And Cloud API only allows a free-form reply within 24 hours of the user's last message — outside that window it needs a pre-approved message template, which this channel does not set up for you.
 
-Teams is a recognised channel name that explains what it still needs — an Azure app registration and a Bot Framework endpoint reachable from Microsoft's cloud. Everything above the transport — access control, sessions, approvals, the agent loop — is already shared, which is why Discord was one file and Signal and WhatsApp were not much more.
+**iMessage has no official bot API either.** Messages.app only runs on macOS with an Apple ID signed in, so this channel talks to a self-hosted [BlueBubbles Server](https://bluebubbles.app/) instead — install it on a Mac (the same one Robin runs on, most commonly), find its server password in BlueBubbles' preferences, and set `apiUrl` (the server's base URL) and `token` (the server password) in `channels.json`'s `imessage` entry, or `IMESSAGE_API_URL` and `IMESSAGE_BOT_TOKEN`. Every message BlueBubbles reports includes the ones Robin itself just sent, since they were sent from the same Apple ID it's polling as — Robin drops anything marked `isFromMe` before it ever reaches the model, or it would answer its own replies. Sends go through Messages.app's AppleScript interface rather than BlueBubbles' faster Private API, which needs System Integrity Protection disabled to install — not a tradeoff this channel asks for by default. Like Signal, there's no message-editing endpoint.
+
+Teams is a recognised channel name that explains what it still needs — an Azure app registration and a Bot Framework endpoint reachable from Microsoft's cloud. Everything above the transport — access control, sessions, approvals, the agent loop — is already shared, which is why Discord was one file and Signal, WhatsApp and iMessage were not much more.
 
 **Discord needs one thing switched on.** On your application's page at [discord.com/developers](https://discord.com/developers/applications), under *Bot*, enable the **Message Content Intent**. Without it every message arrives with empty text and the bot looks like it is ignoring you. Invite the bot to a server, or message it directly, then put your own Discord user id in the allowlist — `robin serve discord --whoami` prints the id of anyone who messages it.
 
