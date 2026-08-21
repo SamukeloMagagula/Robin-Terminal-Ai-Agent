@@ -5,8 +5,10 @@ import {
   keyLimitPercent,
   renderUsageLine,
   renderUsageReport,
+  renderLocalUsageReport,
 } from '../../src/usage/render-usage';
 import type { OpenRouterUsage } from '../../src/usage/openrouter-usage';
+import type { UsageReport } from '../../src/usage/usage-report';
 
 const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
 
@@ -170,5 +172,54 @@ describe('renderUsageReport', () => {
   it('hides BYOK when it is zero and shows it when it is not', () => {
     expect(strip(renderUsageReport(usage()))).not.toContain('BYOK');
     expect(strip(renderUsageReport(usage({ byokTotal: 1.5 })))).toContain('BYOK');
+  });
+});
+
+function usageReport(overrides: Partial<UsageReport> = {}): UsageReport {
+  const zero = { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0, turns: 0 };
+  return {
+    today: { ...zero },
+    week: { ...zero },
+    month: { ...zero },
+    byProvider: {},
+    ...overrides,
+  };
+}
+
+describe('renderLocalUsageReport', () => {
+  it('shows tokens and estimated cost for today, week, and month', () => {
+    const report = usageReport({
+      today: { inputTokens: 1000, outputTokens: 200, estimatedCostUsd: 0.0045, turns: 3 },
+      week: { inputTokens: 5000, outputTokens: 900, estimatedCostUsd: 0.02, turns: 10 },
+      month: { inputTokens: 20000, outputTokens: 3000, estimatedCostUsd: 0.08, turns: 40 },
+    });
+
+    const out = strip(renderLocalUsageReport(report));
+
+    expect(out).toContain('$0.0045');
+    expect(out).toContain('$0.020');
+    expect(out).toContain('$0.080');
+    expect(out).toContain('1000');
+    expect(out).toContain('3 turns');
+  });
+
+  it('breaks down by provider', () => {
+    const report = usageReport({
+      byProvider: {
+        anthropic: { inputTokens: 100, outputTokens: 20, estimatedCostUsd: 0.001, turns: 1 },
+        ollama: { inputTokens: 50, outputTokens: 10, estimatedCostUsd: 0, turns: 1 },
+      },
+    });
+
+    const out = strip(renderLocalUsageReport(report));
+
+    expect(out).toContain('anthropic');
+    expect(out).toContain('ollama');
+  });
+
+  it('says so plainly when nothing has been recorded yet', () => {
+    const out = strip(renderLocalUsageReport(usageReport()));
+
+    expect(out).toContain('No usage recorded yet');
   });
 });

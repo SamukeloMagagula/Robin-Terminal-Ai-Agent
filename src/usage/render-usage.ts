@@ -1,6 +1,7 @@
 import chalk from 'chalk';
 import { mutedColor } from '../ui/theme.js';
 import { accountBalance, type OpenRouterUsage } from './openrouter-usage.js';
+import type { UsageReport, UsageTotals } from './usage-report.js';
 
 /**
  * Small amounts need more decimals than large ones. Real balances here are
@@ -118,6 +119,36 @@ export function renderUsageReport(usage: OpenRouterUsage): string {
         : 'OpenRouter reports no credits have ever been purchased on this account.'
     )
   );
+
+  return lines.join('\n');
+}
+
+function totalsRow(label: string, totals: UsageTotals): string {
+  const tokens = `${totals.inputTokens} in / ${totals.outputTokens} out`;
+  const cost = totals.estimatedCostUsd > 0 ? formatUsd(totals.estimatedCostUsd) : mutedColor('—');
+  return row(label, `${tokens}  ·  ${cost}  ·  ${totals.turns} turn${totals.turns === 1 ? '' : 's'}`);
+}
+
+/**
+ * Local, cross-provider usage — every provider Robin has ever recorded a
+ * turn against, not just OpenRouter's own live account figures above it.
+ */
+export function renderLocalUsageReport(report: UsageReport): string {
+  const hasAny = report.month.turns > 0 || Object.keys(report.byProvider).length > 0;
+  if (!hasAny) {
+    return mutedColor('No usage recorded yet.');
+  }
+
+  const lines: string[] = [mutedColor('All providers — recorded locally')];
+  lines.push(totalsRow('Today', report.today));
+  lines.push(totalsRow('This week', report.week) + mutedColor('   (from Monday)'));
+  lines.push(totalsRow('This month', report.month));
+
+  lines.push('');
+  lines.push(mutedColor('By provider, all time'));
+  for (const [provider, totals] of Object.entries(report.byProvider)) {
+    lines.push(totalsRow(provider, totals));
+  }
 
   return lines.join('\n');
 }

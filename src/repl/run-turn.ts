@@ -23,6 +23,8 @@ import { ContextLimitStore } from '../providers/context-limits.js';
 import { UnsupportedModelStore } from '../providers/unsupported-models.js';
 import { estimateMessagesTokens, trimHistory } from './trim-history.js';
 import { listProviders } from '../providers/index.js';
+import { UsageLog } from '../usage/usage-log.js';
+import { estimateCost } from '../usage/pricing.js';
 
 export interface TurnOptions {
   onText: (text: string) => void;
@@ -74,6 +76,8 @@ export interface TurnOptions {
   tools?: boolean;
   /** Injectable for tests; defaults to the real registry. */
   providers?: Provider[];
+  /** Where completed turns are recorded. Defaults to the real per-profile log. */
+  usageLog?: UsageLog;
   /** Aborts the in-flight request. An abort is reported, never retried. */
   signal?: AbortSignal;
 }
@@ -127,6 +131,7 @@ export async function runTurn(
   const allowFallback = options.fallback ?? true;
   const providers = options.providers ?? listProviders();
   const contextLimits = options.contextLimits ?? new ContextLimitStore();
+  const usageLog = options.usageLog ?? new UsageLog();
 
   let activeProvider = session.provider;
   let activeModel = session.model;
@@ -201,6 +206,16 @@ export async function runTurn(
         }
       );
       session.history.push(...newMessages);
+      if (usage) {
+        void usageLog.append({
+          ts: new Date().toISOString(),
+          provider: activeProvider.id,
+          model: activeModel,
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          estimatedCostUsd: estimateCost(activeProvider.id, activeModel, usage),
+        });
+      }
       // An abort returns normally from runAgentTurn, so the catch below — and
       // with it the fallback chain — is unreachable for it by construction.
       return {
