@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { promises as fs } from 'node:fs';
-import { loadMcpConfig, serverFingerprint } from '../../src/mcp/config';
+import { loadMcpConfig, serverFingerprint, addMcpServer, removeMcpServer } from '../../src/mcp/config';
 
 async function withConfig(contents: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'robin-mcp-'));
@@ -130,5 +130,83 @@ describe('loadMcpConfig and the mcpServers spelling', () => {
   it('returns nothing when neither key is present', async () => {
     const file = await withConfig(JSON.stringify({ somethingElse: {} }));
     expect(await loadMcpConfig(file)).toEqual([]);
+  });
+});
+
+describe('addMcpServer', () => {
+  async function freshPath(): Promise<string> {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'robin-mcp-add-'));
+    return path.join(dir, 'mcp.json');
+  }
+
+  it('creates a missing file', async () => {
+    const file = await freshPath();
+    await addMcpServer({ name: 'fs', command: 'npx', args: ['-y', 'x'] }, file);
+    expect(await loadMcpConfig(file)).toEqual([
+      { name: 'fs', command: 'npx', args: ['-y', 'x'], env: undefined, cwd: undefined },
+    ]);
+  });
+
+  it('preserves unrelated top-level keys', async () => {
+    const file = await withConfig(JSON.stringify({ somethingElse: { keep: true }, servers: {} }));
+    await addMcpServer({ name: 'fs', command: 'npx' }, file);
+
+    const raw = JSON.parse(await fs.readFile(file, 'utf-8'));
+    expect(raw.somethingElse).toEqual({ keep: true });
+  });
+
+  it('writes under servers even when the file only had mcpServers', async () => {
+    const file = await withConfig(JSON.stringify({ mcpServers: { other: { command: 'y' } } }));
+    await addMcpServer({ name: 'fs', command: 'npx' }, file);
+
+    const raw = JSON.parse(await fs.readFile(file, 'utf-8'));
+    expect(raw.servers.fs).toBeDefined();
+    expect(raw.mcpServers.other).toBeDefined();
+    // loadMcpConfig merges both, so the addition is actually usable.
+    expect((await loadMcpConfig(file)).map((s) => s.name).sort()).toEqual(['fs', 'other']);
+  });
+
+  it('adds env values, which round-trip through loadMcpConfig', async () => {
+    const file = await freshPath();
+    await addMcpServer({ name: 'gh', command: 'npx', env: { TOKEN: 'abc' } }, file);
+    expect((await loadMcpConfig(file))[0].env).toEqual({ TOKEN: 'abc' });
+  });
+
+  it('overwrites an existing entry of the same name rather than duplicating it', async () => {
+    const file = await withConfig(JSON.stringify({ servers: { fs: { command: 'old' } } }));
+    await addMcpServer({ name: 'fs', command: 'new' }, file);
+    expect((await loadMcpConfig(file)).map((s) => s.command)).toEqual(['new']);
+  });
+
+  it('throws without writing when the existing file fails to parse', async () => {
+    const file = await withConfig('{ not json');
+    await expect(addMcpServer({ name: 'fs', command: 'npx' }, file)).rejects.toThrow(file);
+    expect(await fs.readFile(file, 'utf-8')).toBe('{ not json');
+  });
+});
+
+describe('removeMcpServer', () => {
+  it('deletes an entry under servers', async () => {
+    const file = await withConfig(JSON.stringify({ servers: { fs: { command: 'x' }, gh: { command: 'y' } } }));
+    expect(await removeMcpServer('fs', file)).toBe(true);
+    expect((await loadMcpConfig(file)).map((s) => s.name)).toEqual(['gh']);
+  });
+
+  it('deletes an entry under mcpServers too', async () => {
+    const file = await withConfig(JSON.stringify({ mcpServers: { fs: { command: 'x' } } }));
+    expect(await removeMcpServer('fs', file)).toBe(true);
+    expect(await loadMcpConfig(file)).toEqual([]);
+  });
+
+  it('returns false for a name that was never there', async () => {
+    const file = await withConfig(JSON.stringify({ servers: { fs: { command: 'x' } } }));
+    expect(await removeMcpServer('nope', file)).toBe(false);
+    // Untouched — the existing entry survives a no-op remove.
+    expect((await loadMcpConfig(file)).map((s) => s.name)).toEqual(['fs']);
+  });
+
+  it('returns false when the file does not exist', async () => {
+    const file = path.join(os.tmpdir(), 'robin-mcp-remove-absent', 'mcp.json');
+    expect(await removeMcpServer('fs', file)).toBe(false);
   });
 });

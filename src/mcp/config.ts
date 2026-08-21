@@ -80,6 +80,91 @@ function isStringMap(value: unknown): value is Record<string, string> {
   return Object.values(value as Record<string, unknown>).every((v) => typeof v === 'string');
 }
 
+/** Reads the raw parsed file, or {} for a missing one. Throws on unparseable JSON. */
+async function readRawConfig(filePath: string): Promise<Record<string, unknown>> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(filePath, 'utf-8');
+  } catch {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('not an object');
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    throw new Error(
+      `${filePath} already exists but is not valid JSON. Fix or remove it before adding a server.`
+    );
+  }
+}
+
+async function writeRawConfig(filePath: string, parsed: Record<string, unknown>): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  await fs.writeFile(filePath, `${JSON.stringify(parsed, null, 2)}\n`, { mode: 0o600 });
+}
+
+/**
+ * Writes one server into mcp.json, under `servers` — Robin's documented,
+ * collision-winning spelling — even when the file currently only has an
+ * `mcpServers` block; loadMcpConfig already merges both, so the addition is
+ * usable either way. Unlike the read path, a write must never silently
+ * discard something that might still be recoverable by hand: an existing
+ * file that fails to parse throws rather than being overwritten from empty.
+ */
+export async function addMcpServer(
+  entry: McpServerConfig,
+  filePath: string = defaultMcpConfigPath()
+): Promise<void> {
+  const parsed = await readRawConfig(filePath);
+  const servers =
+    parsed.servers && typeof parsed.servers === 'object' && !Array.isArray(parsed.servers)
+      ? { ...(parsed.servers as Record<string, unknown>) }
+      : {};
+  servers[entry.name] = {
+    command: entry.command,
+    ...(entry.args ? { args: entry.args } : {}),
+    ...(entry.env ? { env: entry.env } : {}),
+    ...(entry.cwd ? { cwd: entry.cwd } : {}),
+  };
+  await writeRawConfig(filePath, { ...parsed, servers });
+}
+
+/**
+ * Deletes a named entry from whichever of servers/mcpServers it is under.
+ * Leaves the trust store alone — a stale trust record for a server no
+ * longer in mcp.json is inert, the same "nothing to clean up" reasoning
+ * already applied to a declined skill install never being recorded.
+ */
+export async function removeMcpServer(
+  name: string,
+  filePath: string = defaultMcpConfigPath()
+): Promise<boolean> {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = await readRawConfig(filePath);
+  } catch {
+    return false;
+  }
+
+  let removed = false;
+  for (const key of ['servers', 'mcpServers'] as const) {
+    const block = parsed[key];
+    if (block && typeof block === 'object' && !Array.isArray(block) && name in block) {
+      const next = { ...(block as Record<string, unknown>) };
+      delete next[name];
+      parsed = { ...parsed, [key]: next };
+      removed = true;
+    }
+  }
+  if (!removed) return false;
+
+  await writeRawConfig(filePath, parsed);
+  return true;
+}
+
 /**
  * The exact command this entry will run — what the user is asked to approve.
  *
