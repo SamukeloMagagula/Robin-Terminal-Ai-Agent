@@ -1,7 +1,13 @@
 import { expand, input, password } from '@inquirer/prompts';
 import { TrustStore } from '../trust-store.js';
 import { loadMcpConfig, serverFingerprint, addMcpServer, removeMcpServer, type McpServerConfig } from '../mcp/config.js';
-import { searchRegistry, installablePackage, commandFor } from '../mcp/catalogue.js';
+import {
+  searchRegistry,
+  installablePackage,
+  installableRemote,
+  commandFor,
+  type RegistryServer,
+} from '../mcp/catalogue.js';
 import { readLiveGatewayInfo } from '../gateway/discovery.js';
 import { mutedColor, assistantColor, errorColor, box, divider } from '../ui/theme.js';
 
@@ -88,6 +94,18 @@ export async function runMcp(): Promise<void> {
   );
 }
 
+/** Explains why neither installablePackage nor installableRemote found anything usable. */
+function notInstallableReason(server: RegistryServer): string {
+  const remotes = server.remotes ?? [];
+  if (remotes.length > 0 && remotes.every((r) => r.type !== 'streamable-http')) {
+    return 'only offers the legacy sse transport';
+  }
+  if (remotes.some((r) => r.type === 'streamable-http' && /\{[^}]+\}/.test(r.url))) {
+    return 'its remote url has an unresolved {placeholder} this catalogue will not guess at';
+  }
+  return 'HTTP/SSE only, or a package shape this catalogue does not map';
+}
+
 /** Queries the MCP registry and shows what each result would run, or why it can't. */
 export async function runMcpSearch(term: string, fetchImpl: typeof fetch = fetch): Promise<void> {
   const found = await searchRegistry(term, fetchImpl);
@@ -101,15 +119,20 @@ export async function runMcpSearch(term: string, fetchImpl: typeof fetch = fetch
   }
 
   for (const server of found) {
+    // A local package is preferred when a server offers both — faster, more
+    // capable, and never sends headers over a network.
     const pkg = installablePackage(server);
+    const remote = pkg ? undefined : installableRemote(server);
     console.log(`\n  ${assistantColor(server.name)} ${mutedColor(server.description)}`);
     if (pkg) {
       const { command, args } = commandFor(pkg);
       console.log(`    ${mutedColor([command, ...args].join(' '))}`);
+    } else if (remote) {
+      console.log(`    ${mutedColor(`GET ${remote.url}`)}`);
     } else {
       console.log(
         `    ${errorColor('not installable')} ${mutedColor(
-          '— HTTP/SSE only, or a package shape this catalogue does not map'
+          `— ${notInstallableReason(server)}`
         )}`
       );
     }
@@ -136,36 +159,50 @@ export async function runMcpAdd(name: string, fetchImpl: typeof fetch = fetch): 
     return;
   }
 
+  // A local package is preferred when a server offers both — faster, more
+  // capable, and never sends headers over a network.
   const pkg = installablePackage(server);
-  if (!pkg) {
-    console.log(
-      errorColor(
-        `✖ "${name}" has no installable package — it offers only a remote (HTTP/SSE) ` +
-          'connection, or a package shape this catalogue does not map.'
-      )
-    );
+  const remote = pkg ? undefined : installableRemote(server);
+  if (!pkg && !remote) {
+    console.log(errorColor(`✖ "${name}" is not installable — ${notInstallableReason(server)}.`));
     return;
   }
 
-  const env: Record<string, string> = {};
-  for (const variable of pkg.environmentVariables ?? []) {
-    if (!variable.isRequired) continue;
-    const prompt = variable.isSecret ? password : input;
-    env[variable.name] = await prompt({
-      message: `${variable.name} — ${variable.description}`,
-      default: variable.default,
-    });
+  let entry: McpServerConfig;
+  let target: string;
+  if (pkg) {
+    const collected: Record<string, string> = {};
+    for (const variable of pkg.environmentVariables ?? []) {
+      if (!variable.isRequired) continue;
+      const prompt = variable.isSecret ? password : input;
+      collected[variable.name] = await prompt({
+        message: `${variable.name} — ${variable.description}`,
+        default: variable.default,
+      });
+    }
+    const { command, args } = commandFor(pkg);
+    entry = { name, command, args, ...(Object.keys(collected).length ? { env: collected } : {}) };
+    target = [command, ...args].join(' ');
+  } else {
+    const collected: Record<string, string> = {};
+    for (const header of remote!.headers ?? []) {
+      if (!header.isRequired) continue;
+      const prompt = header.isSecret ? password : input;
+      collected[header.name] = await prompt({
+        message: `${header.name} — ${header.description}`,
+        default: header.default,
+      });
+    }
+    entry = { name, url: remote!.url, ...(Object.keys(collected).length ? { headers: collected } : {}) };
+    target = remote!.url;
   }
 
-  const { command, args } = commandFor(pkg);
-  const entry: McpServerConfig = { name, command, args, ...(Object.keys(env).length ? { env } : {}) };
-
-  console.log(mutedColor(`\n"${name}" wants to run:`));
-  console.log(box([[command, ...args].join(' ')]));
+  console.log(mutedColor(`\n"${name}" wants to ${pkg ? 'run' : 'connect to'}:`));
+  console.log(box([target]));
   console.log(
     errorColor(
       'The MCP registry accepts submissions from anyone — nothing here vets what a ' +
-        'server actually does. Read the command above carefully.'
+        `server actually does. Read the ${pkg ? 'command' : 'url'} above carefully.`
     )
   );
 
