@@ -24,7 +24,7 @@ export interface ChannelConfig {
    * separately. Absent for every other channel.
    */
   appToken?: string;
-  /** Base URL of the signal-cli-rest-api container. Signal only. */
+  /** Base URL of the signal-cli-rest-api container, or a BlueBubbles Server. Signal and iMessage only. */
   apiUrl?: string;
   /** The registered Signal number, E.164 format. Signal only — this is the
    *  channel's identity, in the role a bot token plays for every other
@@ -90,6 +90,11 @@ export const EXAMPLE_CONFIG = `{
       "appSecret": "your-meta-app-secret",
       "webhookPort": 8443,
       "allow": ["15551234567"]
+    },
+    "imessage": {
+      "token": "your-bluebubbles-server-password",
+      "apiUrl": "http://localhost:1234",
+      "allow": ["+15559876543"]
     }
   }
 }`;
@@ -186,6 +191,19 @@ export async function loadChannelConfig(
     throw new UserFacingError(
       `No token for "${channel}". Set ${tokenEnvVar(channel)} or add a "token" to ${filePath}.`
     );
+  }
+
+  // iMessage's token is the BlueBubbles server password; it also needs the
+  // server's URL, the same role apiUrl plays for Signal.
+  if (channel === 'imessage') {
+    const apiUrl =
+      env.IMESSAGE_API_URL?.trim() || (typeof record.apiUrl === 'string' ? record.apiUrl.trim() : '');
+    if (!apiUrl) {
+      throw new UserFacingError(
+        `No API URL for "imessage". Set IMESSAGE_API_URL or add an "apiUrl" to ${filePath}.`
+      );
+    }
+    return { token, apiUrl, allow, provider, model };
   }
 
   // WhatsApp's webhook needs three more credentials beyond the access token,

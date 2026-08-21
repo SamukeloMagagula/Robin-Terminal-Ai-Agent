@@ -126,6 +126,51 @@ describe('loadChannelConfig — signal', () => {
   });
 });
 
+describe('loadChannelConfig — imessage', () => {
+  const imessageFile = () =>
+    configFile(
+      JSON.stringify({
+        channels: {
+          imessage: { token: 'sekret', apiUrl: 'http://localhost:1234', allow: ['+15559876543'] },
+        },
+      })
+    );
+
+  it('reads token and apiUrl from the file', async () => {
+    const config = await loadChannelConfig('imessage', await imessageFile(), {});
+    expect(config.token).toBe('sekret');
+    expect(config.apiUrl).toBe('http://localhost:1234');
+  });
+
+  it('lets IMESSAGE_BOT_TOKEN override the file', async () => {
+    const config = await loadChannelConfig('imessage', await imessageFile(), {
+      IMESSAGE_BOT_TOKEN: 'from-env',
+    });
+    expect(config.token).toBe('from-env');
+  });
+
+  it('lets IMESSAGE_API_URL override the file', async () => {
+    const config = await loadChannelConfig('imessage', await imessageFile(), {
+      IMESSAGE_API_URL: 'http://elsewhere:9000',
+    });
+    expect(config.apiUrl).toBe('http://elsewhere:9000');
+  });
+
+  it('refuses to start with no apiUrl anywhere', async () => {
+    const file = await configFile(
+      JSON.stringify({ channels: { imessage: { token: 'sekret', allow: ['1'] } } })
+    );
+    await expect(loadChannelConfig('imessage', file, {})).rejects.toThrow(/No API URL/);
+  });
+
+  it('refuses to start with no token anywhere', async () => {
+    const file = await configFile(
+      JSON.stringify({ channels: { imessage: { apiUrl: 'http://localhost:1234', allow: ['1'] } } })
+    );
+    await expect(loadChannelConfig('imessage', file, {})).rejects.toThrow(/No token/);
+  });
+});
+
 describe('loadChannelConfig — whatsapp', () => {
   const whatsappFile = () =>
     configFile(
