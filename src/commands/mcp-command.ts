@@ -27,15 +27,25 @@ export async function runMcp(): Promise<void> {
   let changed = 0;
   for (const server of configured) {
     const fingerprint = serverFingerprint(server.name, server);
-    const command = [server.command, ...(server.args ?? [])].join(' ');
+    // A remote entry runs nothing locally — "wants to run" would be a lie
+    // for it. Different blast radius (a network request plus whatever
+    // tools it advertises, vs. arbitrary local code execution), different
+    // sentence.
+    const isRemote = Boolean(server.url);
+    const target = isRemote ? server.url! : [server.command, ...(server.args ?? [])].join(' ');
 
     if (await trustStore.isTrusted('mcp-server', server.name, fingerprint)) {
-      console.log(`  ${assistantColor('✓')} ${server.name.padEnd(20)}${mutedColor(command)}`);
+      console.log(`  ${assistantColor('✓')} ${server.name.padEnd(20)}${mutedColor(target)}`);
       continue;
     }
 
-    console.log(`\n${mutedColor(`"${server.name}" wants to run:`)}`);
-    console.log(box([command]));
+    console.log(`\n${mutedColor(`"${server.name}" wants to ${isRemote ? 'connect to' : 'run'}:`)}`);
+    console.log(box([target]));
+    if (isRemote && server.headers && Object.keys(server.headers).length > 0) {
+      console.log(
+        mutedColor(`Sends these header names (values not shown): ${Object.keys(server.headers).join(', ')}`)
+      );
+    }
     console.log(
       mutedColor('Its tools become available to the model, each still asking before it runs.')
     );
@@ -44,11 +54,11 @@ export async function runMcp(): Promise<void> {
       message: `Approve "${server.name}"?`,
       default: 'n',
       choices: [
-        { key: 'y', name: 'yes, this exact command', value: 'yes' },
+        { key: 'y', name: `yes, this exact ${isRemote ? 'url' : 'command'}`, value: 'yes' },
         { key: 'n', name: 'no', value: 'no' },
         {
           key: 'a',
-          name: 'yes, and trust this server even if its command changes',
+          name: `yes, and trust this server even if its ${isRemote ? 'url' : 'command'} changes`,
           value: 'always',
         },
       ],
