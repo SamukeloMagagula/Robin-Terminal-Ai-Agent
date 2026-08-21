@@ -59,6 +59,46 @@ describe('loadMcpConfig', () => {
 
     expect((await loadMcpConfig(file)).map((s) => s.name)).toEqual(['ok']);
   });
+
+  it('reads a url-only entry as a remote server', async () => {
+    const file = await withConfig(
+      JSON.stringify({ servers: { remote: { url: 'https://example.com/mcp', headers: { Authorization: 'Bearer x' } } } })
+    );
+
+    const loaded = await loadMcpConfig(file);
+    expect(loaded).toEqual([
+      {
+        name: 'remote',
+        command: undefined,
+        args: undefined,
+        env: undefined,
+        cwd: undefined,
+        url: 'https://example.com/mcp',
+        headers: { Authorization: 'Bearer x' },
+      },
+    ]);
+  });
+
+  it('skips an entry with neither command nor url', async () => {
+    const file = await withConfig(JSON.stringify({ servers: { bad: { headers: {} }, ok: { command: 'x' } } }));
+    expect((await loadMcpConfig(file)).map((s) => s.name)).toEqual(['ok']);
+  });
+
+  it('skips an entry with both command and url — ambiguous', async () => {
+    const file = await withConfig(
+      JSON.stringify({
+        servers: { bad: { command: 'x', url: 'https://example.com' }, ok: { command: 'y' } },
+      })
+    );
+    expect((await loadMcpConfig(file)).map((s) => s.name)).toEqual(['ok']);
+  });
+
+  it('skips an entry with an unparseable url', async () => {
+    const file = await withConfig(
+      JSON.stringify({ servers: { bad: { url: 'not a url' }, ok: { command: 'y' } } })
+    );
+    expect((await loadMcpConfig(file)).map((s) => s.name)).toEqual(['ok']);
+  });
 });
 
 describe('serverFingerprint', () => {
@@ -83,6 +123,46 @@ describe('serverFingerprint', () => {
     const a = serverFingerprint('gh', { name: 'gh', command: 'x', env: { TOKEN: 'v' } });
     const b = serverFingerprint('gh', { name: 'gh', command: 'x', env: { TOKEN: 'v', EXTRA: 'v' } });
     expect(a).not.toBe(b);
+  });
+
+  it('changes when the url changes, for a remote entry', () => {
+    const a = serverFingerprint('remote', { name: 'remote', url: 'https://a.example.com' });
+    const b = serverFingerprint('remote', { name: 'remote', url: 'https://b.example.com' });
+    expect(a).not.toBe(b);
+  });
+
+  it('ignores header values so a rotated token does not re-prompt', () => {
+    const a = serverFingerprint('remote', {
+      name: 'remote',
+      url: 'https://a.example.com',
+      headers: { Authorization: 'Bearer old' },
+    });
+    const b = serverFingerprint('remote', {
+      name: 'remote',
+      url: 'https://a.example.com',
+      headers: { Authorization: 'Bearer new' },
+    });
+    expect(a).toBe(b);
+  });
+
+  it('still changes when a new header key appears', () => {
+    const a = serverFingerprint('remote', {
+      name: 'remote',
+      url: 'https://a.example.com',
+      headers: { Authorization: 'Bearer v' },
+    });
+    const b = serverFingerprint('remote', {
+      name: 'remote',
+      url: 'https://a.example.com',
+      headers: { Authorization: 'Bearer v', 'X-Extra': 'v' },
+    });
+    expect(a).not.toBe(b);
+  });
+
+  it('never collides between a local and a remote entry of the same name', () => {
+    const local = serverFingerprint('svc', { name: 'svc', command: 'npx' });
+    const remote = serverFingerprint('svc', { name: 'svc', url: 'https://example.com/mcp' });
+    expect(local).not.toBe(remote);
   });
 });
 

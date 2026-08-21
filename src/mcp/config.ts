@@ -4,10 +4,14 @@ import { robinHome } from '../profile.js';
 
 export interface McpServerConfig {
   name: string;
-  command: string;
+  command?: string;
   args?: string[];
   env?: Record<string, string>;
   cwd?: string;
+  /** Presence means this entry connects over Streamable-HTTP, not stdio. */
+  url?: string;
+  /** Static auth headers for a remote entry. Never meaningful with command. */
+  headers?: Record<string, string>;
 }
 
 export function defaultMcpConfigPath(): string {
@@ -60,19 +64,38 @@ export async function loadMcpConfig(
     if (!isValidServerName(name)) continue;
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
     const entry = raw as Record<string, unknown>;
-    if (typeof entry.command !== 'string' || !entry.command) continue;
+
+    const hasCommand = typeof entry.command === 'string' && entry.command !== '';
+    const hasUrl = typeof entry.url === 'string' && entry.url !== '';
+    const url = hasUrl ? parseableUrl(entry.url as string) : undefined;
+    // Exactly one of command/url — neither is already meaningless, and both
+    // is ambiguous rather than one silently winning.
+    if (hasCommand === hasUrl) continue;
+    if (hasUrl && !url) continue; // url present but unparseable
 
     out.push({
       name,
-      command: entry.command,
+      command: hasCommand ? (entry.command as string) : undefined,
       args: Array.isArray(entry.args)
         ? entry.args.filter((a): a is string => typeof a === 'string')
         : undefined,
       env: isStringMap(entry.env) ? entry.env : undefined,
       cwd: typeof entry.cwd === 'string' ? entry.cwd : undefined,
+      url: hasUrl ? (entry.url as string) : undefined,
+      headers: hasUrl && isStringMap(entry.headers) ? entry.headers : undefined,
     });
   }
   return out;
+}
+
+/** Validates without normalising — the original string is what gets stored. */
+function parseableUrl(value: string): string | undefined {
+  try {
+    void new URL(value);
+    return value;
+  } catch {
+    return undefined;
+  }
 }
 
 function isStringMap(value: unknown): value is Record<string, string> {
@@ -179,5 +202,7 @@ export function serverFingerprint(name: string, config: McpServerConfig): string
     args: config.args ?? [],
     env: Object.keys(config.env ?? {}).sort(),
     cwd: config.cwd ?? null,
+    url: config.url ?? null,
+    headers: Object.keys(config.headers ?? {}).sort(),
   });
 }
