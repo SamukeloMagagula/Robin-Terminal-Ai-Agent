@@ -526,6 +526,8 @@ robin skill list          # the skill catalogues
 robin skill add anthropic pdf   # install one
 robin skill update        # re-fetch what you installed
 robin mcp                 # review and approve MCP servers
+robin mcp search filesystem     # find a server in the MCP registry
+robin mcp add <name>      # install one
 ```
 
 In a chat session, typing `/` shows a live-filtered popup of matching commands as you keep typing — arrow keys to move the highlight, **Tab** to fill in the highlighted command without submitting (so you can still type an argument), **Enter** to submit the highlighted command (or your typed line, if the popup isn't open), **Esc** to dismiss the popup and keep typing free text.
@@ -691,6 +693,16 @@ Robin can connect to [Model Context Protocol](https://modelcontextprotocol.io) s
   }
 }
 ```
+
+**Or install one from the registry instead of hand-writing an entry:**
+
+```bash
+robin mcp search filesystem
+robin mcp add com.pulsemcp/remote-filesystem
+robin mcp remove com.pulsemcp/remote-filesystem
+```
+
+`robin mcp search <term>` queries the [official MCP registry](https://registry.modelcontextprotocol.io) and shows what each result would actually run — or why it can't (some servers only offer a remote HTTP/SSE connection, which Robin's stdio-only client can't use). `robin mcp add <name>` prompts for any required credentials the server declares (masked input for anything marked secret), shows the exact resulting command, and — unlike `robin skill add`, which just fetches text — this is an *executable* from a registry anyone can publish to, so read the command before you say yes. Confirming writes the entry to `mcp.json` and approves it in the same step, so there's no separate `robin mcp` pass needed afterward. `robin mcp remove <name>` undoes it.
 
 **Tools are namespaced `server__tool`** — `filesystem__read_file` is distinct from Robin's own `read_file`. That prefix is a security boundary, not decoration: without it a server could declare a tool named `read_file` and quietly intercept every call meant for the built-in.
 

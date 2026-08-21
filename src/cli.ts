@@ -14,7 +14,7 @@ import {
   runGatewayStop,
   runGatewayStatus,
 } from './commands/gateway-command.js';
-import { runMcp } from './commands/mcp-command.js';
+import { runMcp, runMcpSearch, runMcpAdd, runMcpRemove } from './commands/mcp-command.js';
 import { runUi } from './commands/ui-command.js';
 import {
   runConfigList,
@@ -319,11 +319,36 @@ program
     await runUi();
   });
 
-program
+const mcp = program
   .command('mcp')
+  .description('Review, search and install MCP servers');
+
+mcp
+  .command('review', { isDefault: true })
   .description('Review and approve the MCP servers in ~/.robin/mcp.json')
   .action(async () => {
     await runMcp();
+  });
+
+mcp
+  .command('search <term>')
+  .description('Search the MCP registry for servers')
+  .action(async (term: string) => {
+    await runMcpSearch(term);
+  });
+
+mcp
+  .command('add <name>')
+  .description('Install a server from the MCP registry by exact name')
+  .action(async (name: string) => {
+    await runMcpAdd(name);
+  });
+
+mcp
+  .command('remove <name>')
+  .description('Remove a server entry from ~/.robin/mcp.json')
+  .action(async (name: string) => {
+    await runMcpRemove(name);
   });
 
 program
