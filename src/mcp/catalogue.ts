@@ -27,14 +27,19 @@ export interface RegistryPackage {
   environmentVariables?: EnvironmentVariable[];
 }
 
+export interface RegistryRemote {
+  type: string; // 'streamable-http' | 'sse' | ...
+  url: string;
+  headers?: EnvironmentVariable[]; // same shape as a package's environmentVariables
+}
+
 export interface RegistryServer {
   name: string;
   description: string;
   version: string;
   /** Absent, not just empty, for a server that only offers remotes. */
   packages?: RegistryPackage[];
-  /** Present only to detect "no packages, HTTP/SSE only" — never installable. */
-  remotes?: unknown[];
+  remotes?: RegistryRemote[];
 }
 
 /**
@@ -92,6 +97,15 @@ export function installablePackage(server: RegistryServer): RegistryPackage | un
     }
   }
   return undefined;
+}
+
+/**
+ * The one remote Robin could actually connect to — Streamable-HTTP, with no
+ * unresolved {placeholder} in its URL. undefined when nothing qualifies,
+ * including every legacy sse-only remote and a templated-URL-only one.
+ */
+export function installableRemote(server: RegistryServer): RegistryRemote | undefined {
+  return server.remotes?.find((r) => r.type === 'streamable-http' && !/\{[^}]+\}/.test(r.url));
 }
 
 const DEFAULT_RUNTIME: Record<string, string> = {

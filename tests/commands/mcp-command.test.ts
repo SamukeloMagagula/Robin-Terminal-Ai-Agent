@@ -27,11 +27,18 @@ const installable: RegistryServer = {
   ],
 };
 
-const remoteOnly: RegistryServer = {
+const remoteInstallable: RegistryServer = {
   name: 'io.github.acme/hosted',
   description: 'Hosted only',
   version: '1.0.0',
-  remotes: [{ type: 'streamable-http', url: 'https://example.com' }],
+  remotes: [{ type: 'streamable-http', url: 'https://example.com/mcp' }],
+};
+
+const sseOnly: RegistryServer = {
+  name: 'io.github.acme/legacy',
+  description: 'SSE only',
+  version: '1.0.0',
+  remotes: [{ type: 'sse', url: 'https://example.com/sse' }],
 };
 
 function fetchReturning(servers: RegistryServer[]): typeof fetch {
@@ -65,13 +72,23 @@ describe('runMcpSearch', () => {
     expect(out).toContain('npx');
   });
 
-  it('says why a remotes-only server cannot be installed', async () => {
+  it('shows the url for a server only installable via streamable-http', async () => {
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    await runMcpSearch('hosted', fetchReturning([remoteOnly]));
+    await runMcpSearch('hosted', fetchReturning([remoteInstallable]));
 
     const out = printed();
     expect(out).toContain('io.github.acme/hosted');
-    expect(out.toLowerCase()).toMatch(/not installable|remote|http/);
+    expect(out).toContain('https://example.com/mcp');
+    expect(out.toLowerCase()).not.toContain('not installable');
+  });
+
+  it('says why an sse-only server cannot be installed', async () => {
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runMcpSearch('legacy', fetchReturning([sseOnly]));
+
+    const out = printed();
+    expect(out).toContain('io.github.acme/legacy');
+    expect(out.toLowerCase()).toMatch(/not installable|sse|http/);
   });
 });
 
