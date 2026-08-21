@@ -45,6 +45,69 @@ const usage = (input: number, output: number): ChatEvent => ({
   usage: { inputTokens: input, outputTokens: output },
 });
 
+import { UsageLog } from '../../src/usage/usage-log';
+
+describe('runTurn and the usage log', () => {
+  it('appends one entry per successful turn, with an estimated cost', async () => {
+    const p = provider(
+      [[{ type: 'text', text: 'hi' }, usage(1_000_000, 1_000_000)]],
+      'anthropic',
+      'Claude'
+    );
+    const log = new UsageLog(path.join(os.tmpdir(), `robin-usage-test-${Date.now()}-${Math.random()}.jsonl`));
+
+    await runTurn(createSession(p, 'claude-sonnet-5'), 'hello', options({ usageLog: log }));
+    await log.flush();
+
+    const entries = await log.readAll();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      provider: 'anthropic',
+      model: 'claude-sonnet-5',
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+    });
+    expect(entries[0].estimatedCostUsd).toBeCloseTo(18, 5); // $3 + $15 per million
+  });
+
+  it('records a null estimated cost for a provider with no pricing entry', async () => {
+    const p = provider([[{ type: 'text', text: 'hi' }, usage(100, 10)]], 'ollama', 'Ollama (local)');
+    const log = new UsageLog(path.join(os.tmpdir(), `robin-usage-test-${Date.now()}-${Math.random()}.jsonl`));
+
+    await runTurn(createSession(p, 'llama3'), 'hello', options({ usageLog: log }));
+    await log.flush();
+
+    expect((await log.readAll())[0].estimatedCostUsd).toBeNull();
+  });
+
+  it('records nothing when the provider reported no usage', async () => {
+    const p = provider([[{ type: 'text', text: 'hi' }]]);
+    const log = new UsageLog(path.join(os.tmpdir(), `robin-usage-test-${Date.now()}-${Math.random()}.jsonl`));
+
+    await runTurn(createSession(p, 'm1'), 'hello', options({ usageLog: log }));
+    await log.flush();
+
+    expect(await log.readAll()).toEqual([]);
+  });
+
+  it('records nothing for a turn that ultimately fails', async () => {
+    const failing = provider([[]], 'copilot', 'GitHub Copilot');
+    failing.chat = vi.fn().mockImplementation(async function* () {
+      throw new Error('boom');
+    }) as never;
+    const log = new UsageLog(path.join(os.tmpdir(), `robin-usage-test-${Date.now()}-${Math.random()}.jsonl`));
+
+    await runTurn(
+      createSession(failing, 'm1'),
+      'hello',
+      options({ usageLog: log, fallback: false })
+    );
+    await log.flush();
+
+    expect(await log.readAll()).toEqual([]);
+  });
+});
+
 describe('runTurn and token usage', () => {
   it('reports what the provider said the turn cost', async () => {
     const p = provider([[{ type: 'text', text: 'hi' }, usage(120, 8)]]);
