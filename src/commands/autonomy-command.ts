@@ -84,8 +84,10 @@ const FLAG_KINDS: [keyof RuleFlags, RuleKind][] = [
 ];
 
 /**
- * The four rule kinds are the four kinds a ConfirmRequest can have, so a flag
- * exists for each and nothing has to be invented or mapped by name.
+ * A flag exists for four of the five kinds a ConfirmRequest can have, so
+ * nothing has to be invented or mapped by name. `capture_screen` has none on
+ * purpose: no manifest may ever authorise a screenshot for an unattended
+ * run, so there is no flag to grant one — see manifest.ts's ruleMatches.
  */
 export function rulesFromFlags(flags: RuleFlags): Rule[] {
   const rules: Rule[] = [];
@@ -108,6 +110,10 @@ const KIND_LABELS: Record<RuleKind, string> = {
   read_file: 'read',
   write_file: 'write',
   mcp_tool: 'mcp',
+  // No rule of this kind can ever come from rulesFromFlags — this label is
+  // only for rendering a manifest file someone hand-edited to include one,
+  // which ruleMatches's default case leaves permanently inert regardless.
+  capture_screen: 'capture',
 };
 
 function ruleLines(rules: Rule[]): string[] {

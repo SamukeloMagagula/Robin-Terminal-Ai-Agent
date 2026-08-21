@@ -135,6 +135,12 @@ export const SETTINGS: readonly SettingDefinition[] = [
     description: 'Gemini model used by the transcribe tool',
     fallback: 'gemini-2.5-flash',
   },
+  {
+    key: 'media.visionModel',
+    type: 'string',
+    description: 'Gemini model used by the describe_screen tool',
+    fallback: 'gemini-2.5-flash',
+  },
 ];
 
 export function settingKeys(): string[] {

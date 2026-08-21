@@ -20,6 +20,7 @@ describe('the settings registry', () => {
       'media.imageModel',
       'media.speechModel',
       'media.transcribeModel',
+      'media.visionModel',
     ]);
   });
 

@@ -114,6 +114,7 @@ describe('SettingsStore precedence', () => {
       'media.imageModel',
       'media.speechModel',
       'media.transcribeModel',
+      'media.visionModel',
     ]);
   });
 });
