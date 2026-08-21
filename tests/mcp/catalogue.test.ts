@@ -1,5 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
-import { searchRegistry, installablePackage, commandFor, type RegistryServer } from '../../src/mcp/catalogue';
+import {
+  searchRegistry,
+  installablePackage,
+  installableRemote,
+  commandFor,
+  type RegistryServer,
+} from '../../src/mcp/catalogue';
 
 /** Wraps servers the way the real registry does: {server, _meta}, not flat. */
 function envelope(server: RegistryServer, isLatest = true) {
@@ -111,6 +117,60 @@ describe('installablePackage', () => {
       remotes: [{ type: 'streamable-http', url: 'https://example.com' }],
     };
     expect(installablePackage(remoteOnly)).toBeUndefined();
+  });
+});
+
+describe('installableRemote', () => {
+  it('picks a streamable-http remote', () => {
+    const server: RegistryServer = {
+      name: 'x',
+      description: 'd',
+      version: '1',
+      remotes: [{ type: 'streamable-http', url: 'https://example.com/mcp' }],
+    };
+    expect(installableRemote(server)).toEqual({ type: 'streamable-http', url: 'https://example.com/mcp' });
+  });
+
+  // Notion, Linear and others list both — streamable-http is what sse was
+  // superseded by, not a second transport to also support.
+  it('prefers streamable-http over a co-listed sse remote', () => {
+    const server: RegistryServer = {
+      name: 'x',
+      description: 'd',
+      version: '1',
+      remotes: [
+        { type: 'sse', url: 'https://example.com/sse' },
+        { type: 'streamable-http', url: 'https://example.com/mcp' },
+      ],
+    };
+    expect(installableRemote(server)?.type).toBe('streamable-http');
+  });
+
+  it('returns undefined for an sse-only server', () => {
+    const server: RegistryServer = {
+      name: 'x',
+      description: 'd',
+      version: '1',
+      remotes: [{ type: 'sse', url: 'https://example.com/sse' }],
+    };
+    expect(installableRemote(server)).toBeUndefined();
+  });
+
+  // Substituting into a URL is riskier than a header — get it wrong and the
+  // request goes to the wrong host, not just carries a bad credential.
+  it('skips a streamable-http remote with an unresolved {placeholder} in its url', () => {
+    const server: RegistryServer = {
+      name: 'x',
+      description: 'd',
+      version: '1',
+      remotes: [{ type: 'streamable-http', url: 'https://{baseUrl}/mcp' }],
+    };
+    expect(installableRemote(server)).toBeUndefined();
+  });
+
+  it('returns undefined when there are no remotes at all', () => {
+    const server: RegistryServer = { name: 'x', description: 'd', version: '1' };
+    expect(installableRemote(server)).toBeUndefined();
   });
 });
 
