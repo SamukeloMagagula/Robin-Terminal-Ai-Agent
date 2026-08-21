@@ -5,6 +5,7 @@ import type { Provider } from './providers/types.js';
 import { listProviders, getProvider } from './providers/index.js';
 import { runLogin, runLogout } from './commands/auth-commands.js';
 import { runStatus } from './commands/status-command.js';
+import { runUsage } from './commands/usage-command.js';
 import { runModelsList, runModelsForget } from './commands/models-command.js';
 import { runRepl } from './repl/run-repl.js';
 import { runDoctor } from './commands/doctor-command.js';
@@ -221,6 +222,13 @@ program
   .description('Show login/reachability status for every provider')
   .action(async () => {
     await runStatus(listProviders());
+  });
+
+program
+  .command('usage')
+  .description('Show token usage and estimated cost across every provider')
+  .action(async () => {
+    await runUsage();
   });
 
 const models = program
