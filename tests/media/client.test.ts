@@ -5,6 +5,7 @@ const models: MediaModels = {
   image: 'gemini-image',
   speech: 'gemini-tts',
   transcribe: 'gemini-audio',
+  vision: 'gemini-vision',
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -124,6 +125,45 @@ describe('transcribe', () => {
     await expect(client(fetchImpl).transcribe(Buffer.from('a'), 'audio/mp4')).rejects.toThrow(
       /no transcript/i
     );
+  });
+});
+
+describe('describeImage', () => {
+  it('sends the image inline with the prompt, and returns the text', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ candidates: [{ content: { parts: [{ text: 'a red bicycle' }] } }] }));
+
+    const text = await client(fetchImpl).describeImage(Buffer.from('png-bytes'), 'image/png', 'what is this?');
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toContain('gemini-vision:generateContent');
+    const body = JSON.parse(init.body as string);
+    expect(body.contents[0].parts[0].inlineData).toEqual({
+      mimeType: 'image/png',
+      data: Buffer.from('png-bytes').toString('base64'),
+    });
+    expect(body.contents[0].parts[1]).toEqual({ text: 'what is this?' });
+    expect(body.generationConfig.responseModalities).toContain('TEXT');
+    expect(text).toBe('a red bicycle');
+  });
+
+  it('joins every text part', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({
+        candidates: [{ content: { parts: [{ text: 'first half ' }, { text: 'second half' }] } }],
+      })
+    );
+    expect(await client(fetchImpl).describeImage(Buffer.from('a'), 'image/png', 'describe')).toBe(
+      'first half second half'
+    );
+  });
+
+  it('explains itself when nothing came back', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ candidates: [] }));
+    await expect(
+      client(fetchImpl).describeImage(Buffer.from('a'), 'image/png', 'describe')
+    ).rejects.toThrow(/no description/i);
   });
 });
 

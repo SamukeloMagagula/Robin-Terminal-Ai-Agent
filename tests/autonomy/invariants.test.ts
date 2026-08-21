@@ -120,6 +120,24 @@ describe('invariant: nothing is granted without a valid approval on disk', () =>
   });
 });
 
+describe('invariant: no manifest can ever authorise a screen capture', () => {
+  it('refuses capture_screen even under a hand-written rule of that exact kind', async () => {
+    // Nothing in this repo can produce this rule through the CLI — it exists
+    // only to prove that even a manifest file someone edited by hand to
+    // include it is powerless, because ruleMatches has no case for it.
+    const explicit: Manifest = {
+      id: 'explicit-capture',
+      created: '2026-08-17T00:00:00Z',
+      rules: [{ kind: 'capture_screen', pattern: '*' }],
+      expires: null,
+    };
+
+    expect(
+      await permits(explicit, { kind: 'capture_screen', message: '', subject: 'screen' }, new Date())
+    ).toBe(false);
+  });
+});
+
 describe('invariant: a manifest authorises one process, never a shell script', () => {
   it('refuses a chained command under the widest possible rule', async () => {
     for (const smuggled of [

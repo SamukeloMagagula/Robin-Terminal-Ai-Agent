@@ -18,6 +18,7 @@ export interface MediaModels {
   image: string;
   speech: string;
   transcribe: string;
+  vision: string;
 }
 
 export interface Media {
@@ -29,6 +30,7 @@ export interface MediaClient {
   generateImage(prompt: string): Promise<Media>;
   speak(text: string): Promise<Media>;
   transcribe(audio: Buffer, mimeType: string): Promise<string>;
+  describeImage(image: Buffer, mimeType: string, prompt: string): Promise<string>;
 }
 
 export type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
@@ -207,6 +209,28 @@ export function createGeminiMedia(options: GeminiMediaOptions): MediaClient {
         .trim();
       if (!transcript) throw new Error('Gemini returned no transcript.');
       return transcript;
+    },
+
+    async describeImage(image: Buffer, mimeType: string, prompt: string): Promise<string> {
+      const response = await call(options.models.vision, {
+        contents: [
+          {
+            parts: [
+              { inlineData: { mimeType, data: image.toString('base64') } },
+              { text: prompt },
+            ],
+          },
+        ],
+        generationConfig: { responseModalities: ['TEXT'] },
+      });
+
+      const description = parts(response)
+        .map((part) => part.text)
+        .filter(Boolean)
+        .join('')
+        .trim();
+      if (!description) throw new Error('Gemini returned no description.');
+      return description;
     },
   };
 }

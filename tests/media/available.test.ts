@@ -45,4 +45,10 @@ describe('mediaModels', () => {
     await settings.set('media.imageModel', 'gemini-9-image');
     expect((await mediaModels(settings)).image).toBe('gemini-9-image');
   });
+
+  it('includes a vision model for describe_screen', async () => {
+    const { settings } = await stores();
+    const models = await mediaModels(settings);
+    expect(models.vision).toBeTruthy();
+  });
 });

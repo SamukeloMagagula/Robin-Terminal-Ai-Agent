@@ -28,7 +28,7 @@ Built by Samukelo "Batman" Magagula.
 | [Tool-Calling](#tool-calling) · [Security](#security) | what it can do to your machine, and what it asks first |
 | [Capability manifests](#capability-manifests) | letting it act unattended, within limits |
 | [Scheduled jobs](#scheduled-jobs) | prompts on a timer, answers where you want them |
-| [Images, speech and transcription](#images-speech-and-transcription) | the media tools |
+| [Images, speech, transcription and screen capture](#images-speech-transcription-and-screen-capture) | the media tools |
 | [Remote control](#remote-control-telegram-discord-slack-signal-whatsapp-imessage) | Telegram, Discord, Slack, Signal, WhatsApp, iMessage |
 | [Editor integration (ACP)](#editor-integration-acp) | Zed, JetBrains, and other Agent Client Protocol editors |
 | [Skills](#skills) · [Memory](#memory) · [MCP servers](#mcp-servers) | what it knows and what it can reach |
@@ -1073,15 +1073,16 @@ happen. The reason is kept and shown in `robin schedule list`, and the job
 stays enabled — a provider that was down at 02:00 is usually up tomorrow, and
 quietly switching a job off would be worse than a run that fails visibly.
 
-## Images, speech and transcription
+## Images, speech, transcription and screen capture
 
-Three extra tools appear once you are logged in to Gemini:
+Four extra tools appear once you are logged in to Gemini:
 
 | Tool | What it does |
 |---|---|
 | `generate_image` | writes an image from a prompt |
 | `speak` | writes spoken audio from text |
 | `transcribe` | reads an audio file and returns what is said |
+| `describe_screen` | captures the screen and describes what is on it |
 
 ```bash
 robin login gemini     # the only credential these need
@@ -1102,12 +1103,24 @@ generated files without knowing anything about media.
 You are asked *before* the API call, not after, so a picture you decline costs
 nothing.
 
+**`describe_screen` is different: no [manifest](#capability-manifests) can ever
+grant it.** It captures your whole visible desktop, which exposes more than
+any single file a `--read`/`--write` rule could name, so it always needs a
+live human at a terminal to approve it in the moment — there is no
+`--capture-screen` flag, on purpose, and no capability manifest can be written
+by hand to work around that either. Capture itself shells out to your OS's own
+screenshot tool (nothing to install on macOS or Windows; on Linux, whichever
+of `grim`, `scrot`, `gnome-screenshot` or ImageMagick's `import` is already on
+your machine), so it works no matter which provider is answering the
+conversation.
+
 **The model ids are settings**, because Google renames these models often:
 
 ```bash
 robin config set media.imageModel gemini-2.5-flash-image
 robin config set media.speechModel gemini-2.5-flash-preview-tts
 robin config set media.transcribeModel gemini-2.5-flash
+robin config set media.visionModel gemini-2.5-flash
 ```
 
 If a call fails saying the model does not exist, that is a rename and the fix

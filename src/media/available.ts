@@ -18,6 +18,7 @@ export async function mediaModels(
     image: String(await settings.get('media.imageModel')),
     speech: String(await settings.get('media.speechModel')),
     transcribe: String(await settings.get('media.transcribeModel')),
+    vision: String(await settings.get('media.visionModel')),
   };
 }
 

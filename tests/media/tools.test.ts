@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { promises as fs } from 'node:fs';
@@ -7,15 +7,17 @@ import {
   generateImageTool,
   speakTool,
   transcribeTool,
+  describeScreenTool,
   MAX_AUDIO_BYTES,
 } from '../../src/media/tools';
-import type { MediaClient } from '../../src/media/client';
+import type { MediaClient, Media } from '../../src/media/client';
 
 function media(overrides: Partial<MediaClient> = {}): MediaClient {
   return {
     generateImage: vi.fn().mockResolvedValue({ data: Buffer.from('png'), mimeType: 'image/png' }),
     speak: vi.fn().mockResolvedValue({ data: Buffer.from('wav'), mimeType: 'audio/wav' }),
     transcribe: vi.fn().mockResolvedValue('the words'),
+    describeImage: vi.fn().mockResolvedValue('a red bicycle'),
     ...overrides,
   };
 }
@@ -28,11 +30,12 @@ const approve = vi.fn().mockResolvedValue(true);
 const decline = vi.fn().mockResolvedValue(false);
 
 describe('the media tool definitions', () => {
-  it('offers exactly the three tools', () => {
+  it('offers exactly the four tools', () => {
     expect(MEDIA_TOOL_DEFINITIONS.map((t) => t.name)).toEqual([
       'generate_image',
       'speak',
       'transcribe',
+      'describe_screen',
     ]);
   });
 });
@@ -178,5 +181,67 @@ describe('transcribe', () => {
     );
     expect(result).toMatch(/^Error:/);
     expect(client.transcribe).not.toHaveBeenCalled();
+  });
+});
+
+describe('describe_screen', () => {
+  const capturedImage: Media = { data: Buffer.from('png-bytes'), mimeType: 'image/png' };
+  let capture: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    capture = vi.fn().mockResolvedValue(capturedImage);
+  });
+
+  it('captures, then describes, and returns the description', async () => {
+    const client = media();
+    const result = await describeScreenTool({}, approve, client, capture);
+    expect(result).toBe('a red bicycle');
+    expect(client.describeImage).toHaveBeenCalledWith(
+      capturedImage.data,
+      capturedImage.mimeType,
+      'Describe what is on the screen.'
+    );
+  });
+
+  it('passes a given prompt through to the vision call', async () => {
+    const client = media();
+    await describeScreenTool({ prompt: 'what error is shown?' }, approve, client, capture);
+    expect(client.describeImage).toHaveBeenCalledWith(
+      capturedImage.data,
+      capturedImage.mimeType,
+      'what error is shown?'
+    );
+  });
+
+  it('asks before capturing, as kind capture_screen', async () => {
+    const confirm = vi.fn().mockResolvedValue(true);
+    await describeScreenTool({}, confirm, media(), capture);
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'capture_screen', subject: 'screen' })
+    );
+  });
+
+  it('captures nothing when declined', async () => {
+    const client = media();
+    const result = await describeScreenTool({}, decline, client, capture);
+    expect(capture).not.toHaveBeenCalled();
+    expect(client.describeImage).not.toHaveBeenCalled();
+    expect(result).toMatch(/declined/i);
+  });
+
+  it('reports a capture failure without calling the vision API', async () => {
+    const client = media();
+    const failingCapture = vi.fn().mockRejectedValue(new Error('no screenshot tool found'));
+    const result = await describeScreenTool({}, approve, client, failingCapture);
+    expect(result).toMatch(/^Error:/);
+    expect(result).toContain('no screenshot tool found');
+    expect(client.describeImage).not.toHaveBeenCalled();
+  });
+
+  it('reports a vision-call failure', async () => {
+    const client = media({ describeImage: vi.fn().mockRejectedValue(new Error('Gemini returned no description.')) });
+    const result = await describeScreenTool({}, approve, client, capture);
+    expect(result).toMatch(/^Error:/);
+    expect(result).toContain('no description');
   });
 });

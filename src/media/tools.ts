@@ -19,6 +19,7 @@ import type { ToolDefinition } from '../providers/types.js';
 import type { ConfirmFn } from '../tools/execute.js';
 import { checkPath, defaultSensitiveDirs } from '../tools/sensitive-paths.js';
 import { extensionFor, type MediaClient } from './client.js';
+import { captureScreen } from './screen-capture.js';
 
 /**
  * Audio is base64'd into a request body, so the whole file is held in memory
@@ -67,6 +68,22 @@ export const MEDIA_TOOL_DEFINITIONS: ToolDefinition[] = [
         path: { type: 'string', description: 'Path to the audio file.' },
       },
       required: ['path'],
+    },
+  },
+  {
+    name: 'describe_screen',
+    description:
+      'Capture the current screen and describe what is on it. The user is asked ' +
+      'before anything is captured. Optionally focus the description with a prompt, ' +
+      'e.g. "what error is shown?".',
+    parameters: {
+      type: 'object',
+      properties: {
+        prompt: {
+          type: 'string',
+          description: 'What to look for or ask about the screenshot. Defaults to a general description.',
+        },
+      },
     },
   },
 ];
@@ -230,6 +247,38 @@ export async function transcribeTool(
   try {
     const audio = await fs.readFile(verdict.realPath);
     return await media.transcribe(audio, mimeType);
+  } catch (err) {
+    return `Error: ${(err as Error).message}`;
+  }
+}
+
+export async function describeScreenTool(
+  args: Record<string, unknown>,
+  confirm: ConfirmFn,
+  media: MediaClient,
+  capture: () => Promise<{ data: Buffer; mimeType: string }> = captureScreen
+): Promise<string> {
+  const prompt =
+    typeof args.prompt === 'string' && args.prompt.trim()
+      ? args.prompt
+      : 'Describe what is on the screen.';
+
+  const approved = await confirm({
+    kind: 'capture_screen',
+    message: `Capture the screen and describe it?\n---\n${prompt}\n---`,
+    subject: 'screen',
+  });
+  if (!approved) return 'Screen capture was declined by the user.';
+
+  let captured: { data: Buffer; mimeType: string };
+  try {
+    captured = await capture();
+  } catch (err) {
+    return `Error: ${(err as Error).message}`;
+  }
+
+  try {
+    return await media.describeImage(captured.data, captured.mimeType, prompt);
   } catch (err) {
     return `Error: ${(err as Error).message}`;
   }

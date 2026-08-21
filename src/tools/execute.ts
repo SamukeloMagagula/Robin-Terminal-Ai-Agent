@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import type { ToolCall, ToolDefinition, Provider, Message } from '../providers/types.js';
 import { checkPath, defaultSensitiveDirs, commandTouchesSensitivePath } from './sensitive-paths.js';
 import type { MediaClient } from '../media/client.js';
-import { generateImageTool, speakTool, transcribeTool } from '../media/tools.js';
+import { generateImageTool, speakTool, transcribeTool, describeScreenTool } from '../media/tools.js';
 import { runAgentTurn } from '../agent-loop.js';
 import { TOOL_DEFINITIONS } from './definitions.js';
 import { MAX_OUTPUT_LENGTH, type ExecutionBackend } from '../backends/types.js';
@@ -75,7 +75,7 @@ export function wrapUntrusted(source: string, content: string): string {
  * kind to offer "don't ask again for this kind of action this session".
  */
 export interface ConfirmRequest {
-  kind: 'run_command' | 'write_file' | 'read_file' | 'mcp_tool';
+  kind: 'run_command' | 'write_file' | 'read_file' | 'mcp_tool' | 'capture_screen';
   message: string;
   /**
    * The thing being asked about, structured: the raw command, the canonical
@@ -136,7 +136,7 @@ export interface ExecuteOptions {
   /** Enables the `use_skill` tool when present. */
   skills?: SkillStore;
   /**
-   * Enables generate_image, speak and transcribe when present.
+   * Enables generate_image, speak, transcribe and describe_screen when present.
    *
    * Absent whenever Gemini is not logged in, which is also why the tools are
    * not offered then: a tool the model can see but never use is a tool it will
@@ -255,6 +255,9 @@ export async function executeTool(
       case 'transcribe':
         if (!options.media) return MEDIA_UNAVAILABLE;
         return await transcribeTool(args, confirm, options.media, options.cwd);
+      case 'describe_screen':
+        if (!options.media) return MEDIA_UNAVAILABLE;
+        return await describeScreenTool(args, confirm, options.media);
       case 'run_command':
         return await runCommandTool(
           requireString(args.command, 'command'),

@@ -95,6 +95,7 @@ const APPROVAL_WORDING: Record<ConfirmRequest['kind'], { question: string; scope
   write_file: { question: 'Write it?', scope: 'file writes' },
   read_file: { question: 'Read it?', scope: 'reads outside this directory' },
   mcp_tool: { question: 'Run it?', scope: 'MCP tools' },
+  capture_screen: { question: 'Capture it?', scope: 'screen captures' },
 };
 
 /**
