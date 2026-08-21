@@ -680,7 +680,7 @@ It's `robin schedule add` under the hood with a fixed job name (`memory-nudge`, 
 
 ## MCP servers
 
-Robin can connect to [Model Context Protocol](https://modelcontextprotocol.io) servers over stdio, adding their tools alongside its own three. Declare them in `~/.robin/mcp.json`. Either `"servers"` or `"mcpServers"` works — the second is what Claude Desktop, Cursor and most other hosts use, so a block pasted from their docs works unchanged:
+Robin can connect to [Model Context Protocol](https://modelcontextprotocol.io) servers over stdio or Streamable-HTTP, adding their tools alongside its own three. Declare them in `~/.robin/mcp.json`. Either `"servers"` or `"mcpServers"` works — the second is what Claude Desktop, Cursor and most other hosts use, so a block pasted from their docs works unchanged:
 
 ```jsonc
 {
@@ -689,10 +689,16 @@ Robin can connect to [Model Context Protocol](https://modelcontextprotocol.io) s
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/me/code"]
     },
-    "github": { "command": "gh-mcp", "env": { "GITHUB_TOKEN": "..." } }
+    "github": { "command": "gh-mcp", "env": { "GITHUB_TOKEN": "..." } },
+    "remote-example": {
+      "url": "https://mcp.example.com/mcp",
+      "headers": { "Authorization": "Bearer ..." }
+    }
   }
 }
 ```
+
+An entry needs exactly one of `command` or `url` — the first connects over stdio, a local subprocess; the second over Streamable-HTTP, a remote connection. `headers` (optional, `url` entries only) is a static auth header, not an OAuth flow — that's not supported.
 
 **Or install one from the registry instead of hand-writing an entry:**
 
@@ -702,13 +708,13 @@ robin mcp add com.pulsemcp/remote-filesystem
 robin mcp remove com.pulsemcp/remote-filesystem
 ```
 
-`robin mcp search <term>` queries the [official MCP registry](https://registry.modelcontextprotocol.io) and shows what each result would actually run — or why it can't (some servers only offer a remote HTTP/SSE connection, which Robin's stdio-only client can't use). `robin mcp add <name>` prompts for any required credentials the server declares (masked input for anything marked secret), shows the exact resulting command, and — unlike `robin skill add`, which just fetches text — this is an *executable* from a registry anyone can publish to, so read the command before you say yes. Confirming writes the entry to `mcp.json` and approves it in the same step, so there's no separate `robin mcp` pass needed afterward. `robin mcp remove <name>` undoes it.
+`robin mcp search <term>` queries the [official MCP registry](https://registry.modelcontextprotocol.io) and shows what each result would actually do — run a command, connect to a URL, or why it can't (a server offering only the legacy SSE transport, or a remote URL with an unresolved `{placeholder}`, isn't installable this way). A local package is preferred when a server offers both, since it's faster, more capable, and never sends headers over a network. `robin mcp add <name>` prompts for any required credentials the server declares (masked input for anything marked secret — an environment variable for a local install, a header for a remote one), shows the exact resulting command or URL, and — unlike `robin skill add`, which just fetches text — this is an *executable*, or a connection to one, from a registry anyone can publish to, so read it before you say yes. Confirming writes the entry to `mcp.json` and approves it in the same step, so there's no separate `robin mcp` pass needed afterward. `robin mcp remove <name>` undoes it.
 
 **Tools are namespaced `server__tool`** — `filesystem__read_file` is distinct from Robin's own `read_file`. That prefix is a security boundary, not decoration: without it a server could declare a tool named `read_file` and quietly intercept every call meant for the built-in.
 
 **Two gates, and neither can be turned off:**
 
-- **Starting a server is approved once, with `robin mcp`.** An `mcp.json` entry says "run this command", and config files get pasted from the internet. `robin mcp` prints the exact command and asks — `y` approves that exact command, `a` trusts the server whatever its command becomes, `n` skips it. Changing an approved command asks again. Approvals live in `~/.robin/personality-trust.json` alongside the `PERSONALITY.md` ones.
+- **Starting a server is approved once, with `robin mcp`.** A local `mcp.json` entry says "run this command"; a remote one says "connect to this url" — genuinely different blast radius (arbitrary local code execution vs. a network request plus whatever tools that server advertises), so `robin mcp` says which one it is rather than always saying "run". Config files get pasted from the internet either way. `y` approves that exact command or url, `a` trusts the server whatever it becomes, `n` skips it. Changing an approved command or url asks again. Approvals live in `~/.robin/personality-trust.json` alongside the `PERSONALITY.md` ones.
 
   The [gateway](#the-gateway) runs the servers, and it never asks: it is detached with no terminal, so a server you have not approved is skipped rather than launched quietly. It says which ones on startup, and `robin mcp` is where you answer. Approving something while the gateway is already running needs a `robin gateway stop` — it reads trust once, at startup.
 - **Every MCP tool call is approved individually.** Robin auto-approves its own read-only shell commands because it can inspect the command; there is no equivalent for an opaque third-party tool, and trusting a name the server chose would be trusting the thing being gated. A tool called `list_files` may do anything. Use the gate's "stop asking about MCP tools this session" option if that gets tiring.
@@ -717,7 +723,7 @@ Results are wrapped as untrusted content before the model sees them, exactly lik
 
 A server that fails to start, or dies, is disabled with one muted line — the turn continues on the remaining tools. One bad entry never costs you the rest.
 
-**Not supported yet:** the Streamable-HTTP transport (stdio only), and MCP resources and prompts (tools only).
+**Not supported yet:** OAuth for a remote server (static headers only), the legacy SSE transport, and MCP resources and prompts (tools only).
 
 ## Remote control (Telegram, Discord, Slack, Signal, WhatsApp, iMessage)
 
