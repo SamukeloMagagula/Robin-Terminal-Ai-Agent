@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { McpServerConfig } from './config.js';
 import { robinVersion } from '../version.js';
 
@@ -32,17 +33,21 @@ export class McpConnection {
   ) {}
 
   async connect(): Promise<void> {
-    const transport = new StdioClientTransport({
-      command: this.config.command,
-      args: this.config.args,
-      // Passing env through unchanged rather than merging the parent's: a
-      // server should see what mcp.json grants it, not Robin's whole
-      // environment. The SDK supplies a safe default when this is undefined.
-      env: this.config.env,
-      cwd: this.config.cwd,
-      // Server diagnostics must not interleave with Robin's own output.
-      stderr: 'ignore',
-    });
+    const transport = this.config.url
+      ? new StreamableHTTPClientTransport(new URL(this.config.url), {
+          requestInit: { headers: this.config.headers },
+        })
+      : new StdioClientTransport({
+          command: this.config.command as string,
+          args: this.config.args,
+          // Passing env through unchanged rather than merging the parent's: a
+          // server should see what mcp.json grants it, not Robin's whole
+          // environment. The SDK supplies a safe default when this is undefined.
+          env: this.config.env,
+          cwd: this.config.cwd,
+          // Server diagnostics must not interleave with Robin's own output.
+          stderr: 'ignore',
+        });
 
     const client = new Client({ name: 'robin', version: robinVersion() }, { capabilities: {} });
 
